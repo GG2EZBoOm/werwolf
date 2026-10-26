@@ -22,6 +22,7 @@ void Config::load() {
         const std::string value = line.substr(eq + 1);
         if (key == "name") name = value;
         else if (key == "address") address = value;
+        else if (key == "update_url") updateUrl = value;
         else if (key == "port") {
             const int p = std::atoi(value.c_str());
             if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);
@@ -38,6 +39,7 @@ void Config::save() const {
     out << "name=" << name << "\n";
     out << "address=" << address << "\n";
     out << "port=" << port << "\n";
+    if (!updateUrl.empty()) out << "update_url=" << updateUrl << "\n";
 }
 
 } // namespace ww

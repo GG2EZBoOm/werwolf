@@ -6,6 +6,7 @@
 #include "engine/net/Net.h"
 
 #include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,7 @@ namespace ww {
 // Ein Eintrag im Chatverlauf (Chatnachricht oder Erzählertext).
 struct LogEntry {
     bool isChat = false;
-    ChatChannel channel = ChatChannel::Public;
+    ChatChannel channel = ChatChannel::Global;
     NoticeKind kind = NoticeKind::Info;
     uint8_t from = kNoPlayer;
     std::string name;
@@ -25,7 +26,13 @@ struct LogEntry {
     std::vector<std::string> lines;
 };
 
-// Netzwerk-Client ohne Grafik: Verbindung, Protokoll und letzter Spielzustand.
+struct Correction {
+    float x = 0.0f;
+    float z = 0.0f;
+    float yaw = 0.0f;
+};
+
+// Netzwerk-Client ohne Grafik: Verbindung, Protokoll, Spielzustand und Positions-Interpolation.
 class NetClient {
 public:
     enum class Status { Idle, Connecting, Handshake, Connected, Failed };
@@ -44,19 +51,20 @@ public:
     const std::string& host() const { return m_host; }
     uint16_t port() const { return m_port; }
     const std::string& name() const { return m_name; }
-    // Verbleibende Phasenzeit, lokal weitergezählt
     float timeLeft(double now) const;
 
+    // Positionen aller Figuren, leicht verzögert und weich interpoliert
+    std::vector<EntityState> entities(double now) const;
+    bool hasSnapshot() const { return !m_snapshots.empty(); }
+    std::optional<Correction> takeCorrection();
+
     std::deque<LogEntry>& log() { return m_log; }
-    // Neu eingetroffene Einträge seit dem letzten Aufruf (für Sprechblasen / Banner)
     std::vector<LogEntry> takeNewEntries();
     void clearLog() { m_log.clear(); }
 
-    void sendChat(const std::string& text);
-    void sendSelect(uint8_t target);
-    void sendConfirm();
-    void sendWitchHeal(bool use);
-    void sendSkip(bool skip);
+    void sendChat(const std::string& text, bool wolves);
+    void sendMove(float x, float z, float yaw, uint8_t flags);
+    void sendInteract(Interaction kind, uint8_t target);
     void sendStartGame();
     void sendSettings(const Settings& settings);
     void sendAddBot();
@@ -64,6 +72,11 @@ public:
     void sendReturnToLobby();
 
 private:
+    struct Snapshot {
+        double time;
+        std::vector<EntityState> entities;
+    };
+
     void send(const eng::ByteWriter& w);
     void handle(const std::vector<uint8_t>& data, double now);
     void addEntry(LogEntry entry);
@@ -80,6 +93,8 @@ private:
     bool m_hasView = false;
     double m_viewTime = 0.0;
     double m_lastPing = 0.0;
+    std::deque<Snapshot> m_snapshots;
+    std::optional<Correction> m_correction;
     std::deque<LogEntry> m_log;
     std::vector<LogEntry> m_newEntries;
 };

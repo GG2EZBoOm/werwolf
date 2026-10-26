@@ -33,6 +33,28 @@ using GLintptr = std::ptrdiff_t;
 #define GL_R8 0x8229
 #define GL_TEXTURE_SWIZZLE_RGBA 0x8E46
 #define GL_FUNC_ADD 0x8006
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#define GL_FRAMEBUFFER 0x8D40
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#define GL_RENDERBUFFER 0x8D41
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#define GL_DEPTH_ATTACHMENT 0x8D00
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#define GL_DEPTH_COMPONENT24 0x81A6
+#define GL_DEPTH_COMPONENT32F 0x8CAC
+#define GL_RGBA16F 0x881A
+#define GL_RGB16F 0x881B
+#define GL_R11F_G11F_B10F 0x8C3A
+#define GL_HALF_FLOAT 0x140B
+#define GL_TEXTURE_COMPARE_MODE 0x884C
+#define GL_TEXTURE_COMPARE_FUNC 0x884D
+#define GL_COMPARE_REF_TO_TEXTURE 0x884E
+#define GL_CLAMP_TO_BORDER 0x812D
+#define GL_MAX_SAMPLES 0x8D57
+#define GL_TEXTURE1 0x84C1
+#define GL_TEXTURE2 0x84C2
+#define GL_TEXTURE3 0x84C3
 
 #define ENG_GL_FUNCTIONS(X)                                                                                        \
     X(GLuint, glCreateShader, GLenum type)                                                                         \
@@ -62,7 +84,30 @@ using GLintptr = std::ptrdiff_t;
       const void* pointer)                                                                                         \
     X(void, glEnableVertexAttribArray, GLuint index)                                                               \
     X(void, glActiveTexture, GLenum texture)                                                                       \
-    X(void, glBlendFuncSeparate, GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha)
+    X(void, glBlendFuncSeparate, GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha)  \
+    X(void, glBufferSubData, GLenum target, GLintptr offset, GLsizeiptr size, const void* data)                    \
+    X(void, glUniform1f, GLint location, GLfloat v0)                                                               \
+    X(void, glUniform2f, GLint location, GLfloat v0, GLfloat v1)                                                   \
+    X(void, glUniform3f, GLint location, GLfloat v0, GLfloat v1, GLfloat v2)                                       \
+    X(void, glUniform4f, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)                           \
+    X(void, glUniform4fv, GLint location, GLsizei count, const GLfloat* value)                                     \
+    X(void, glUniformMatrix3fv, GLint location, GLsizei count, GLboolean transpose, const GLfloat* value)          \
+    X(void, glGenFramebuffers, GLsizei n, GLuint* ids)                                                             \
+    X(void, glBindFramebuffer, GLenum target, GLuint framebuffer)                                                  \
+    X(void, glDeleteFramebuffers, GLsizei n, const GLuint* framebuffers)                                           \
+    X(void, glFramebufferTexture2D, GLenum target, GLenum attachment, GLenum textarget, GLuint texture,            \
+      GLint level)                                                                                                 \
+    X(GLenum, glCheckFramebufferStatus, GLenum target)                                                             \
+    X(void, glGenRenderbuffers, GLsizei n, GLuint* renderbuffers)                                                  \
+    X(void, glBindRenderbuffer, GLenum target, GLuint renderbuffer)                                                \
+    X(void, glDeleteRenderbuffers, GLsizei n, const GLuint* renderbuffers)                                         \
+    X(void, glRenderbufferStorageMultisample, GLenum target, GLsizei samples, GLenum internalformat,               \
+      GLsizei width, GLsizei height)                                                                               \
+    X(void, glFramebufferRenderbuffer, GLenum target, GLenum attachment, GLenum renderbuffertarget,                \
+      GLuint renderbuffer)                                                                                         \
+    X(void, glBlitFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0,       \
+      GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter)                                                    \
+    X(void, glGenerateMipmap, GLenum target)
 
 #define ENG_GL_DECLARE(ret, name, ...)                                                                             \
     using PFN_##name = ret(APIENTRY*)(__VA_ARGS__);                                                                \

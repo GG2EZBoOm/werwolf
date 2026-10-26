@@ -10,20 +10,20 @@
 // Jede Nachricht beginnt mit einem Typ-Byte, danach folgen die Felder.
 namespace ww::proto {
 
-constexpr uint16_t kVersion = 1;
+constexpr uint16_t kVersion = 2;
 constexpr uint16_t kDefaultPort = 27777;
 constexpr size_t kMaxNameLength = 16;  // Codepoints
 constexpr size_t kMaxChatLength = 240; // Codepoints
 constexpr double kPingInterval = 2.0;
 constexpr double kTimeout = 15.0;
+constexpr double kMoveInterval = 1.0 / 20.0;     // Client -> Server
+constexpr double kSnapshotInterval = 1.0 / 20.0; // Server -> Client
 
 enum class ClientMsg : uint8_t {
     Hello = 1,      // u16 version, str name, u64 token (0 = neu)
-    Chat,           // str text
-    Select,         // u8 target (255 = Auswahl aufheben)
-    Confirm,        // –
-    WitchHeal,      // bool use
-    Skip,           // bool skip
+    Chat,           // str text, bool wolves (Rudel-Kanal gewünscht)
+    Move,           // f32 x, f32 z, f32 yaw, u8 flags
+    Interact,       // u8 Interaction, u8 target
     StartGame,      // – (nur Spielleitung)
     UpdateSettings, // Settings (nur Spielleitung)
     AddBot,         // – (nur Spielleitung)
@@ -40,6 +40,8 @@ enum class ServerMsg : uint8_t {
     Chat,        // u8 channel, u8 from, str name, str text
     Notice,      // u8 kind, str text
     Pong,        // –
+    Snapshot,    // Entities
+    Correction,  // f32 x, f32 z, f32 yaw – Server setzt die eigene Position
 };
 
 inline eng::ByteWriter begin(ClientMsg type) {

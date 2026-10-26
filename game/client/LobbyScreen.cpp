@@ -44,14 +44,13 @@ void App::drawLobby() {
     const float W = r.width();
     const float H = r.height();
 
-    m_scenery.drawSky(r, 1.0f, m_time);
-    m_scenery.drawHorizon(r, 1.0f, m_time, H * 0.84f);
-    m_scenery.drawVignette(r, 0.6f);
+    // Das 3D-Dorf läuft im Hintergrund; etwas abdunkeln, damit die Oberfläche lesbar bleibt
+    r.rect({0, 0, W, H}, Color::hex(0x05070F, 0.35f));
 
     const float margin = 20.0f;
     const float chatW = std::clamp(W * 0.3f, 320.0f, 420.0f);
     const Rect chat{W - margin - chatW, margin, chatW, H - 2 * margin};
-    drawChat(chat);
+    drawChat(chat, false);
     Rect main{margin, margin, chat.x - 2 * margin, H - 2 * margin};
 
     // Kopfzeile
@@ -200,18 +199,19 @@ void App::drawLobby() {
         int lo;
         int hi;
     };
-    const TimeStep steps[] = {{"NACHT", "lobby/night", &edit.nightSeconds, 15, 15, 180},
-                              {"DISKUSSION", "lobby/discussion", &edit.discussionSeconds, 30, 30, 600},
-                              {"ABSTIMMUNG", "lobby/vote", &edit.voteSeconds, 15, 15, 180}};
+    const TimeStep steps[] = {{"TAG (ERKUNDEN)", "lobby/day", &edit.daySeconds, 30, 30, 900},
+                              {"VERSAMMLUNG", "lobby/discussion", &edit.discussionSeconds, 15, 20, 600},
+                              {"ABSTIMMUNG", "lobby/vote", &edit.voteSeconds, 15, 15, 180},
+                              {"NACHT (JAGD)", "lobby/night", &edit.nightSeconds, 15, 30, 600}};
     for (const TimeStep& st : steps) {
         r.text(m_fonts.smallBold, {b.x, b.y}, st.label, theme::muted);
-        b.takeTop(19.0f);
-        const int d = m_ui.stepper(st.id, b.takeTop(34.0f), formatSeconds(*st.value), host);
+        b.takeTop(18.0f);
+        const int d = m_ui.stepper(st.id, b.takeTop(32.0f), formatSeconds(*st.value), host);
         if (d != 0) {
             *st.value = static_cast<uint16_t>(std::clamp(static_cast<int>(*st.value) + d * st.step, st.lo, st.hi));
             changed = true;
         }
-        b.takeTop(10.0f);
+        b.takeTop(7.0f);
     }
     if (m_ui.checkbox("lobby/reveal", b.takeTop(30.0f), "Rollen Toter aufdecken", edit.revealRoles, host)) changed = true;
 

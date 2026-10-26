@@ -101,12 +101,21 @@ TEST(KomplettePartieUeberNetzwerk) {
     Settings s;
     s.cupid = true;
     s.protector = true;
+    s.daySeconds = 40;
+    s.discussionSeconds = 20;
+    s.voteSeconds = 15;
+    s.nightSeconds = 40;
     host.sendSettings(s);
     CHECK(pump(host, [&] { return host.view().players.size() == 7 && host.view().settings.cupid; }, 5.0));
 
     host.sendStartGame();
-    CHECK(pump(host, [&] { return host.view().phase == Phase::Night; }, 5.0));
+    CHECK(pump(host, [&] { return host.view().phase == Phase::Day && host.hasSnapshot(); }, 5.0));
     CHECK(host.view().yourRole != Role::Unknown);
+    CHECK(host.view().worldSeed != 0);
+    const auto start = host.takeCorrection();
+    CHECK(start.has_value());
+    const size_t entityCount = host.entities(eng::nowSeconds()).size();
+    CHECK_EQ(entityCount, 7u);
 
     // Gast "stürzt ab" und verbindet sich mit seinem Token neu
     guest.conn.close();
@@ -123,20 +132,28 @@ TEST(KomplettePartieUeberNetzwerk) {
     CHECK(!stranger.hello("Fremd", 0));
     CHECK(!stranger.rejectReason.empty());
 
-    // Die Testerin spielt zufällig mit, bis die Runde vorbei ist
+    // Die Testerin läuft ein wenig herum und stimmt mit, bis die Runde vorbei ist
     eng::Rng rng(7);
+    float x = start ? start->x : 0.0f, z = start ? start->z : 8.0f;
     const bool finished = pump(host, [&] {
         const GameView& v = host.view();
         if (v.phase == Phase::GameOver) return true;
-        if (v.action != ActionKind::None && rng.chance(0.02f)) {
+        if (auto c = host.takeCorrection()) {
+            x = c->x;
+            z = c->z;
+        }
+        if (rng.chance(0.05f)) {
+            x += rng.uniform(-0.3f, 0.3f);
+            z += rng.uniform(-0.3f, 0.3f);
+            host.sendMove(x, z, 0.0f, 0);
+        }
+        if (v.can(AbilityVote) && v.vote == kNoPlayer && rng.chance(0.05f)) {
             std::vector<uint8_t> targets;
             for (const PlayerView& p : v.players)
                 if (p.alive && p.id != v.you) targets.push_back(p.id);
-            if (v.action == ActionKind::SkipDiscussion) host.sendSkip(true);
-            else if (!targets.empty()) host.sendSelect(rng.pick(targets));
-            if (rng.chance(0.5f)) host.sendConfirm();
-            if (rng.chance(0.3f)) host.sendChat("Ich bin unschuldig!");
+            if (!targets.empty()) host.sendInteract(Interaction::Vote, rng.pick(targets));
         }
+        if (rng.chance(0.002f)) host.sendChat("Ich bin unschuldig!", false);
         // Gast-Verbindung am Leben halten
         rejoin.conn.update();
         std::vector<uint8_t> sink;

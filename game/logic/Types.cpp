@@ -1,6 +1,7 @@
 #include "logic/Types.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace ww {
 
@@ -20,22 +21,23 @@ const char* roleName(Role role) {
 const char* roleDescription(Role role) {
     switch (role) {
     case Role::Villager:
-        return "Du hast keine besonderen Fähigkeiten. Finde die Werwölfe und stimme sie tagsüber aus dem Dorf.";
+        return "Du hast keine besonderen Fähigkeiten. Beobachte, sammle Hinweise und überführe die Werwölfe in der "
+               "Versammlung.";
     case Role::Werewolf:
-        return "Jede Nacht wählst du mit deinem Rudel ein Opfer. Tagsüber musst du unerkannt bleiben.";
+        return "Nachts verwandelst du dich (R) und reißt Opfer (Linksklick). Lass dich nicht dabei beobachten – "
+               "tagsüber musst du unerkannt bleiben.";
     case Role::Seer:
-        return "Jede Nacht darfst du die wahre Rolle eines Mitspielers erfahren.";
+        return "Einmal pro Nacht siehst du die wahre Rolle eines Spielers in deiner Nähe (anvisieren + E).";
     case Role::Witch:
-        return "Du besitzt einen Heiltrank, der das Opfer der Werwölfe rettet, und einen Gifttrank, der einen "
-               "Spieler tötet. Jeder Trank wirkt nur ein einziges Mal.";
+        return "Dein Heiltrank holt ein frisches Opfer ins Leben zurück, dein Gifttrank tötet sofort (jeweils E). "
+               "Jeder Trank wirkt nur einmal.";
     case Role::Hunter:
-        return "Wenn du stirbst, reißt du mit deinem letzten Schuss einen Spieler deiner Wahl mit in den Tod.";
+        return "Stirbst du, bleiben dir 15 Sekunden für einen letzten Schuss (anvisieren + E).";
     case Role::Cupid:
-        return "In der ersten Nacht verliebst du zwei Spieler ineinander. Stirbt einer, stirbt auch der andere "
-               "vor Kummer.";
+        return "In der ersten Nacht verliebst du zwei Spieler (anvisieren + E). Stirbt einer, stirbt auch der andere.";
     case Role::Protector:
-        return "Jede Nacht beschützt du einen Spieler vor den Werwölfen – aber nie zweimal hintereinander "
-               "denselben.";
+        return "Jede Nacht beschützt du einen Spieler in deiner Nähe vor den Werwölfen (anvisieren + E) – nie "
+               "zweimal hintereinander denselben.";
     default:
         return "";
     }
@@ -69,13 +71,12 @@ const char* teamName(Team team) {
 const char* phaseTitle(Phase phase) {
     switch (phase) {
     case Phase::Lobby: return "Lobby";
-    case Phase::Night: return "Nacht";
-    case Phase::Witch: return "Nacht – Die Hexe";
-    case Phase::Morning: return "Morgengrauen";
-    case Phase::Hunter: return "Der letzte Schuss";
     case Phase::Day: return "Tag";
+    case Phase::Assembly: return "Versammlung";
     case Phase::Vote: return "Abstimmung";
     case Phase::Execution: return "Urteil";
+    case Phase::Night: return "Nacht";
+    case Phase::Morning: return "Morgengrauen";
     case Phase::GameOver: return "Spielende";
     }
     return "";
@@ -83,7 +84,8 @@ const char* phaseTitle(Phase phase) {
 
 const char* channelName(ChatChannel channel) {
     switch (channel) {
-    case ChatChannel::Public: return "Alle";
+    case ChatChannel::Global: return "Alle";
+    case ChatChannel::Nearby: return "Nähe";
     case ChatChannel::Wolves: return "Rudel";
     case ChatChannel::Dead: return "Geister";
     }
@@ -94,9 +96,10 @@ const char* channelName(ChatChannel channel) {
 
 void Settings::sanitize() {
     wolves = std::min<uint8_t>(wolves, 6);
-    nightSeconds = std::clamp<uint16_t>(nightSeconds, 15, 180);
+    daySeconds = std::clamp<uint16_t>(daySeconds, 30, 900);
     discussionSeconds = std::clamp<uint16_t>(discussionSeconds, 20, 600);
     voteSeconds = std::clamp<uint16_t>(voteSeconds, 15, 180);
+    nightSeconds = std::clamp<uint16_t>(nightSeconds, 30, 600);
 }
 
 void Settings::write(eng::ByteWriter& w) const {
@@ -109,9 +112,10 @@ void Settings::write(eng::ByteWriter& w) const {
     flags |= protector ? 16 : 0;
     flags |= revealRoles ? 32 : 0;
     w.u8(flags);
-    w.u16(nightSeconds);
+    w.u16(daySeconds);
     w.u16(discussionSeconds);
     w.u16(voteSeconds);
+    w.u16(nightSeconds);
 }
 
 bool Settings::read(eng::ByteReader& r) {
@@ -123,9 +127,10 @@ bool Settings::read(eng::ByteReader& r) {
     cupid = flags & 8;
     protector = flags & 16;
     revealRoles = flags & 32;
-    nightSeconds = r.u16();
+    daySeconds = r.u16();
     discussionSeconds = r.u16();
     voteSeconds = r.u16();
+    nightSeconds = r.u16();
     return r.ok();
 }
 
@@ -177,6 +182,7 @@ void GameView::write(eng::ByteWriter& w) const {
     w.f32(phaseDuration);
     w.u8(you);
     w.u8(host);
+    w.u32(worldSeed);
     w.u8(static_cast<uint8_t>(yourRole));
     settings.write(w);
 
@@ -189,31 +195,30 @@ void GameView::write(eng::ByteWriter& w) const {
         flags |= p.connected ? 2 : 0;
         flags |= p.bot ? 4 : 0;
         flags |= p.lover ? 8 : 0;
-        flags |= p.skip ? 16 : 0;
-        flags |= p.winner ? 32 : 0;
+        flags |= p.winner ? 16 : 0;
         w.u8(flags);
         w.u8(static_cast<uint8_t>(p.role));
         w.u8(p.vote);
     }
 
-    w.u8(static_cast<uint8_t>(action));
-    w.u8(static_cast<uint8_t>(selection.size()));
-    for (uint8_t id : selection) w.u8(id);
-    w.boolean(confirmed);
+    w.u16(abilities);
+    w.u8(vote);
     w.u8(loverPartner);
     w.u8(static_cast<uint8_t>(seerResults.size()));
     for (const SeerResult& s : seerResults) {
         w.u8(s.player);
         w.u8(static_cast<uint8_t>(s.role));
     }
+    w.u8(static_cast<uint8_t>(cupidPicks.size()));
+    for (uint8_t id : cupidPicks) w.u8(id);
+    w.u8(protectedTarget);
     w.u8(lastProtected);
-    w.u8(witchVictim);
-    uint8_t witchFlags = 0;
-    witchFlags |= healAvailable ? 1 : 0;
-    witchFlags |= poisonAvailable ? 2 : 0;
-    witchFlags |= healUsed ? 4 : 0;
-    w.u8(witchFlags);
-    w.u8(poisonTarget);
+    uint8_t potions = 0;
+    potions |= healAvailable ? 1 : 0;
+    potions |= poisonAvailable ? 2 : 0;
+    w.u8(potions);
+    w.u8(packKillsLeft);
+    w.f32(hunterTimeLeft);
     w.u8(static_cast<uint8_t>(winner));
 }
 
@@ -222,7 +227,6 @@ bool GameView::read(eng::ByteReader& r) {
         const uint8_t v = r.u8();
         return v < static_cast<uint8_t>(Role::Count) ? static_cast<Role>(v) : Role::Unknown;
     };
-
     const uint8_t ph = r.u8();
     if (ph > static_cast<uint8_t>(Phase::GameOver)) return false;
     phase = static_cast<Phase>(ph);
@@ -231,6 +235,7 @@ bool GameView::read(eng::ByteReader& r) {
     phaseDuration = r.f32();
     you = r.u8();
     host = r.u8();
+    worldSeed = r.u32();
     yourRole = readRole();
     if (!settings.read(r)) return false;
 
@@ -246,19 +251,14 @@ bool GameView::read(eng::ByteReader& r) {
         p.connected = flags & 2;
         p.bot = flags & 4;
         p.lover = flags & 8;
-        p.skip = flags & 16;
-        p.winner = flags & 32;
+        p.winner = flags & 16;
         p.role = readRole();
         p.vote = r.u8();
         players.push_back(std::move(p));
     }
 
-    const uint8_t act = r.u8();
-    action = act <= static_cast<uint8_t>(ActionKind::DayVote) ? static_cast<ActionKind>(act) : ActionKind::None;
-    const uint8_t selCount = r.u8();
-    selection.clear();
-    for (uint8_t i = 0; i < selCount && r.ok(); ++i) selection.push_back(r.u8());
-    confirmed = r.boolean();
+    abilities = r.u16();
+    vote = r.u8();
     loverPartner = r.u8();
     const uint8_t seerCount = r.u8();
     seerResults.clear();
@@ -268,37 +268,73 @@ bool GameView::read(eng::ByteReader& r) {
         s.role = readRole();
         seerResults.push_back(s);
     }
+    const uint8_t pickCount = r.u8();
+    cupidPicks.clear();
+    for (uint8_t i = 0; i < pickCount && r.ok(); ++i) cupidPicks.push_back(r.u8());
+    protectedTarget = r.u8();
     lastProtected = r.u8();
-    witchVictim = r.u8();
-    const uint8_t witchFlags = r.u8();
-    healAvailable = witchFlags & 1;
-    poisonAvailable = witchFlags & 2;
-    healUsed = witchFlags & 4;
-    poisonTarget = r.u8();
+    const uint8_t potions = r.u8();
+    healAvailable = potions & 1;
+    poisonAvailable = potions & 2;
+    packKillsLeft = r.u8();
+    hunterTimeLeft = r.f32();
     const uint8_t win = r.u8();
     winner = win <= static_cast<uint8_t>(Team::Nobody) ? static_cast<Team>(win) : Team::None;
     return r.ok();
 }
 
-// --- Chatregeln --------------------------------------------------------------
+// --- Positionen ----------------------------------------------------------------
 
-std::optional<ChatChannel> speakChannel(Phase phase, bool alive, Role role) {
-    if (phase == Phase::Lobby || phase == Phase::GameOver) return ChatChannel::Public;
-    if (!alive) return ChatChannel::Dead;
-    if (phase == Phase::Night || phase == Phase::Witch) {
-        if (role == Role::Werewolf) return ChatChannel::Wolves;
-        return std::nullopt; // das Dorf schläft
+void writeEntities(eng::ByteWriter& w, const std::vector<EntityState>& entities) {
+    w.u8(static_cast<uint8_t>(std::min<size_t>(entities.size(), 64)));
+    size_t n = 0;
+    for (const EntityState& e : entities) {
+        if (n++ >= 64) break;
+        w.u8(e.id);
+        w.u8(e.kind);
+        w.f32(e.x);
+        w.f32(e.z);
+        const float yaw = std::fmod(e.yaw, 2.0f * 3.14159265f);
+        w.u16(static_cast<uint16_t>((yaw < 0 ? yaw + 2.0f * 3.14159265f : yaw) / (2.0f * 3.14159265f) * 65535.0f));
+        w.u8(e.flags);
+        w.u8(static_cast<uint8_t>(std::clamp(e.transform, 0.0f, 1.0f) * 255.0f));
     }
-    return ChatChannel::Public;
 }
 
-bool canReadChannel(ChatChannel channel, Phase phase, bool alive, Role role) {
-    switch (channel) {
-    case ChatChannel::Public: return true;
-    case ChatChannel::Wolves: return role == Role::Werewolf || !alive || phase == Phase::GameOver;
-    case ChatChannel::Dead: return !alive || phase == Phase::GameOver;
+bool readEntities(eng::ByteReader& r, std::vector<EntityState>& entities) {
+    entities.clear();
+    const uint8_t count = r.u8();
+    for (uint8_t i = 0; i < count && r.ok(); ++i) {
+        EntityState e;
+        e.id = r.u8();
+        e.kind = r.u8();
+        e.x = r.f32();
+        e.z = r.f32();
+        e.yaw = static_cast<float>(r.u16()) / 65535.0f * 2.0f * 3.14159265f;
+        e.flags = r.u8();
+        e.transform = static_cast<float>(r.u8()) / 255.0f;
+        entities.push_back(e);
     }
-    return false;
+    return r.ok();
+}
+
+bool isGatheringPhase(Phase phase) {
+    return phase == Phase::Lobby || phase == Phase::Assembly || phase == Phase::Vote || phase == Phase::Execution ||
+           phase == Phase::GameOver;
+}
+
+float timeOfDay(Phase phase, float timeLeft, float phaseDuration) {
+    const float p = phaseDuration > 0.0f ? std::clamp(1.0f - timeLeft / phaseDuration, 0.0f, 1.0f) : 0.0f;
+    switch (phase) {
+    case Phase::Day: return 0.28f + p * 0.42f;
+    case Phase::Assembly: return 0.70f + p * 0.04f;
+    case Phase::Vote: return 0.74f + p * 0.02f;
+    case Phase::Execution: return 0.76f + p * 0.025f;
+    case Phase::Night: return std::fmod(0.79f + p * 0.41f, 1.0f);
+    case Phase::Morning: return 0.2f + p * 0.08f;
+    case Phase::GameOver: return 0.73f;
+    default: return 0.9f;
+    }
 }
 
 } // namespace ww

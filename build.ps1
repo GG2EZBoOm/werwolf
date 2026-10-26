@@ -1,4 +1,4 @@
-# Baut das Projekt mit der MSVC-Toolchain aus Visual Studio.
+﻿# Baut das Projekt mit der MSVC-Toolchain aus Visual Studio.
 # Beispiele:
 #   .\build.ps1                  # Debug-Build
 #   .\build.ps1 -Preset release  # optimierter Build

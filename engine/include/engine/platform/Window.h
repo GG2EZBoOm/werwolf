@@ -37,6 +37,9 @@ public:
 
     Input& input();
     void setCursor(Cursor cursor);
+    // Versteckt den Mauszeiger und hält ihn im Fenster (für die Kamerasteuerung).
+    void setMouseCaptured(bool captured);
+    bool isMouseCaptured() const;
     void toggleFullscreen();
     void setTitle(const std::string& title);
     void requestClose();

@@ -24,10 +24,9 @@ void App::drawMenu() {
     const float W = r.width();
     const float H = r.height();
 
-    m_scenery.drawSky(r, 1.0f, m_time);
-    m_scenery.drawHorizon(r, 1.0f, m_time, H * 0.8f);
-    m_scenery.drawCampfire(r, {W * 0.5f, H * 0.93f}, 0.7f, m_time, 1.0f);
-    m_scenery.drawVignette(r, 0.7f);
+    // 3D-Dorf im Hintergrund, oben abgedunkelt für den Titel
+    r.gradientV({0, 0, W, H * 0.45f}, Color::hex(0x02030A, 0.55f), Color::hex(0x02030A, 0.0f));
+    r.rect({0, 0, W, H}, Color::hex(0x02030A, 0.18f));
 
     // Titel
     const float titleY = H * 0.1f;
@@ -81,19 +80,28 @@ void App::drawMenu() {
                "Hosten startet einen Server auf diesem PC – die anderen treten per IP bei.", theme::faint);
     }
 
-    const Rect quitRect{panel.center().x - 70.0f, panel.bottom() + 16.0f, 140.0f, 38.0f};
+    const Rect exploreRect{panel.center().x - 150.0f, panel.bottom() + 16.0f, 180.0f, 38.0f};
+    if (m_ui.button("menu/explore", exploreRect, "Dorf erkunden", ButtonKind::Ghost)) enterSandbox();
+    const Rect quitRect{panel.center().x + 40.0f, panel.bottom() + 16.0f, 110.0f, 38.0f};
     if (m_ui.button("menu/quit", quitRect, "Beenden", ButtonKind::Ghost)) m_quit = true;
 
-    r.textRight(m_fonts.small, {W - 16.0f, H - 26.0f}, "Eigene C++-Engine · F11 Vollbild · v0.1", theme::faint);
+    if (!m_menuNotice.empty()) {
+        float y = quitRect.bottom() + 14.0f;
+        for (const std::string& line : m_fonts.small.wrap(m_menuNotice, 520.0f)) {
+            r.textCentered(m_fonts.small, {0, y, W, 18.0f}, line, theme::gold.fade(0.85f));
+            y += m_fonts.small.lineHeight();
+        }
+    }
+
+    r.textRight(m_fonts.small, {W - 16.0f, H - 26.0f},
+                std::string("Eigene C++-Engine · F11 Vollbild · Version ") + versionString(), theme::faint);
 }
 
 void App::drawConnecting() {
     eng::Renderer2D& r = m_renderer;
     const float W = r.width();
     const float H = r.height();
-    m_scenery.drawSky(r, 1.0f, m_time);
-    m_scenery.drawHorizon(r, 1.0f, m_time, H * 0.8f);
-    m_scenery.drawVignette(r, 0.7f);
+    r.rect({0, 0, W, H}, Color::hex(0x02030A, 0.4f));
 
     const Rect panel{std::round(W * 0.5f - 210.0f), std::round(H * 0.5f - 110.0f), 420.0f, 200.0f};
     drawPanel(panel);
@@ -119,9 +127,7 @@ void App::drawLost() {
     eng::Renderer2D& r = m_renderer;
     const float W = r.width();
     const float H = r.height();
-    m_scenery.drawSky(r, m_night, m_time);
-    m_scenery.drawHorizon(r, m_night, m_time, H * 0.8f);
-    m_scenery.drawVignette(r, 0.7f);
+    r.rect({0, 0, W, H}, Color::hex(0x02030A, 0.45f));
 
     const Rect panel{std::round(W * 0.5f - 230.0f), std::round(H * 0.5f - 120.0f), 460.0f, 220.0f};
     drawPanel(panel);

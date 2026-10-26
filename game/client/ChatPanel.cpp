@@ -20,47 +20,44 @@ std::string chatPrefix(const LogEntry& e) {
 
 } // namespace
 
-void App::drawChat(const Rect& area) {
+void App::drawChat(const Rect& area, bool compact) {
     eng::Renderer2D& r = m_renderer;
     eng::Input& in = m_window.input();
     const GameView& v = m_net.view();
-    drawPanel(area);
+    const PlayerView* me = v.me();
+    const bool alive = me ? me->alive : true;
+    const bool focused = m_ui.isFocused("chat");
+
+    if (compact) {
+        r.roundRect(area, 14.0f, Color::hex(0x0A0D1A, focused ? 0.78f : 0.5f));
+        r.roundRectOutline(area, 14.0f, 1.0f, theme::panelBorder);
+    } else {
+        drawPanel(area);
+    }
     Rect inner = area.shrink(14.0f, 12.0f);
 
-    // Wer darf gerade wo sprechen?
-    const PlayerView* me = v.me();
-    const std::optional<ChatChannel> channel = speakChannel(v.phase, me ? me->alive : true, v.yourRole);
-
-    Rect header = inner.takeTop(28.0f);
-    r.text(m_fonts.uiBold, {header.x, header.y + 2.0f}, v.inGame() ? "Dorfgeflüster" : "Chat", theme::text);
-    std::string channelLabel = "Nachts herrscht Stille";
-    Color channelColor = theme::faint;
-    if (channel) {
-        switch (*channel) {
-        case ChatChannel::Public:
-            channelLabel = "An alle";
-            channelColor = theme::muted;
-            break;
-        case ChatChannel::Wolves:
-            channelLabel = "☾ Rudel-Chat";
-            channelColor = theme::blood;
-            break;
-        case ChatChannel::Dead:
-            channelLabel = "† Geisterchat";
-            channelColor = theme::ghost;
-            break;
-        }
+    // Kanal bestimmen (gleiche Regeln wie auf dem Server)
+    ChatChannel channel = ChatChannel::Global;
+    if (v.inGame()) {
+        if (v.phase == Phase::GameOver) channel = ChatChannel::Global;
+        else if (!alive) channel = ChatChannel::Dead;
+        else if (m_chatWolves && v.yourRole == Role::Werewolf) channel = ChatChannel::Wolves;
+        else if (isGatheringPhase(v.phase)) channel = ChatChannel::Global;
+        else channel = ChatChannel::Nearby;
     }
-    r.textRight(m_fonts.small, {header.right(), header.y + 5.0f}, channelLabel, channelColor);
-    inner.takeTop(6.0f);
-    r.rect({inner.x, inner.y, inner.w, 1.0f}, theme::panelBorder);
-    inner.takeTop(8.0f);
 
-    const Rect input = inner.takeBottom(42.0f);
-    inner.takeBottom(10.0f);
+    if (!compact) {
+        Rect header = inner.takeTop(28.0f);
+        r.text(m_fonts.uiBold, {header.x, header.y + 2.0f}, "Chat", theme::text);
+        inner.takeTop(6.0f);
+        r.rect({inner.x, inner.y, inner.w, 1.0f}, theme::panelBorder);
+        inner.takeTop(8.0f);
+    }
+
+    const Rect input = inner.takeBottom(compact ? 36.0f : 42.0f);
+    inner.takeBottom(8.0f);
     const Rect logArea = inner;
 
-    // Verlauf von unten nach oben zeichnen
     std::deque<LogEntry>& log = m_net.log();
     const float width = logArea.w;
     float total = 0.0f;
@@ -70,18 +67,23 @@ void App::drawChat(const Rect& area) {
         LogEntry& e = *it;
         const bool narration = !e.isChat && e.kind == NoticeKind::Narration;
         const bool victory = !e.isChat && e.kind == NoticeKind::Victory;
-        eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : m_fonts.ui;
+        eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : (compact ? m_fonts.small : m_fonts.ui);
         if (e.wrapWidth != width) {
             e.lines = font.wrap(e.isChat ? chatPrefix(e) + e.text : e.text, width);
             e.wrapWidth = width;
         }
         const float lh = font.lineHeight();
-        const float h = static_cast<float>(e.lines.size()) * lh + (e.isChat ? 4.0f : 8.0f);
+        const float h = static_cast<float>(e.lines.size()) * lh + (e.isChat ? 3.0f : 6.0f);
         total += h;
         y -= h;
         if (y > logArea.bottom() || y + h < logArea.y) continue;
 
-        float ly = y + (e.isChat ? 2.0f : 4.0f);
+        // Im Spiel verblassen ältere Einträge, solange der Chat nicht aktiv ist
+        float alpha = 1.0f;
+        if (compact && !focused && m_chatScroll < 1.0f) alpha = eng::clamp01(1.4f - static_cast<float>(m_time - e.time) / 30.0f);
+        if (alpha <= 0.02f) continue;
+
+        float ly = y + (e.isChat ? 1.0f : 3.0f);
         if (e.isChat) {
             Color nameColor = theme::playerColor(e.from);
             Color textColor = theme::text;
@@ -96,18 +98,17 @@ void App::drawChat(const Rect& area) {
             for (size_t i = 0; i < e.lines.size(); ++i) {
                 const std::string& line = e.lines[i];
                 if (i == 0 && line.compare(0, prefix.size(), prefix) == 0) {
-                    r.text(font, {logArea.x, ly}, prefix, nameColor);
-                    r.text(font, {logArea.x + font.measure(prefix), ly}, std::string_view(line).substr(prefix.size()),
-                           textColor);
+                    r.text(font, {logArea.x, ly}, prefix, nameColor.fade(alpha));
+                    r.text(font, {logArea.x + font.measure(prefix), ly}, std::string_view(line).substr(prefix.size()), textColor.fade(alpha));
                 } else {
-                    r.text(font, {logArea.x, ly}, line, i == 0 ? nameColor : textColor);
+                    r.text(font, {logArea.x, ly}, line, (i == 0 ? nameColor : textColor).fade(alpha));
                 }
                 ly += lh;
             }
         } else {
-            const Color c = theme::noticeColor(e.kind);
+            const Color c = theme::noticeColor(e.kind).fade(alpha);
             if (e.kind == NoticeKind::Death || e.kind == NoticeKind::Private || e.kind == NoticeKind::Victory)
-                r.roundRect({logArea.x - 6.0f, y + 1.0f, 3.0f, h - 2.0f}, 1.5f, c.withAlpha(0.8f));
+                r.roundRect({logArea.x - 6.0f, y + 1.0f, 3.0f, h - 2.0f}, 1.5f, c.withAlpha(0.8f * alpha));
             for (const std::string& line : e.lines) {
                 r.text(font, {logArea.x, ly}, line, c);
                 ly += lh;
@@ -116,36 +117,31 @@ void App::drawChat(const Rect& area) {
     }
     r.popClip();
 
-    // Scrollen mit dem Mausrad
-    if (m_ui.hovered(logArea) && in.wheel != 0.0f) m_chatScroll += in.wheel * 48.0f;
+    if (m_ui.hovered(logArea) && in.wheel != 0.0f) m_chatScroll += in.wheel * 40.0f;
     m_chatScroll = std::clamp(m_chatScroll, 0.0f, std::max(0.0f, total - logArea.h));
     if (m_chatScroll > 4.0f) {
-        const Rect jump{logArea.center().x - 80.0f, logArea.bottom() - 30.0f, 160.0f, 26.0f};
+        const Rect jump{logArea.center().x - 70.0f, logArea.bottom() - 28.0f, 140.0f, 24.0f};
         if (m_ui.button("chat/jump", jump, "↓ Neueste", eng::ui::ButtonKind::Normal)) m_chatScroll = 0.0f;
     }
-    if (log.empty()) {
-        r.textCentered(m_fonts.small, logArea, "Noch ist es still im Dorf …", theme::faint);
-    }
 
-    // Eingabezeile
-    std::string placeholder = "Nachts schläft das Dorf …";
-    if (channel) {
-        switch (*channel) {
-        case ChatChannel::Public: placeholder = "Nachricht an alle …"; break;
-        case ChatChannel::Wolves: placeholder = "Flüstere deinem Rudel zu …"; break;
-        case ChatChannel::Dead: placeholder = "Nur die Toten hören dich …"; break;
-        }
+    std::string placeholder;
+    switch (channel) {
+    case ChatChannel::Global: placeholder = v.inGame() ? "An alle …" : "Nachricht an alle …"; break;
+    case ChatChannel::Nearby: placeholder = "Sprechen (Hörweite 24 m) …"; break;
+    case ChatChannel::Wolves: placeholder = "Flüstere deinem Rudel zu …"; break;
+    case ChatChannel::Dead: placeholder = "Nur die Toten hören dich …"; break;
     }
-    const bool enabled = channel.has_value();
-    if (m_ui.textInput("chat", input, m_chatInput, placeholder, proto::kMaxChatLength, enabled)) {
+    if (compact && !focused) placeholder = "Enter: " + placeholder;
+    const bool submitted = m_ui.textInput("chat", input, m_chatInput, placeholder, proto::kMaxChatLength, true);
+    if (submitted && m_time != m_chatFocusTime) {
         if (!m_chatInput.empty()) {
-            m_net.sendChat(m_chatInput);
+            m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves);
             m_chatInput.clear();
             m_chatScroll = 0.0f;
         }
+        if (compact) m_ui.clearFocus(); // zurück ins Spiel
     }
-    // Enter springt ins Chatfeld
-    if (enabled && !m_ui.anyFocused() && in.pressed(eng::Key::Enter)) m_ui.focus("chat");
+    if (!compact && !m_ui.anyFocused() && in.pressed(eng::Key::Enter)) m_ui.focus("chat");
 }
 
 } // namespace ww

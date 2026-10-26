@@ -25,9 +25,28 @@ enum class Key : uint8_t {
     PageUp,
     PageDown,
     A,
+    B,
     C,
+    D,
+    E,
+    F,
+    G,
+    M,
+    Q,
+    R,
+    S,
+    T,
     V,
+    W,
     X,
+    Shift,
+    Ctrl,
+    Num1,
+    Num2,
+    Num3,
+    Num4,
+    F1,
+    F3,
     F11,
     F12,
     Count
@@ -38,6 +57,7 @@ enum class MouseButton : uint8_t { Left, Right, Middle, Count };
 // Eingabezustand eines Frames. Koordinaten sind logische Pixel.
 struct Input {
     Vec2 mouse{-1000.0f, -1000.0f};
+    Vec2 mouseDelta{0.0f, 0.0f}; // rohe Mausbewegung dieses Frames (für die Kamera)
     float wheel = 0.0f;
     std::string text; // in diesem Frame getippter Text (UTF-8)
     bool ctrl = false;
@@ -74,6 +94,7 @@ struct Input {
         m_btnPressed.fill(false);
         m_btnReleased.fill(false);
         wheel = 0.0f;
+        mouseDelta = {0.0f, 0.0f};
         text.clear();
     }
     // Verhindert, dass ein Klick von mehreren Elementen verarbeitet wird.

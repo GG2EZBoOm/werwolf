@@ -11,6 +11,7 @@ struct Config {
     std::string name;
     std::string address = "127.0.0.1";
     uint16_t port = 27777;
+    std::string updateUrl; // leer = Standardquelle
 
     static std::filesystem::path path();
     void load();

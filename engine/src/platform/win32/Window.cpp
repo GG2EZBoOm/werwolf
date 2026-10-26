@@ -42,9 +42,28 @@ Key mapKey(WPARAM vk) {
     case VK_PRIOR: return Key::PageUp;
     case VK_NEXT: return Key::PageDown;
     case 'A': return Key::A;
+    case 'B': return Key::B;
     case 'C': return Key::C;
+    case 'D': return Key::D;
+    case 'E': return Key::E;
+    case 'F': return Key::F;
+    case 'G': return Key::G;
+    case 'M': return Key::M;
+    case 'Q': return Key::Q;
+    case 'R': return Key::R;
+    case 'S': return Key::S;
+    case 'T': return Key::T;
     case 'V': return Key::V;
+    case 'W': return Key::W;
     case 'X': return Key::X;
+    case '1': return Key::Num1;
+    case '2': return Key::Num2;
+    case '3': return Key::Num3;
+    case '4': return Key::Num4;
+    case VK_SHIFT: return Key::Shift;
+    case VK_CONTROL: return Key::Ctrl;
+    case VK_F1: return Key::F1;
+    case VK_F3: return Key::F3;
     case VK_F11: return Key::F11;
     case VK_F12: return Key::F12;
     default: return Key::Unknown;
@@ -71,6 +90,23 @@ struct Window::Impl {
     HCURSOR cursors[3] = {};
     wchar_t pendingHighSurrogate = 0;
     PFN_wglSwapIntervalEXT swapInterval = nullptr;
+    bool mouseCaptured = false;
+
+    void applyCapture() {
+        if (mouseCaptured && focused) {
+            RECT r;
+            GetClientRect(hwnd, &r);
+            POINT tl{r.left, r.top}, br{r.right, r.bottom};
+            ClientToScreen(hwnd, &tl);
+            ClientToScreen(hwnd, &br);
+            RECT clip{tl.x, tl.y, br.x, br.y};
+            ClipCursor(&clip);
+            SetCursor(nullptr);
+        } else {
+            ClipCursor(nullptr);
+            SetCursor(cursors[static_cast<int>(cursor)]);
+        }
+    }
 
     void updateModifiers() {
         input.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -102,6 +138,7 @@ struct Window::Impl {
             fbWidth = LOWORD(lParam);
             fbHeight = HIWORD(lParam);
             minimized = wParam == SIZE_MINIMIZED;
+            if (mouseCaptured) applyCapture();
             return 0;
         case WM_DPICHANGED: {
             scale = static_cast<float>(HIWORD(wParam)) / 96.0f;
@@ -118,17 +155,33 @@ struct Window::Impl {
         }
         case WM_SETCURSOR:
             if (LOWORD(lParam) == HTCLIENT) {
-                SetCursor(cursors[static_cast<int>(cursor)]);
+                SetCursor(mouseCaptured && focused ? nullptr : cursors[static_cast<int>(cursor)]);
                 return TRUE;
             }
             break;
         case WM_SETFOCUS:
             focused = true;
+            applyCapture();
             return 0;
         case WM_KILLFOCUS:
             focused = false;
             input.releaseAll();
+            ClipCursor(nullptr);
             return 0;
+        case WM_INPUT: {
+            RAWINPUT raw{};
+            UINT size = sizeof raw;
+            if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) !=
+                    static_cast<UINT>(-1) &&
+                raw.header.dwType == RIM_TYPEMOUSE && !(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) && focused) {
+                input.mouseDelta.x += static_cast<float>(raw.data.mouse.lLastX);
+                input.mouseDelta.y += static_cast<float>(raw.data.mouse.lLastY);
+            }
+            break;
+        }
+        case WM_MOVE:
+            if (mouseCaptured) applyCapture();
+            break;
         case WM_MOUSEMOVE:
             input.mouse = {static_cast<float>(GET_X_LPARAM(lParam)) / scale,
                            static_cast<float>(GET_Y_LPARAM(lParam)) / scale};
@@ -301,6 +354,13 @@ bool Window::create(const std::string& title, int logicalWidth, int logicalHeigh
     log::info("OpenGL {} | {} | DPI-Skalierung {:.2f}", reinterpret_cast<const char*>(glGetString(GL_VERSION)),
               reinterpret_cast<const char*>(glGetString(GL_RENDERER)), m->scale);
 
+    // Rohe Mausdaten für die Kamerasteuerung
+    RAWINPUTDEVICE mouse{};
+    mouse.usUsagePage = 0x01;
+    mouse.usUsage = 0x02;
+    mouse.hwndTarget = m->hwnd;
+    RegisterRawInputDevices(&mouse, 1, sizeof mouse);
+
     ShowWindow(m->hwnd, SW_SHOWDEFAULT);
     UpdateWindow(m->hwnd);
     RECT client{};
@@ -311,6 +371,8 @@ bool Window::create(const std::string& title, int logicalWidth, int logicalHeigh
 }
 
 void Window::destroy() {
+    if (m->mouseCaptured) ClipCursor(nullptr);
+    m->mouseCaptured = false;
     if (m->glrc) {
         wglMakeCurrent(nullptr, nullptr);
         wglDeleteContext(m->glrc);
@@ -356,6 +418,14 @@ void Window::setCursor(Cursor cursor) {
     GetCursorPos(&p);
     if (WindowFromPoint(p) == m->hwnd) SetCursor(m->cursors[static_cast<int>(cursor)]);
 }
+
+void Window::setMouseCaptured(bool captured) {
+    if (m->mouseCaptured == captured) return;
+    m->mouseCaptured = captured;
+    m->applyCapture();
+}
+
+bool Window::isMouseCaptured() const { return m->mouseCaptured; }
 
 void Window::toggleFullscreen() {
     // Randloses Vollbild nach dem bewährten Muster aus "The Old New Thing".
