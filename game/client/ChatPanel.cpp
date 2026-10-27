@@ -11,11 +11,13 @@ using eng::Rect;
 namespace {
 
 std::string chatPrefix(const LogEntry& e) {
+    // Leerer Name: Das kleine Mädchen hört den Rudel-Chat, ohne die Sprecher zu kennen
+    const std::string name = e.name.empty() ? std::string(L("Unbekannter Werwolf", "Unknown werewolf")) : e.name;
     switch (e.channel) {
-    case ChatChannel::Wolves: return "[Rudel] " + e.name + ": ";
-    case ChatChannel::Dead: return "[Geist] " + e.name + ": ";
-    case ChatChannel::Family: return "[Geschwister] " + e.name + ": ";
-    default: return e.name + ": ";
+    case ChatChannel::Wolves: return std::string(L("[Rudel] ", "[Pack] ")) + name + ": ";
+    case ChatChannel::Dead: return std::string(L("[Geist] ", "[Ghost] ")) + name + ": ";
+    case ChatChannel::Family: return std::string(L("[Geschwister] ", "[Siblings] ")) + name + ": ";
+    default: return name + ": ";
     }
 }
 
@@ -48,7 +50,7 @@ void App::drawChat(const Rect& area, bool compact) {
 
     if (!compact) {
         Rect header = inner.takeTop(34.0f);
-        r.text(m_fonts.handLarge, {header.x, header.y - 4.0f}, "Dorfgeflüster", palette::chalk);
+        r.text(m_fonts.handLarge, {header.x, header.y - 4.0f}, L("Dorfgeflüster", "Village whispers"), palette::chalk);
         inner.takeTop(4.0f);
         m_kit.inkLine({inner.x, inner.y}, {inner.right(), inner.y + 1.0f}, 1.2f, palette::chalk.withAlpha(0.35f), 1.0f, 9);
         inner.takeTop(10.0f);
@@ -68,9 +70,10 @@ void App::drawChat(const Rect& area, bool compact) {
         const bool narration = !e.isChat && e.kind == NoticeKind::Narration;
         const bool victory = !e.isChat && e.kind == NoticeKind::Victory;
         eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : (compact ? m_fonts.handSmall : m_fonts.hand);
-        if (e.wrapWidth != width) {
-            e.lines = font.wrap(e.isChat ? chatPrefix(e) + e.text : e.text, width);
+        if (e.wrapWidth != width || e.wrapLang != language()) {
+            e.lines = font.wrap(e.isChat ? chatPrefix(e) + e.text.str() : e.text.str(), width);
             e.wrapWidth = width;
+            e.wrapLang = language();
         }
         const float lh = font.lineHeight();
         const float h = static_cast<float>(e.lines.size()) * lh + (e.isChat ? 3.0f : 6.0f);
@@ -124,16 +127,16 @@ void App::drawChat(const Rect& area, bool compact) {
     m_chatScroll = std::clamp(m_chatScroll, 0.0f, std::max(0.0f, total - logArea.h));
     if (m_chatScroll > 4.0f) {
         const Rect jump{logArea.center().x - 70.0f, logArea.bottom() - 28.0f, 140.0f, 24.0f};
-        if (m_ui.button("chat/jump", jump, "↓ Neueste", eng::ui::ButtonKind::Normal)) m_chatScroll = 0.0f;
+        if (m_ui.button("chat/jump", jump, L("↓ Neueste", "↓ Latest"), eng::ui::ButtonKind::Normal)) m_chatScroll = 0.0f;
     }
 
     std::string placeholder;
     switch (channel) {
-    case ChatChannel::Global: placeholder = v.inGame() ? "An alle …" : "Nachricht an alle …"; break;
-    case ChatChannel::Nearby: placeholder = "Sprechen (Hörweite 24 m) …"; break;
-    case ChatChannel::Wolves: placeholder = "Flüstere deinem Rudel zu …"; break;
-    case ChatChannel::Dead: placeholder = "Nur die Toten hören dich …"; break;
-    case ChatChannel::Family: placeholder = "Nur deine Geschwister hören dich …"; break;
+    case ChatChannel::Global: placeholder = v.inGame() ? L("An alle …", "To everyone …") : L("Nachricht an alle …", "Message to everyone …"); break;
+    case ChatChannel::Nearby: placeholder = L("Sprechen (Hörweite 24 m) …", "Talk (earshot 24 m) …"); break;
+    case ChatChannel::Wolves: placeholder = L("Flüstere deinem Rudel zu …", "Whisper to your pack …"); break;
+    case ChatChannel::Dead: placeholder = L("Nur die Toten hören dich …", "Only the dead hear you …"); break;
+    case ChatChannel::Family: placeholder = L("Nur deine Geschwister hören dich …", "Only your siblings hear you …"); break;
     }
     if (compact && !focused) placeholder = "Enter: " + placeholder;
     const bool submitted = m_ui.textInput("chat", input, m_chatInput, placeholder, proto::kMaxChatLength, true);

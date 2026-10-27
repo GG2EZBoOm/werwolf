@@ -21,19 +21,45 @@ float lerpAngle(float a, float b, float t) {
 }
 } // namespace
 
+Text netErrorText(const std::string& error) {
+    static const std::pair<const char*, const char*> kErrors[] = {
+        {"Netzwerk konnte nicht initialisiert werden", "The network could not be initialised"},
+        {"Adresse wurde nicht gefunden", "The address could not be found"},
+        {"Socket konnte nicht erstellt werden", "Could not create a socket"},
+        {"Verbindung fehlgeschlagen", "Connection failed"},
+        {"Server nicht erreichbar", "The server cannot be reached"},
+        {"Zeitüberschreitung beim Verbinden", "The connection timed out"},
+        {"Sendefehler (Verbindung abgebrochen)", "Send error (connection aborted)"},
+        {"Zu viele Daten empfangen", "Received too much data"},
+        {"Verbindung wurde getrennt", "The connection was closed"},
+        {"Verbindung abgebrochen", "The connection was aborted"},
+        {"Ungültige Nachricht empfangen", "Received an invalid message"},
+        {"Sendepuffer übergelaufen (Gegenstelle reagiert nicht)", "Send buffer overflowed (the other side is not responding)"},
+        {"Port ist bereits belegt oder nicht verfügbar", "The port is already in use or not available"},
+    };
+    for (const auto& [de, en] : kErrors)
+        if (error == de) return {de, en};
+    return Text::same(error);
+}
+
 bool NetClient::connect(const std::string& host, uint16_t port, const std::string& name, uint64_t token) {
+    return connect(std::vector<std::string>{host}, port, name, token);
+}
+
+bool NetClient::connect(const std::vector<std::string>& hosts, uint16_t port, const std::string& name, uint64_t token) {
     disconnect();
-    m_host = host;
+    m_hosts = hosts;
+    m_host = hosts.empty() ? std::string() : hosts.front();
     m_port = port;
     m_name = name;
     m_token = token;
-    m_error.clear();
+    m_error = {};
     m_hasView = false;
     m_myId = kNoPlayer;
     m_snapshots.clear();
     m_correction.reset();
-    if (!m_conn.connect(host, port)) {
-        m_error = m_conn.error();
+    if (!m_conn.connect(hosts, port)) {
+        m_error = netErrorText(m_conn.error());
         m_status = Status::Failed;
         return false;
     }
@@ -76,7 +102,8 @@ void NetClient::update(double now) {
 
     if (m_conn.state() == eng::net::Connection::State::Disconnected) {
         m_status = Status::Failed;
-        if (m_error.empty()) m_error = m_conn.error().empty() ? "Verbindung verloren" : m_conn.error();
+        if (m_error.empty())
+            m_error = m_conn.error().empty() ? Text{"Verbindung verloren", "Connection lost"} : netErrorText(m_conn.error());
         return;
     }
     if (m_status == Status::Connected && now - m_lastPing > proto::kPingInterval) {
@@ -84,7 +111,7 @@ void NetClient::update(double now) {
         m_lastPing = now;
     }
     if (m_conn.isConnected() && now - m_conn.lastReceiveTime() > proto::kTimeout) {
-        m_error = "Der Server antwortet nicht mehr";
+        m_error = {"Der Server antwortet nicht mehr", "The server is no longer responding"};
         m_conn.close();
         m_status = Status::Failed;
     }
@@ -101,10 +128,10 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
         eng::log::info("Verbunden mit {}:{} als Spieler {}", m_host, m_port, m_myId);
         break;
     case proto::ServerMsg::Reject:
-        m_error = r.str();
+        m_error.read(r);
         m_status = Status::Failed;
         m_conn.close();
-        eng::log::info("Server hat die Verbindung abgelehnt: {}", m_error);
+        eng::log::info("Server hat die Verbindung abgelehnt: {}", m_error.de);
         break;
     case proto::ServerMsg::State: {
         GameView v;
@@ -127,7 +154,7 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
         e.channel = static_cast<ChatChannel>(std::min<uint8_t>(r.u8(), static_cast<uint8_t>(ChatChannel::Family)));
         e.from = r.u8();
         e.name = r.str();
-        e.text = r.str();
+        e.text.read(r);
         e.time = now;
         if (r.ok()) addEntry(std::move(e));
         break;
@@ -135,7 +162,7 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
     case proto::ServerMsg::Notice: {
         LogEntry e;
         e.kind = static_cast<NoticeKind>(std::min<uint8_t>(r.u8(), static_cast<uint8_t>(NoticeKind::Victory)));
-        e.text = r.str();
+        e.text.read(r);
         e.time = now;
         if (r.ok()) addEntry(std::move(e));
         break;

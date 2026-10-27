@@ -9,41 +9,43 @@ namespace ww {
 
 namespace {
 
-const std::vector<std::string> kDayLines = {
-    "Guten Morgen … oder auch nicht.",
-    "Ich habe heute Nacht seltsame Geräusche am Brunnen gehört.",
-    "{name}, wo warst du gestern Nacht?",
-    "Ich bin nur ein einfacher Dorfbewohner, ehrlich!",
-    "Ich traue {name} nicht über den Weg.",
-    "Wir müssen zusammenhalten, sonst holen sie uns alle.",
-    "Hat jemand {name} heute Nacht gesehen?",
-    "Irgendetwas stimmt mit {name} nicht.",
-    "Ich habe Augen im Wald leuchten sehen …",
-    "Lasst uns nicht vorschnell urteilen.",
-    "Verriegelt heute Nacht eure Türen!",
-    "Ich habe Holz krachen hören, ganz in der Nähe von {name}s Haus.",
+const std::vector<Text> kDayLines = {
+    {"Guten Morgen … oder auch nicht.", "Good morning … or not."},
+    {"Ich habe heute Nacht seltsame Geräusche am Brunnen gehört.", "I heard strange noises at the well last night."},
+    {"{name}, wo warst du gestern Nacht?", "{name}, where were you last night?"},
+    {"Ich bin nur ein einfacher Dorfbewohner, ehrlich!", "I'm just a simple villager, honestly!"},
+    {"Ich traue {name} nicht über den Weg.", "I don't trust {name} one bit."},
+    {"Wir müssen zusammenhalten, sonst holen sie uns alle.", "We have to stick together, or they'll get us all."},
+    {"Hat jemand {name} heute Nacht gesehen?", "Did anyone see {name} last night?"},
+    {"Irgendetwas stimmt mit {name} nicht.", "Something is off about {name}."},
+    {"Ich habe Augen im Wald leuchten sehen …", "I saw eyes glowing in the forest …"},
+    {"Lasst uns nicht vorschnell urteilen.", "Let's not judge too quickly."},
+    {"Verriegelt heute Nacht eure Türen!", "Bolt your doors tonight!"},
+    {"Ich habe Holz krachen hören, ganz in der Nähe von {name}s Haus.", "I heard wood cracking right near {name}'s house."},
 };
 
-const std::vector<std::string> kWolfLines = {
-    "Ich nehme mir {name} vor.",
-    "{name} ist allein unterwegs … perfekt.",
-    "Vorsicht, beim Feuer sind zu viele.",
-    "Wer übernimmt heute Nacht?",
-    "{name} hat sich eingeschlossen – die Tür hält nicht lange.",
+const std::vector<Text> kWolfLines = {
+    {"Ich nehme mir {name} vor.", "I'll take {name}."},
+    {"{name} ist allein unterwegs … perfekt.", "{name} is out alone … perfect."},
+    {"Vorsicht, beim Feuer sind zu viele.", "Careful, there are too many at the fire."},
+    {"Wer übernimmt heute Nacht?", "Who's taking tonight?"},
+    {"{name} hat sich eingeschlossen – die Tür hält nicht lange.", "{name} has locked themselves in – the door won't hold for long."},
 };
 
-const std::vector<std::string> kJesterLines = {
-    "Vielleicht war ich es ja … wer weiß?",
-    "Ich würde mich an eurer Stelle hängen.",
-    "Hehe. Ich sage nichts mehr ohne meinen Anwalt.",
-    "Ich habe ein ganz schlechtes Gewissen, aber das hat nichts zu bedeuten.",
+const std::vector<Text> kJesterLines = {
+    {"Vielleicht war ich es ja … wer weiß?", "Maybe it was me … who knows?"},
+    {"Ich würde mich an eurer Stelle hängen.", "If I were you, I'd hang me."},
+    {"Hehe. Ich sage nichts mehr ohne meinen Anwalt.", "Hehe. I'm not saying anything without my lawyer."},
+    {"Ich habe ein ganz schlechtes Gewissen, aber das hat nichts zu bedeuten.", "I have a really guilty conscience, but that means nothing."},
 };
 
-const std::vector<std::string> kEndLines = {"Gut gespielt!", "GG!", "Noch eine Runde?", "Das war knapp!"};
+const std::vector<Text> kEndLines = {
+    {"Gut gespielt!", "Well played!"}, {"GG!", "GG!"}, {"Noch eine Runde?", "One more round?"}, {"Das war knapp!", "That was close!"}};
 
-std::string fill(std::string line, const std::string& name) {
+Text fill(Text line, const std::string& name) {
     const std::string key = "{name}";
-    if (auto pos = line.find(key); pos != std::string::npos) line.replace(pos, key.size(), name);
+    for (std::string* s : {&line.de, &line.en})
+        if (auto pos = s->find(key); pos != std::string::npos) s->replace(pos, key.size(), name);
     return line;
 }
 
@@ -167,18 +169,23 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
     }
 }
 
-void Bot::hear(const Match& match, uint8_t speaker, const std::string& text) {
+void Bot::hear(const Match& match, uint8_t speaker, const Text& message) {
     if (speaker == m_id) return;
     const Match::Player* me = match.find(m_id);
     const Match::Player* from = match.find(speaker);
     if (!me || !from) return;
+    // Menschen schreiben in einer Sprache, Bots in beiden: in beiden nach Stichworten suchen
+    const std::string text = message.de == message.en ? message.de : message.de + "\n" + message.en;
     auto contains = [&](const char* word) { return text.find(word) != std::string::npos; };
     float weight = 0.4f;
-    if (contains("Werwolf") || contains("werwolf") || contains("Wolf") || contains("Leiche von")) weight = 2.0f;
+    if (contains("Werwolf") || contains("werwolf") || contains("Wolf") || contains("wolf") || contains("Leiche von") ||
+        contains("body of"))
+        weight = 2.0f;
     else if (contains("traue") || contains("verdächtig") || contains("stimmt") || contains("Stimme geht") ||
-             contains("gesehen") || contains("Leiche"))
+             contains("gesehen") || contains("Leiche") || contains("trust") || contains("suspicious") || contains("off about") ||
+             contains("vote goes") || contains("saw") || contains("body"))
         weight = 1.0f;
-    if (contains("unschuldig") || contains("vertraue")) weight = -1.0f;
+    if (contains("unschuldig") || contains("vertraue") || contains("innocent")) weight = -1.0f;
 
     for (const Match::Player& p : match.players()) {
         if (!p.alive || p.id == speaker || p.name.size() < 2 || text.find(p.name) == std::string::npos) continue;
@@ -303,8 +310,10 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
         m_reported = true;
         m_suspicion[me->trackTarget] += 6.0f;
         if (const Match::Player* t = match.find(me->trackTarget); t && t->alive) {
-            say(m_id, "Ich bin der Fährtenleser! Die Spur von " + t->name + " führte heute Nacht direkt zur Leiche von " +
-                          match.find(me->trackVictims.front())->name + "!",
+            say(m_id,
+                tx("Ich bin der Fährtenleser! Die Spur von {} führte heute Nacht direkt zur Leiche von {}!",
+                   "I'm the tracker! The trail of {} led straight to the body of {} last night!", t->name,
+                   match.find(me->trackVictims.front())->name),
                 false);
         }
     }
@@ -320,20 +329,20 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 say(m_id, m_rng.pick(kJesterLines), false);
             } else if (me->alive && suspect != kNoPlayer && m_rng.chance(0.7f)) {
                 const std::string& name = match.find(suspect)->name;
-                say(m_id, strongest >= 4.0f ? "Ich habe " + name + " heute Nacht als Werwolf gesehen!"
-                                            : "Ich bin mir sicher: " + name + " ist ein Werwolf!",
+                say(m_id, strongest >= 4.0f ? tx("Ich habe {} heute Nacht als Werwolf gesehen!", "I saw {} as a werewolf last night!", name)
+                                            : tx("Ich bin mir sicher: {} ist ein Werwolf!", "I'm sure of it: {} is a werewolf!", name),
                     false);
             } else if (me->alive) {
                 std::vector<std::string> names;
                 for (const Match::Player& p : match.players())
                     if (p.alive && p.id != m_id) names.push_back(p.name);
-                const std::string name = names.empty() ? "irgendwer" : m_rng.pick(names);
+                const std::string name = names.empty() ? "?" : m_rng.pick(names);
                 bool spoke = false;
                 if (view.yourRole == Role::Seer) {
                     for (const SeerResult& r : view.seerResults) {
                         const PlayerView* p = view.player(r.player);
                         if (p && p->alive && isWolfRole(r.role) && m_rng.chance(0.7f)) {
-                            say(m_id, "Ich bin die Seherin! " + p->name + " ist ein Werwolf!", false);
+                            say(m_id, tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", p->name), false);
                             spoke = true;
                             break;
                         }
@@ -513,7 +522,10 @@ void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Ve
             if (target != kNoPlayer) {
                 match.interact(m_id, Interaction::Vote, target);
                 if (m_rng.chance(0.3f))
-                    say(m_id, (view.election ? "Ich wähle " : "Meine Stimme geht an ") + view.player(target)->name + ".", false);
+                    say(m_id,
+                        view.election ? tx("Ich wähle {}.", "I choose {}.", view.player(target)->name)
+                                      : tx("Meine Stimme geht an {}.", "My vote goes to {}.", view.player(target)->name),
+                        false);
             }
         }
         break;

@@ -5,6 +5,10 @@ Nähe-Chat, beobachtet, versammelt sich am Feuer zur Abstimmung – und nachts v
 Werwölfe und gehen auf die Jagd. Alles läuft auf einer eigenen, von Grund auf geschriebenen
 C++20-Engine ohne externe Bibliotheken; Welt, Gebäude und Figuren werden prozedural erzeugt.
 
+> **English:** The whole game is available in English (*Werewolf*). It follows the Windows language;
+> switch it under **Settings → Interface → Language**. Players on the same server may use different
+> languages – every message from the narrator reaches each player in their own language.
+
 ## Bauen
 
 Voraussetzung: Visual Studio 2022/2026 mit dem Workload „Desktopentwicklung mit C++“
@@ -27,12 +31,34 @@ Die Programme landen in `build\<preset>\bin\`:
 
 ## Spielen
 
-1. Eine Person klickt **Spiel hosten**; die Lobby zeigt die IP-Adressen für die anderen.
-2. Alle anderen tragen die Adresse ein und klicken **Beitreten**.
+1. Eine Person klickt **Ein Dorf gründen**; die Lobby zeigt die Adressen für die anderen (ein Klick kopiert sie).
+2. Alle anderen tragen die Adresse ein und klopfen an – oder treten über eine **Discord-Einladung** bei.
 3. Die Spielleitung stellt Rollen und Phasenlängen ein, füllt mit **Bots** auf und startet.
 
-Port **27777 (TCP)**. Beim ersten Hosten fragt die Windows-Firewall – Zugriff erlauben. Fürs Internet
-den Port im Router weiterleiten oder ein VPN (Tailscale, Radmin) nutzen. 4 bis 16 Spieler.
+Port **27777 (TCP)**, 4 bis 16 Spieler. Beim ersten Hosten fragt die Windows-Firewall – Zugriff erlauben.
+
+### Über das Internet (IPv4 und IPv6)
+
+Der Server lauscht gleichzeitig auf IPv4 und IPv6. Beim Beitreten geht jede Form: `84.12.3.4`,
+`84.12.3.4:27777`, `2001:db8::1`, `[2001:db8::1]:27777` oder ein Hostname; hat ein Name mehrere
+Adressen, werden alle nacheinander versucht.
+
+- **Router-Freigabe:** Beim Hosten gibt das Spiel den Port per UPnP selbst im Router frei (IPv4-Weiterleitung
+  und, falls der Router es kann, die IPv6-Firewall) und räumt beim Beenden wieder auf. Bei einer FRITZ!Box muss
+  dafür unter *Internet → Freigaben* für den PC „Selbstständige Portfreigaben erlauben“ an sein. Abschaltbar unter
+  **Einstellungen → Oberfläche**; dann den TCP-Port von Hand freigeben.
+- **Die Lobby zeigt**, wie man herkommt: Heimnetz, öffentliche IPv4, IPv6 und VPN-Adressen (Radmin, Hamachi,
+  Tailscale) sowie den Zustand der Freigabe. Die öffentliche IPv4 fragt das Spiel bei `api.ipify.org` ab.
+- **DS-Lite/Carrier-Grade-NAT:** Ohne eigene öffentliche IPv4 erkennt die Lobby das und rät zu IPv6 bzw. einem VPN.
+
+### Discord
+
+Läuft Discord, zeigt es an, dass du Werwolf spielst (Lobby, Phase, Mitspielerzahl – nie deine Rolle).
+In der Lobby kann man Freunde über **＋ → Zu Werwolf einladen** in einem Discord-Chat einladen; ein Klick auf
+„Beitreten“ startet bei Bedarf das Spiel und verbindet direkt (IPv6, IPv4 oder Heimnetz). Fragt jemand per Discord
+an, erscheint in der Lobby ein Zettel zum Einlassen. Abschaltbar unter **Einstellungen → Oberfläche**.
+Für das große Bild im Discord-Status muss im Discord-Entwicklerportal (App `1564687671161524365`) unter
+*Rich Presence → Art Assets* ein Bild mit dem Namen `logo` hochgeladen sein.
 
 **Dorf erkunden** im Hauptmenü startet eine Offline-Runde zum Umsehen (ohne Spielregeln).
 

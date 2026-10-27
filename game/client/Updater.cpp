@@ -1,10 +1,12 @@
 #include "client/Updater.h"
+#include "i18n/Text.h"
 
 #include "engine/core/Log.h"
 #include "engine/core/Sha256.h"
 #include "engine/core/Utf8.h"
 #include "engine/net/Http.h"
 
+#include <cstring>
 #include <fstream>
 
 #ifdef _WIN32
@@ -28,7 +30,7 @@ void Updater::start(const std::string& manifestUrl, const update::Version& curre
     m_cancel = false;
     m_progress = 0.0f;
     m_state = State::Checking;
-    setStatus("Suche nach Updates …");
+    setStatus(L("Suche nach Updates …", "Looking for updates …"));
     m_thread = std::thread([this] { run(); });
 }
 
@@ -37,9 +39,30 @@ void Updater::cancel() {
     const State s = m_state.load();
     if (s == State::Checking || s == State::Downloading) {
         m_state = State::Cancelled;
-        setStatus("Update übersprungen.");
+        setStatus(L("Update übersprungen.", "Update skipped."));
     }
 }
+
+namespace {
+// Fehlertexte des Downloads (WinHTTP) für die englische Oberfläche
+std::string httpErrorText(const std::string& error) {
+    if (language() != Lang::English) return error;
+    static const std::pair<const char*, const char*> kTexts[] = {
+        {"Nur sichere HTTPS-Adressen sind erlaubt", "Only secure HTTPS addresses are allowed"},
+        {"Datei nicht gefunden (HTTP 404)", "File not found (HTTP 404)"},
+        {"Server antwortet mit HTTP ", "The server answered with HTTP "},
+        {"Datei ist zu groß", "The file is too large"},
+        {"Abgebrochen", "Cancelled"},
+        {"Download unvollständig", "Download incomplete"},
+        {"Ungültige Adresse: ", "Invalid address: "},
+        {"Verbindung", "Connection"},
+        {"Anfrage", "Request"},
+    };
+    for (const auto& [de, en] : kTexts)
+        if (error.rfind(de, 0) == 0) return en + error.substr(std::strlen(de));
+    return error;
+}
+} // namespace
 
 std::string Updater::status() const {
     std::lock_guard lock(m_mutex);
@@ -84,12 +107,12 @@ void Updater::run() {
     std::vector<uint8_t> data;
     std::string error;
     if (!eng::net::httpGet(m_url, data, error, options)) {
-        fail("Update-Prüfung fehlgeschlagen: " + error);
+        fail(Lf("Update-Prüfung fehlgeschlagen: {}", "Update check failed: {}", httpErrorText(error)));
         return;
     }
     update::Manifest manifest;
     if (!update::parseManifest(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()), manifest, error)) {
-        fail(error);
+        fail(Lf("{}", "Invalid update information ({})", error));
         return;
     }
     {
@@ -99,7 +122,7 @@ void Updater::run() {
     if (m_cancel) return;
     if (!(manifest.version > m_current)) {
         eng::log::info("Update: Version {} ist aktuell (Server: {})", m_current.str(), manifest.versionText);
-        setStatus("Du spielst die neueste Version (" + m_current.str() + ").");
+        setStatus(Lf("Du spielst die neueste Version ({}).", "You are playing the latest version ({}).", m_current.str()));
         State expected = State::Checking;
         m_state.compare_exchange_strong(expected, State::UpToDate);
         return;
@@ -116,7 +139,7 @@ void Updater::run() {
     uint64_t total = 0, done = 0;
     for (const update::FileEntry& f : manifest.files) total += f.size;
     for (const update::FileEntry& f : manifest.files) {
-        setStatus("Lade Version " + manifest.versionText + " herunter … (" + f.path + ")");
+        setStatus(Lf("Lade Version {} herunter … ({})", "Downloading version {} … ({})", manifest.versionText, f.path));
         eng::net::HttpOptions fileOptions = options;
         fileOptions.timeoutMs = 30000;
         fileOptions.maxBytes = f.size;
@@ -125,11 +148,12 @@ void Updater::run() {
         };
         std::vector<uint8_t> file;
         if (!eng::net::httpGet(f.url, file, error, fileOptions)) {
-            fail("Download fehlgeschlagen (" + f.path + "): " + error);
+            fail(Lf("Download fehlgeschlagen ({}): {}", "Download failed ({}): {}", f.path, httpErrorText(error)));
             return;
         }
         if (file.size() != f.size || eng::Sha256::hashHex(file.data(), file.size()) != f.sha256) {
-            fail("Die heruntergeladene Datei " + f.path + " ist beschädigt (Prüfsumme stimmt nicht).");
+            fail(Lf("Die heruntergeladene Datei {} ist beschädigt (Prüfsumme stimmt nicht).",
+                    "The downloaded file {} is damaged (checksum does not match).", f.path));
             return;
         }
         const fs::path out = staging / fs::path(f.path);
@@ -137,14 +161,14 @@ void Updater::run() {
         std::ofstream stream(out, std::ios::binary | std::ios::trunc);
         stream.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
         if (!stream) {
-            fail("Datei konnte nicht gespeichert werden: " + f.path);
+            fail(Lf("Datei konnte nicht gespeichert werden: {}", "Could not save the file: {}", f.path));
             return;
         }
         done += f.size;
         m_progress = total > 0 ? static_cast<float>(static_cast<double>(done) / static_cast<double>(total)) : 1.0f;
     }
     if (m_cancel) return;
-    setStatus("Version " + manifest.versionText + " wird installiert …");
+    setStatus(Lf("Version {} wird installiert …", "Installing version {} …", manifest.versionText));
     State downloading = State::Downloading;
     m_state.compare_exchange_strong(downloading, State::ReadyToInstall);
 }
@@ -157,11 +181,11 @@ bool Updater::install(std::string& error) {
         manifest = m_manifest;
     }
     if (!update::installFiles(m_installDir, m_installDir / update::kStagingFolder, manifest.files, error)) {
-        fail("Installation fehlgeschlagen: " + error);
+        fail(Lf("Installation fehlgeschlagen: {}", "Installation failed: {}", error));
         return false;
     }
     eng::log::info("Update: Version {} installiert", manifest.versionText);
-    setStatus("Version " + manifest.versionText + " installiert – Neustart …");
+    setStatus(Lf("Version {} installiert – Neustart …", "Version {} installed – restarting …", manifest.versionText));
     m_state = State::Installed;
     return true;
 }

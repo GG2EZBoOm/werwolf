@@ -17,22 +17,31 @@ constexpr int kShadowSizes[] = {1024, 2048, 4096};
 struct KeyBinding {
     const char* key;
     const char* action;
+    const char* actionEn;
 };
 
 constexpr KeyBinding kBindings[] = {
-    {"W A S D", "Laufen"},           {"Shift", "Rennen"},
-    {"Maus", "Umsehen"},             {"E", "Hauptaktion (Stimme, Vision, …)"},
-    {"F", "Zweitaktion (Gift, Feuer, …)"}, {"Q", "Tür öffnen / schließen"},
-    {"R", "Verwandeln (Werwolf)"},   {"Linksklick", "Reißen, erstechen, Tür einschlagen"},
-    {"Tab", "Geheimer Chat (Rudel, Geister, Geschwister)"}, {"J", "Tagebuch"},
-    {"Enter", "Chat schreiben"},     {"Esc", "Pause"},
-    {"F11", "Vollbild"},             {"F12", "Bildschirmfoto"},
+    {"W A S D", "Laufen", "Walk"},
+    {"Shift", "Rennen", "Run"},
+    {"Maus", "Umsehen", "Look around"},
+    {"E", "Hauptaktion (Stimme, Vision, …)", "Main action (vote, vision, …)"},
+    {"F", "Zweitaktion (Gift, Feuer, …)", "Second action (poison, fire, …)"},
+    {"Q", "Tür öffnen / schließen", "Open / close door"},
+    {"R", "Verwandeln (Werwolf)", "Transform (werewolf)"},
+    {"Linksklick", "Reißen, erstechen, Tür einschlagen", "Maul, stab, break a door"},
+    {"Tab", "Geheimer Chat (Rudel, Geister, Geschwister)", "Secret chat (pack, ghosts, siblings)"},
+    {"J", "Tagebuch", "Journal"},
+    {"Enter", "Chat schreiben", "Write in chat"},
+    {"Esc", "Pause", "Pause"},
+    {"F11", "Vollbild", "Fullscreen"},
+    {"F12", "Bildschirmfoto", "Screenshot"},
 };
 
 } // namespace
 
 void App::applySettings() {
     applyAudioSettings();
+    applyLanguage();
     m_window.setVSync(m_config.vsync);
     if (m_window.isFullscreen() != m_config.fullscreen) m_window.toggleFullscreen();
     m_renderer3d.setQuality(m_config.antialiasing, kShadowSizes[std::clamp(m_config.shadowQuality, 0, 2)]);
@@ -48,18 +57,19 @@ void App::applyGraphics(eng::Environment& env) const {
 
 bool App::drawSettings(const Rect& area) {
     eng::Renderer2D& r = m_renderer;
+    const bool english = language() == Lang::English;
     // Lesebändchen als Reiter, die oben über das Blatt hängen
-    const char* tabs[] = {"Grafik", "Steuerung", "Oberfläche", "Ton"};
+    const char* tabs[] = {L("Grafik", "Graphics"), L("Steuerung", "Controls"), L("Oberfläche", "Interface"), L("Ton", "Sound")};
     const Color ribbons[] = {Color::hex(0x7A1F18), Color::hex(0x2F4A35), Color::hex(0x2E3D5C), Color::hex(0x69502F)};
     m_kit.paper(area, 7070u);
     const float tabWidth = std::min(132.0f, (area.w - 60.0f) / 4.0f);
     for (int i = 0; i < 4; ++i) {
         const Rect tr{area.x + 30.0f + static_cast<float>(i) * tabWidth, area.y - 8.0f, tabWidth - 4.0f, 40.0f};
-        if (m_kit.inkTab(std::string("settings/tab/") + tabs[i], tr, tabs[i], m_settingsTab == i, ribbons[i])) m_settingsTab = i;
+        if (m_kit.inkTab(std::string("settings/tab/") + std::to_string(i), tr, tabs[i], m_settingsTab == i, ribbons[i])) m_settingsTab = i;
     }
     Rect inner = area.shrink(44.0f, 30.0f);
     inner.takeTop(40.0f);
-    r.text(m_fonts.scriptLarge, {inner.x, inner.y}, "Wie soll die Nacht sein?", inkRed);
+    r.text(m_fonts.scriptLarge, {inner.x, inner.y}, L("Wie soll die Nacht sein?", "How should the night be?"), inkRed);
     inner.takeTop(m_fonts.scriptLarge.lineHeight() + 4.0f);
     m_kit.inkLine({inner.x, inner.y}, {inner.right(), inner.y + 1.0f}, 1.0f, inkFaded.withAlpha(0.5f), 1.0f, 41);
     inner.takeTop(12.0f);
@@ -69,6 +79,7 @@ bool App::drawSettings(const Rect& area) {
     const char* hovered = nullptr;
     bool changed = false;
     int rowIndex = 0;
+    const std::vector<std::string> offOn = {L("Aus", "Off"), L("An", "On")};
 
     // Eine Zeile: Beschriftung links, Bedienelement rechts, Beschreibung beim Überfahren
     auto row = [&](const char* text, const char* description) {
@@ -88,7 +99,7 @@ bool App::drawSettings(const Rect& area) {
     };
     auto onOff = [&](const char* id, const char* text, const char* description, bool& value) {
         int index = value ? 1 : 0;
-        if (m_kit.inkChoice(id, row(text, description), {"Aus", "An"}, index)) {
+        if (m_kit.inkChoice(id, row(text, description), offOn, index)) {
             value = index == 1;
             changed = true;
         }
@@ -97,34 +108,42 @@ bool App::drawSettings(const Rect& area) {
     switch (m_settingsTab) {
     case 0: {
         int mode = m_config.fullscreen ? 1 : 0;
-        if (m_kit.inkChoice("settings/fullscreen", row("Anzeige", "Im Fenster oder im Vollbild spielen (F11)."), {"Fenster", "Vollbild"}, mode)) {
+        if (m_kit.inkChoice("settings/fullscreen", row(L("Anzeige", "Display"), L("Im Fenster oder im Vollbild spielen (F11).", "Play in a window or fullscreen (F11).")),
+                            {L("Fenster", "Window"), L("Vollbild", "Fullscreen")}, mode)) {
             m_config.fullscreen = mode == 1;
             changed = true;
         }
-        onOff("settings/vsync", "Bildsynchronisation", "Gleicht die Bildrate an den Monitor an und verhindert Bildrisse.", m_config.vsync);
-        std::vector<std::string> aa = {"Aus"};
+        onOff("settings/vsync", L("Bildsynchronisation", "Vertical sync"),
+              L("Gleicht die Bildrate an den Monitor an und verhindert Bildrisse.", "Matches the frame rate to the monitor and prevents tearing."),
+              m_config.vsync);
+        std::vector<std::string> aa = {L("Aus", "Off")};
         std::vector<int> aaValues = {1};
         for (int s : {2, 4, 8})
             if (s <= m_renderer3d.maxSamples()) {
-                aa.push_back(std::format("{}-fach", s));
+                aa.push_back(Lf("{}-fach", "{}×", s));
                 aaValues.push_back(s);
             }
         int aaIndex = 0;
         for (size_t i = 0; i < aaValues.size(); ++i)
             if (aaValues[i] == m_config.antialiasing) aaIndex = static_cast<int>(i);
-        if (m_kit.inkChoice("settings/aa", row("Kantenglättung", "Glättet Kanten (MSAA). Höhere Stufen kosten Leistung."), aa, aaIndex)) {
+        if (m_kit.inkChoice("settings/aa", row(L("Kantenglättung", "Anti-aliasing"), L("Glättet Kanten (MSAA). Höhere Stufen kosten Leistung.", "Smooths edges (MSAA). Higher levels cost performance.")),
+                            aa, aaIndex)) {
             m_config.antialiasing = aaValues[static_cast<size_t>(aaIndex)];
             changed = true;
         }
         int shadows = m_config.shadowQuality;
-        if (m_kit.inkChoice("settings/shadows", row("Schatten", "Schärfe der Schatten von Sonne und Mond."), {"Grob", "Mittel", "Fein"}, shadows)) {
+        if (m_kit.inkChoice("settings/shadows", row(L("Schatten", "Shadows"), L("Schärfe der Schatten von Sonne und Mond.", "Sharpness of the sun and moon shadows.")),
+                            {L("Grob", "Coarse"), L("Mittel", "Medium"), L("Fein", "Fine")}, shadows)) {
             m_config.shadowQuality = shadows;
             changed = true;
         }
-        onOff("settings/bloom", "Lichtschein", "Laternen, Feuer und Fenster leuchten weich nach.", m_config.bloom);
-        onOff("settings/grain", "Filmkorn", "Feines Korn über dem Bild – wie ein alter Film.", m_config.filmGrain);
+        onOff("settings/bloom", L("Lichtschein", "Bloom"), L("Laternen, Feuer und Fenster leuchten weich nach.", "Lanterns, fires and windows glow softly."),
+              m_config.bloom);
+        onOff("settings/grain", L("Filmkorn", "Film grain"), L("Feines Korn über dem Bild – wie ein alter Film.", "Fine grain over the picture – like an old film."),
+              m_config.filmGrain);
         float fov = m_config.fieldOfView;
-        if (m_kit.inkSlider("settings/fov", row("Sichtfeld", "Wie weit die Kamera seitlich blickt."), fov, 50.0f, 95.0f, std::format("{:.0f}°", fov))) {
+        if (m_kit.inkSlider("settings/fov", row(L("Sichtfeld", "Field of view"), L("Wie weit die Kamera seitlich blickt.", "How wide the camera sees.")), fov,
+                            50.0f, 95.0f, std::format("{:.0f}°", fov))) {
             m_config.fieldOfView = std::round(fov);
             changed = true;
         }
@@ -132,34 +151,57 @@ bool App::drawSettings(const Rect& area) {
     }
     case 1: {
         float sens = m_config.mouseSensitivity;
-        if (m_kit.inkSlider("settings/sens", row("Mausempfindlichkeit", "Wie schnell sich die Kamera mit der Maus dreht."), sens, 0.2f, 3.0f,
-                            std::format("{:.1f}×", sens))) {
+        if (m_kit.inkSlider("settings/sens", row(L("Mausempfindlichkeit", "Mouse sensitivity"), L("Wie schnell sich die Kamera mit der Maus dreht.", "How fast the camera turns with the mouse.")),
+                            sens, 0.2f, 3.0f, std::format("{:.1f}×", sens))) {
             m_config.mouseSensitivity = std::round(sens * 10.0f) / 10.0f;
             changed = true;
         }
-        onOff("settings/invert", "Maus umkehren", "Maus nach oben schaut nach unten – wie im Flugsimulator.", m_config.invertY);
+        onOff("settings/invert", L("Maus umkehren", "Invert mouse"),
+              L("Maus nach oben schaut nach unten – wie im Flugsimulator.", "Moving the mouse up looks down – like in a flight simulator."), m_config.invertY);
         inner.takeTop(8.0f);
-        r.text(m_fonts.script, {inner.x + 8.0f, inner.y}, "Tastenbelegung", inkRed);
+        r.text(m_fonts.script, {inner.x + 8.0f, inner.y}, L("Tastenbelegung", "Key bindings"), inkRed);
         inner.takeTop(m_fonts.script.lineHeight() + 4.0f);
         const float colW = (inner.w - 24.0f) * 0.5f;
         float y = inner.y;
         for (size_t i = 0; i < std::size(kBindings); ++i) {
             const float x = inner.x + 8.0f + (i % 2 == 0 ? 0.0f : colW + 16.0f);
             const KeyBinding& b = kBindings[i];
-            const float kw = std::max(30.0f, m_fonts.smallBold.measure(b.key) + 14.0f);
-            const Rect key{x, y, kw, 22.0f};
-            m_kit.inkLine({key.x, key.bottom()}, {key.right(), key.bottom()}, 1.2f, inkFaded, 1.0f, static_cast<uint32_t>(i));
-            r.textCentered(m_fonts.smallBold, key, b.key, inkDark);
-            r.text(m_fonts.paperItalic, {x + kw + 10.0f, y + 2.0f}, m_fonts.paperItalic.ellipsize(b.action, colW - kw - 14.0f), inkSoft);
+            const char* key = english && std::string_view(b.key) == "Maus" ? "Mouse" : english && std::string_view(b.key) == "Linksklick" ? "Left click" : b.key;
+            const float kw = std::max(30.0f, m_fonts.smallBold.measure(key) + 14.0f);
+            const Rect keyRect{x, y, kw, 22.0f};
+            m_kit.inkLine({keyRect.x, keyRect.bottom()}, {keyRect.right(), keyRect.bottom()}, 1.2f, inkFaded, 1.0f, static_cast<uint32_t>(i));
+            r.textCentered(m_fonts.smallBold, keyRect, key, inkDark);
+            r.text(m_fonts.paperItalic, {x + kw + 10.0f, y + 2.0f}, m_fonts.paperItalic.ellipsize(english ? b.actionEn : b.action, colW - kw - 14.0f),
+                   inkSoft);
             if (i % 2 == 1) y += 27.0f;
         }
         break;
     }
-    case 2:
-        onOff("settings/subtitles", "Erzähler-Untertitel", "Wichtige Ereignisse erscheinen kurz als Untertitel in der Bildmitte.", m_config.subtitles);
-        onOff("settings/fadechat", "Chat ausblenden", "Der Chat tritt in den Hintergrund, solange niemand etwas sagt.", m_config.fadeChat);
-        onOff("settings/fps", "Bildrate anzeigen", "Zeigt die aktuelle Bildrate oben links.", m_config.showFps);
+    case 2: {
+        // Sprache: wie Windows, Deutsch oder Englisch
+        int lang = m_config.language.empty() ? 0 : m_config.language == "de" ? 1 : 2;
+        if (m_kit.inkChoice("settings/language", row(L("Sprache", "Language"), L("Sprache des Spiels. Mitspieler können eine andere Sprache nutzen.", "The game's language. Other players may use a different one.")),
+                            {L("Wie Windows", "Like Windows"), "Deutsch", "English"}, lang)) {
+            m_config.language = lang == 0 ? "" : lang == 1 ? "de" : "en";
+            changed = true;
+        }
+        onOff("settings/subtitles", L("Erzähler-Untertitel", "Narrator subtitles"),
+              L("Wichtige Ereignisse erscheinen kurz als Untertitel in der Bildmitte.", "Important events briefly appear as subtitles in the middle of the screen."),
+              m_config.subtitles);
+        onOff("settings/fadechat", L("Chat ausblenden", "Fade chat"),
+              L("Der Chat tritt in den Hintergrund, solange niemand etwas sagt.", "The chat fades into the background while nobody is talking."), m_config.fadeChat);
+        onOff("settings/fps", L("Bildrate anzeigen", "Show frame rate"), L("Zeigt die aktuelle Bildrate oben links.", "Shows the current frame rate at the top left."),
+              m_config.showFps);
+        onOff("settings/discord", L("Discord-Status", "Discord status"),
+              L("Zeigt in Discord, dass du Werwolf spielst, und erlaubt Freunden, per Einladung beizutreten.",
+                "Shows in Discord that you are playing Werewolf and lets friends join via an invite."),
+              m_config.discord);
+        onOff("settings/upnp", L("Router-Freigabe (UPnP)", "Router port (UPnP)"),
+              L("Gibt beim Hosten den Port automatisch im Router frei, damit Freunde über das Internet beitreten können.",
+                "Opens the port in your router automatically when hosting, so friends can join over the internet."),
+              m_config.upnp);
         break;
+    }
     case 3: {
         auto volume = [&](const char* id, const char* label, const char* hint, int& setting) {
             float value = static_cast<float>(setting);
@@ -168,18 +210,24 @@ bool App::drawSettings(const Rect& area) {
                 changed = true;
             }
         };
-        volume("settings/master", "Gesamtlautstärke", "Lautstärke aller Spielgeräusche. Null ist stumm.", m_config.masterVolume);
-        volume("settings/effects", "Effekte", "Schritte, Türen, Verwandlungen, Spielereignisse und Menüs.", m_config.effectsVolume);
-        volume("settings/ambience", "Umgebung", "Wind, Vögel, Grillen und das Knistern der Feuer.", m_config.ambienceVolume);
-        volume("settings/music", "Musik", "Ruhige Musik am Tag und Horror-Klänge in der Nacht.", m_config.musicVolume);
-        onOff("settings/muted", "Stummschalten", "Schaltet alle Spielgeräusche aus, ohne die Regler zu verändern.", m_config.muted);
-        onOff("settings/background", "Im Hintergrund stumm", "Blendet den Ton aus, sobald du zu einem anderen Fenster wechselst.", m_config.muteUnfocused);
+        volume("settings/master", L("Gesamtlautstärke", "Master volume"), L("Lautstärke aller Spielgeräusche. Null ist stumm.", "Volume of all game sounds. Zero is silent."),
+               m_config.masterVolume);
+        volume("settings/effects", L("Effekte", "Effects"), L("Schritte, Türen, Verwandlungen, Spielereignisse und Menüs.", "Footsteps, doors, transformations, game events and menus."),
+               m_config.effectsVolume);
+        volume("settings/ambience", L("Umgebung", "Ambience"), L("Wind, Vögel, Grillen und das Knistern der Feuer.", "Wind, birds, crickets and the crackling of fires."),
+               m_config.ambienceVolume);
+        volume("settings/music", L("Musik", "Music"), L("Ruhige Musik am Tag und Horror-Klänge in der Nacht.", "Calm music by day and horror sounds at night."),
+               m_config.musicVolume);
+        onOff("settings/muted", L("Stummschalten", "Mute"), L("Schaltet alle Spielgeräusche aus, ohne die Regler zu verändern.", "Turns off all game sounds without changing the sliders."),
+              m_config.muted);
+        onOff("settings/background", L("Im Hintergrund stumm", "Mute in background"),
+              L("Blendet den Ton aus, sobald du zu einem anderen Fenster wechselst.", "Fades out the sound as soon as you switch to another window."), m_config.muteUnfocused);
         inner.takeTop(14.0f);
-        if (m_kit.inkButton("settings/testsound", inner.takeTop(38.0f), "Glocke probehören", false, m_audioReady)) {
+        if (m_kit.inkButton("settings/testsound", inner.takeTop(38.0f), L("Glocke probehören", "Test the bell"), false, m_audioReady)) {
             applyAudioSettings();
             playSound(Sound::Bell, 0.8f);
         }
-        if (!m_audioReady) r.text(m_fonts.paperItalic, {inner.x, inner.y + 8.0f}, "Kein Audiogerät verfügbar.", inkRed);
+        if (!m_audioReady) r.text(m_fonts.paperItalic, {inner.x, inner.y + 8.0f}, L("Kein Audiogerät verfügbar.", "No audio device available."), inkRed);
         break;
     }
     default: break;
@@ -196,9 +244,9 @@ bool App::drawSettings(const Rect& area) {
 
     bool back = false;
     Rect buttons = footer;
-    if (m_kit.inkButton("settings/back", buttons.takeRight(170.0f), "Fertig", true)) back = true;
+    if (m_kit.inkButton("settings/back", buttons.takeRight(170.0f), L("Fertig", "Done"), true)) back = true;
     buttons.takeRight(20.0f);
-    if (m_kit.inkButton("settings/defaults", {buttons.right() - 200.0f, buttons.y + 4.0f, 200.0f, 38.0f}, "Wie früher")) {
+    if (m_kit.inkButton("settings/defaults", {buttons.right() - 200.0f, buttons.y + 4.0f, 200.0f, 38.0f}, L("Wie früher", "Defaults"))) {
         const Config defaults;
         m_config.fullscreen = defaults.fullscreen;
         m_config.vsync = defaults.vsync;
@@ -212,6 +260,8 @@ bool App::drawSettings(const Rect& area) {
         m_config.fadeChat = defaults.fadeChat;
         m_config.subtitles = defaults.subtitles;
         m_config.showFps = defaults.showFps;
+        m_config.discord = defaults.discord;
+        m_config.upnp = defaults.upnp;
         m_config.masterVolume = defaults.masterVolume;
         m_config.effectsVolume = defaults.effectsVolume;
         m_config.ambienceVolume = defaults.ambienceVolume;

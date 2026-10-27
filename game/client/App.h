@@ -4,6 +4,8 @@
 #include "client/Characters.h"
 #include "client/Config.h"
 #include "client/Controller.h"
+#include "client/Discord.h"
+#include "client/HostNetwork.h"
 #include "client/NetClient.h"
 #include "client/Style.h"
 #include "client/Updater.h"
@@ -43,7 +45,7 @@ private:
     };
 
     struct Bubble {
-        std::string text;
+        Text text;
         double time = 0.0;
         ChatChannel channel = ChatChannel::Global;
     };
@@ -91,6 +93,8 @@ private:
         bool forceUpdate = false; // auch im Entwickler-Build aktualisieren
         std::string updateUrl;    // andere update.json verwenden
         std::string updatedTo;    // nach einem Update neu gestartet
+        bool fromDiscord = false; // von Discord für eine Einladung gestartet
+        std::string language;     // --lang de|en (nur für diesen Start)
     };
 
     bool init();
@@ -168,8 +172,17 @@ private:
     // Aktionen
     void hostGame();
     void joinGame();
+    void connectTo(const std::vector<std::string>& hosts, uint16_t port, const std::string& name);
+    void joinFromSecret(const std::string& secret);
     void reconnect();
     void leaveSession();
+    void applyLanguage();
+    // Discord: Status, Einladungen, Beitrittsanfragen
+    void updateDiscord(double now);
+    std::vector<std::string> inviteHosts() const;
+    void drawJoinRequests(const eng::Rect& area);
+    // Adressen für Mitspieler (Lobby des Hosts)
+    float drawAddresses(eng::Rect area);
 
     eng::Window m_window;
     eng::audio::Mixer m_audio;
@@ -210,10 +223,19 @@ private:
     float m_fontScale = 0.0f;
 
     Config m_config;
+    bool m_languageApplied = false;
     NetClient m_net;
     ServerThread m_server;
     bool m_hosting = false;
-    std::vector<std::string> m_localIps;
+    HostNetwork m_hostNet;
+    Discord m_discord;
+    std::string m_partyId;        // Discord-Gruppe dieser Sitzung
+    std::string m_discordSecret;  // Einladung, über die wir beigetreten sind
+    std::string m_pendingDiscordSecret;
+    std::vector<Discord::JoinRequest> m_joinRequests;
+    int64_t m_sessionStart = 0;
+    std::string m_copiedText;     // zuletzt kopierte Adresse (kurze Bestätigung)
+    double m_copiedAt = -100.0;
 
     Screen m_screen = Screen::Menu;
     Updater m_updater;
@@ -246,7 +268,7 @@ private:
     bool m_journalOpen = false;
     double m_revealStart = -100.0;
     bool m_revealDone = true;
-    std::string m_subtitle;
+    Text m_subtitle;
     double m_subtitleTime = -100.0;
 
     double m_time = 0.0;

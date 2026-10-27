@@ -87,14 +87,15 @@ public:
     };
 
     bool start(const std::vector<Seat>& seats, const Settings& settings, const World& world, uint64_t seed,
-               std::string& error);
+               Text& error);
     // Für Tests: feste Rollen (Reihenfolge wie die Plätze)
     bool startWithRoles(const std::vector<Seat>& seats, const std::vector<Role>& roles, const Settings& settings,
-                        const World& world, uint64_t seed, std::string& error);
+                        const World& world, uint64_t seed, Text& error);
     void update(float dt);
 
     void movePlayer(uint8_t id, float x, float z, float yaw, uint8_t flags);
-    std::string interact(uint8_t id, Interaction kind, uint8_t target);
+    // Liefert den Grund, falls die Aktion nicht möglich war (sonst leer)
+    Text interact(uint8_t id, Interaction kind, uint8_t target);
     void playerLeft(uint8_t id);
     void setConnected(uint8_t id, bool connected);
     void skipPhase() { m_timer = 0.0f; }
@@ -120,13 +121,13 @@ public:
     uint32_t dousedHouses() const { return m_doused; }
     bool hasLineOfSight(Vec3 a, Vec3 b) const;
     // Name für Meldungen: "das Haus von Anna", "die Kapelle" (im Dativ: "dem Haus von Anna")
-    std::string houseLabel(int house, bool dative = false) const;
+    Text houseLabel(int house, bool dative = false) const;
     // Dorfhälfte für den Sektierer: 0 = Osten, 1 = Westen
     int sectOf(const Player& p) const;
 
     uint32_t abilitiesFor(uint8_t id) const;
     // Prüft eine Interaktion ohne sie auszuführen; liefert den Grund, falls nicht möglich.
-    std::string checkInteraction(uint8_t id, Interaction kind, uint8_t target) const;
+    Text checkInteraction(uint8_t id, Interaction kind, uint8_t target) const;
     std::vector<EntityState> entitiesFor(uint8_t viewer) const;
     GameView viewFor(uint8_t viewer) const;
 
@@ -151,21 +152,21 @@ private:
     Player* findMutable(uint8_t id);
     void markDirty() { m_dirty = true; }
     void setTimer(float seconds);
-    void notify(Notice::Audience audience, uint8_t player, NoticeKind kind, std::string text);
-    void notifyArea(Vec2 at, float radius, NoticeKind kind, std::string text);
-    void narrate(std::string text) { notify(Notice::Audience::All, kNoPlayer, NoticeKind::Narration, std::move(text)); }
-    void tell(uint8_t player, std::string text) { notify(Notice::Audience::Player, player, NoticeKind::Private, std::move(text)); }
-    void tellWolves(std::string text) { notify(Notice::Audience::Wolves, kNoPlayer, NoticeKind::Private, std::move(text)); }
+    void notify(Notice::Audience audience, uint8_t player, NoticeKind kind, Text text);
+    void notifyArea(Vec2 at, float radius, NoticeKind kind, Text text);
+    void narrate(Text text) { notify(Notice::Audience::All, kNoPlayer, NoticeKind::Narration, std::move(text)); }
+    void tell(uint8_t player, Text text) { notify(Notice::Audience::Player, player, NoticeKind::Private, std::move(text)); }
+    void tellWolves(Text text) { notify(Notice::Audience::Wolves, kNoPlayer, NoticeKind::Private, std::move(text)); }
     std::string nameOf(uint8_t id) const;
     bool mixedCouple() const;
     bool sameFamily(const Player& a, const Player& b) const;
     void notifyProtectors(uint8_t victim);
-    std::string checkDoor(const Player& p, uint8_t house, float range) const;
+    Text checkDoor(const Player& p, uint8_t house, float range) const;
     bool doorwayOccupied(int house) const;
-    void setCaptain(uint8_t id, std::string text);
+    void setCaptain(uint8_t id, Text text);
 
     void enterDay();
-    void enterAssembly(const std::string& reason, float seconds);
+    void enterAssembly(const Text& reason, float seconds);
     void enterVote();
     void resolveVote();
     void resolveElection(const std::vector<std::pair<uint8_t, int>>& ranking);
@@ -178,7 +179,7 @@ private:
     void updateBear(float dt);
     // Angriff eines Werwolfs (Attack) oder Infektion durch den Urwolf
     void wolfStrike(Player& wolf, Player& victim, bool infect);
-    void becomeWolf(Player& p, const std::string& reason);
+    void becomeWolf(Player& p, const Text& reason);
     void kill(uint8_t id, DeathCause cause, bool announceNow, uint8_t killer = kNoPlayer);
     void announce(uint8_t id, DeathCause cause);
     void makeLovers(uint8_t a, uint8_t b);

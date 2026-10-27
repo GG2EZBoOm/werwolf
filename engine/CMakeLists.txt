@@ -22,10 +22,11 @@ endif()
 # --- Netzwerk: TCP mit Nachrichten-Framing (Winsock / BSD-Sockets) -------------
 add_library(engine_net STATIC
     src/net/Net.cpp
+    src/net/Upnp.cpp
 )
 target_link_libraries(engine_net PUBLIC engine_core)
 if(WIN32)
-    target_link_libraries(engine_net PUBLIC ws2_32)
+    target_link_libraries(engine_net PUBLIC ws2_32 iphlpapi)
 endif()
 
 # --- HTTPS-Downloads (für den Updater) über das Windows-eigene WinHTTP -----------

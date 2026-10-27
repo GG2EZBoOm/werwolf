@@ -32,12 +32,115 @@ std::string roleSummary(const std::vector<Role>& roles) {
         if (it == counts.end()) continue;
         if (!out.empty()) out += ", ";
         if (it->second > 1) out += std::to_string(it->second) + "× ";
-        out += r == Role::Werewolf && it->second > 1 ? "Werwölfe" : r == Role::Villager && it->second > 1 ? "Dorfbewohner" : roleName(r);
+        out += r == Role::Werewolf && it->second > 1   ? L("Werwölfe", "Werewolves")
+               : r == Role::Villager && it->second > 1 ? L("Dorfbewohner", "Villagers")
+                                                       : roleName(r);
     }
     return out;
 }
 
 } // namespace
+
+float App::drawAddresses(Rect area) {
+    using namespace palette;
+    eng::Renderer2D& r = m_renderer;
+    const HostNetwork::Status s = m_hostNet.status();
+    const uint16_t port = m_net.port();
+    eng::Font& f = m_fonts.paperItalic;
+    const float lh = f.lineHeight() + 2.0f;
+    float y = area.y;
+
+    r.text(m_fonts.script, {area.x, y}, L("So findet man her", "How to get here"), inkFaded);
+    y += m_fonts.script.lineHeight();
+
+    // Eine Zeile pro Adresse; ein Klick kopiert sie für Mitspieler
+    auto line = [&](const char* label, const std::string& address, Color color) {
+        const std::string endpoint = eng::net::formatEndpoint(address, port);
+        const Rect row{area.x, y, area.w, lh};
+        const bool hover = m_ui.hovered(row);
+        if (m_ui.clickArea(std::string("lobby/copy/") + endpoint, row)) {
+            m_window.setClipboardText(endpoint);
+            m_copiedText = endpoint;
+            m_copiedAt = m_time;
+            playSound(Sound::Click, 0.5f);
+        }
+        if (hover) m_ui.setCursor(eng::Cursor::Hand);
+        const float labelW = 74.0f;
+        r.text(f, {row.x, row.y}, label, inkFaded);
+        r.text(m_fonts.paper, {row.x + labelW, row.y}, m_fonts.paper.ellipsize(endpoint, row.w - labelW), hover ? inkRed : color);
+        y += lh;
+    };
+    if (!s.lan.empty()) line(L("Heimnetz", "Home"), s.lan.front(), inkDark);
+    if (!s.publicIPv4.empty() && !s.cgnat()) line("IPv4", s.publicIPv4, inkDark);
+    if (!s.ipv6.empty()) line("IPv6", s.ipv6.front(), inkDark);
+    if (!s.vpn.empty()) line("VPN", s.vpn.front(), inkSoft);
+
+    // Zustand der Freigabe im Router
+    std::string state;
+    Color stateInk = inkSoft;
+    if (s.router == HostNetwork::Router::Searching) {
+        state = L("Suche den Router für die Portfreigabe …", "Looking for the router to open the port …");
+    } else if (s.cgnat()) {
+        state = s.ipv6.empty() ? L("Dein Anschluss hat keine eigene IPv4-Adresse (DS-Lite). Über das Internet geht es nur per VPN.",
+                                   "Your connection has no public IPv4 address (DS-Lite). Over the internet only a VPN will work.")
+                               : L("Kein eigenes IPv4 (DS-Lite) – Freunde verbinden sich über IPv6.",
+                                   "No public IPv4 (DS-Lite) – friends connect via IPv6.");
+        stateInk = inkRed;
+    } else if (s.router == HostNetwork::Router::Opened) {
+        state = s.ipv6Opened ? L("Router-Freigabe für IPv4 und IPv6 aktiv.", "Router port opened for IPv4 and IPv6.")
+                             : L("Router-Freigabe aktiv.", "Router port opened.");
+    } else if (s.router == HostNetwork::Router::Disabled) {
+        state = Lf("Für Freunde im Internet: TCP-Port {} im Router freigeben.", "For friends on the internet: forward TCP port {} in your router.", port);
+    } else {
+        state = Lf("Der Router hat keine automatische Freigabe erlaubt. Gib TCP-Port {} von Hand frei (IPv6: in der Router-Firewall erlauben).",
+                   "The router did not allow an automatic opening. Forward TCP port {} by hand (IPv6: allow it in the router firewall).", port);
+        stateInk = inkRed;
+    }
+    if (m_time - m_copiedAt < 2.5) {
+        state = Lf("Kopiert: {}", "Copied: {}", m_copiedText);
+        stateInk = inkRed;
+    }
+    for (const std::string& l : m_fonts.handSmall.wrap(state, area.w)) {
+        r.text(m_fonts.handSmall, {area.x, y}, l, stateInk);
+        y += m_fonts.handSmall.lineHeight();
+    }
+    if (m_discord.connected()) {
+        for (const std::string& l : m_fonts.handSmall.wrap(L("Discord: Freunde mit ＋ im Chat einladen.", "Discord: invite friends with ＋ in a chat."), area.w)) {
+            r.text(m_fonts.handSmall, {area.x, y}, l, inkSoft);
+            y += m_fonts.handSmall.lineHeight();
+        }
+    }
+    return y - area.y;
+}
+
+void App::drawJoinRequests(const Rect& area) {
+    using namespace palette;
+    eng::Renderer2D& r = m_renderer;
+    float y = area.y;
+    for (size_t i = 0; i < m_joinRequests.size() && i < 3;) {
+        const Discord::JoinRequest req = m_joinRequests[i];
+        const Rect slip{area.x, y, area.w, 74.0f};
+        m_kit.beginTilt(slip, i % 2 ? 0.012f : -0.01f);
+        m_kit.paper(slip, 9500u + static_cast<uint32_t>(i));
+        m_kit.nail({slip.center().x, slip.y + 10.0f});
+        r.text(m_fonts.hand, {slip.x + 14.0f, slip.y + 12.0f},
+               m_fonts.hand.ellipsize(Lf("{} möchte über Discord beitreten", "{} wants to join via Discord", req.username), slip.w - 28.0f), inkDark);
+        const float bw = (slip.w - 42.0f) * 0.5f;
+        bool handled = false;
+        if (m_kit.inkButton("lobby/discord/yes/" + req.userId, {slip.x + 14.0f, slip.y + 38.0f, bw, 28.0f}, L("Einlassen", "Let in"), true)) {
+            m_discord.respond(req.userId, true);
+            handled = true;
+        }
+        if (m_kit.inkButton("lobby/discord/no/" + req.userId, {slip.x + 28.0f + bw, slip.y + 38.0f, bw, 28.0f}, L("Ablehnen", "Decline"))) {
+            m_discord.respond(req.userId, false);
+            handled = true;
+        }
+        m_kit.endTilt();
+        if (handled) m_joinRequests.erase(m_joinRequests.begin() + static_cast<std::ptrdiff_t>(i));
+        else ++i;
+        y += 82.0f;
+    }
+}
 
 void App::drawLobby() {
     const GameView& v = m_net.view();
@@ -71,15 +174,10 @@ void App::drawLobby() {
     m_kit.paper(register_, 9100u);
     m_kit.nail({register_.center().x, register_.y + 14.0f});
     Rect list = register_.shrink(28.0f, 30.0f);
-    r.text(m_fonts.scriptLarge, {list.x, list.y}, "Dorfregister", inkRed);
+    r.text(m_fonts.scriptLarge, {list.x, list.y}, L("Dorfregister", "Village register"), inkRed);
     list.takeTop(m_fonts.scriptLarge.lineHeight());
-    std::string sub;
-    if (m_hosting) {
-        const std::string ip = m_localIps.empty() ? std::string("diesem PC") : m_localIps.front();
-        sub = std::format("Anreise über {} · Tor {}", ip, m_net.port());
-    } else {
-        sub = std::format("Zu Gast in {}:{}", m_net.host(), m_net.port());
-    }
+    const std::string sub = m_hosting ? Lf("Dein Dorf · Tor {}", "Your village · gate {}", m_net.port())
+                                      : Lf("Zu Gast in {}", "Visiting {}", m_net.address());
     r.text(m_fonts.paperItalic, {list.x, list.y}, m_fonts.paperItalic.ellipsize(sub, list.w), inkSoft);
     list.takeTop(24.0f);
     m_kit.inkLine({list.x, list.y}, {list.right(), list.y}, 1.0f, inkFaded.withAlpha(0.6f), 1.0f, 3);
@@ -87,9 +185,19 @@ void App::drawLobby() {
 
     const Rect botRow = host ? list.takeBottom(42.0f) : Rect{};
     if (host) list.takeBottom(6.0f);
+    // Wie Freunde ins Dorf finden (nur für den Host, der den Server betreibt)
+    if (m_hosting) {
+        const float wanted = std::min(list.h * 0.45f, 190.0f);
+        Rect addr = list.takeBottom(wanted);
+        list.takeBottom(6.0f);
+        m_kit.inkLine({addr.x, addr.y - 3.0f}, {addr.right(), addr.y - 3.0f}, 1.0f, inkFaded.withAlpha(0.5f), 1.0f, 7);
+        drawAddresses(addr.shrink(0.0f, 4.0f));
+    }
     if (static_cast<int>(v.players.size()) < kMinPlayers) {
         r.text(m_fonts.paperItalic, {list.x, list.bottom() - 18.0f},
-               std::format("Mindestens {} Bewohner nötig{}", kMinPlayers, host ? " – lade Fremde ein!" : "."), inkRed);
+               host ? Lf("Mindestens {} Bewohner nötig – lade Fremde ein!", "At least {} villagers needed – invite strangers!", kMinPlayers)
+                    : Lf("Mindestens {} Bewohner nötig.", "At least {} villagers needed.", kMinPlayers),
+               inkRed);
         list.takeBottom(24.0f);
     }
     const float rowH = std::min(40.0f, list.h / std::max<float>(1.0f, static_cast<float>(v.players.size())));
@@ -105,7 +213,7 @@ void App::drawLobby() {
         const std::string name = m_fonts.hand.ellipsize(p.name, row.w - 110.0f);
         m_kit.writeText(m_fonts.hand, {row.x + 28.0f, row.center().y - m_fonts.hand.lineHeight() * 0.5f}, name, nameInk, appear);
         if (me) m_kit.swash({row.x + 28.0f, row.center().y + 9.0f}, m_fonts.hand.measure(name), inkRed.withAlpha(0.6f), appear, 5);
-        std::string tag = p.id == v.host ? "Vorsteher" : (p.bot ? "Fremder" : "");
+        std::string tag = p.id == v.host ? L("Vorsteher", "Headman") : (p.bot ? L("Fremder", "Stranger") : "");
         float tagRight = row.right();
         if (host && !me) {
             const Rect kick{tagRight - 24.0f, row.center().y - 12.0f, 24.0f, 24.0f};
@@ -122,7 +230,7 @@ void App::drawLobby() {
     }
     if (host) {
         const bool full = static_cast<int>(v.players.size()) >= kMaxPlayers;
-        if (m_kit.inkButton("lobby/addbot", botRow, "Fremde einladen", false, !full)) m_net.sendAddBot();
+        if (m_kit.inkButton("lobby/addbot", botRow, L("Fremde einladen", "Invite strangers"), false, !full)) m_net.sendAddBot();
     }
     m_kit.endTilt();
 
@@ -135,17 +243,18 @@ void App::drawLobby() {
     Settings edit = v.settings;
     bool changed = false;
     const int playerCount = static_cast<int>(v.players.size());
-    r.text(m_fonts.scriptLarge, {s.x, s.y}, "Gesetze der Nacht", inkRed);
-    if (!host) r.textRight(m_fonts.paperItalic, {s.right(), s.y + 14.0f}, "nur der Vorsteher schreibt hier", inkFaded);
+    r.text(m_fonts.scriptLarge, {s.x, s.y}, L("Gesetze der Nacht", "Laws of the night"), inkRed);
+    if (!host) r.textRight(m_fonts.paperItalic, {s.right(), s.y + 14.0f}, L("nur der Vorsteher schreibt hier", "only the headman writes here"), inkFaded);
     s.takeTop(m_fonts.scriptLarge.lineHeight() + 2.0f);
 
-    const char* hoveredDescription = nullptr;
     std::string hoveredText;
+    bool hoveredSomething = false;
     {
         Rect row = s.takeTop(32.0f);
-        r.text(m_fonts.script, {row.x, row.center().y - m_fonts.script.lineHeight() * 0.5f}, "Werwölfe", inkSoft);
-        std::vector<std::string> options = {std::format("so viele, wie es braucht ({})", autoWolfCount(std::max(playerCount, kMinPlayers)))};
-        for (int i = 1; i <= 6; ++i) options.push_back(std::format("{} {}", i, i == 1 ? "Werwolf" : "Werwölfe"));
+        r.text(m_fonts.script, {row.x, row.center().y - m_fonts.script.lineHeight() * 0.5f}, L("Werwölfe", "Werewolves"), inkSoft);
+        std::vector<std::string> options = {Lf("so viele, wie es braucht ({})", "as many as needed ({})", autoWolfCount(std::max(playerCount, kMinPlayers)))};
+        for (int i = 1; i <= 6; ++i)
+            options.push_back(i == 1 ? std::string(L("1 Werwolf", "1 werewolf")) : Lf("{} Werwölfe", "{} werewolves", i));
         int wolves = edit.wolves;
         const Rect ctrl{row.x + 110.0f, row.y, std::min(320.0f, row.w - 110.0f), row.h};
         if (host ? m_kit.inkChoice("lobby/wolves", ctrl, options, wolves) : (r.text(m_fonts.paper, {ctrl.x + 30.0f, ctrl.y + 6.0f}, options[static_cast<size_t>(wolves)], inkDark), false)) {
@@ -155,17 +264,21 @@ void App::drawLobby() {
         s.takeTop(4.0f);
         Rect checks = s.takeTop(28.0f);
         bool reveal = edit.revealRoles, captain = edit.captain;
-        if (m_kit.inkCheck("lobby/reveal", checks.takeLeft(checks.w * 0.5f), "Rollen der Toten aufdecken", reveal, host)) {
+        if (m_kit.inkCheck("lobby/reveal", checks.takeLeft(checks.w * 0.5f), L("Rollen der Toten aufdecken", "Reveal the roles of the dead"), reveal, host)) {
             edit.revealRoles = reveal;
             changed = true;
         }
-        if (m_kit.inkCheck("lobby/captain", checks, "Hauptmannwahl", captain, host)) {
+        if (m_kit.inkCheck("lobby/captain", checks, L("Hauptmannwahl", "Captain election"), captain, host)) {
             edit.captain = captain;
             changed = true;
         }
-        if (m_ui.hovered(checks))
-            hoveredDescription = "Hauptmannwahl: Am ersten Abend wählt das Dorf einen Hauptmann. Seine Stimme zählt doppelt, und stirbt er, "
-                                 "bestimmt er seinen Nachfolger.";
+        if (m_ui.hovered(checks)) {
+            hoveredText = L("Hauptmannwahl: Am ersten Abend wählt das Dorf einen Hauptmann. Seine Stimme zählt doppelt, und stirbt er, "
+                            "bestimmt er seinen Nachfolger.",
+                            "Captain election: on the first evening the village elects a captain. Their vote counts double, and if "
+                            "they die, they name their successor.");
+            hoveredSomething = true;
+        }
         s.takeTop(8.0f);
     }
 
@@ -203,13 +316,13 @@ void App::drawLobby() {
                    hover ? inkRed : c);
             if (hover) {
                 hoveredText = std::string(roleIcon(role)) + "  " + roleName(role) + ": " + roleDescription(role);
-                hoveredDescription = hoveredText.c_str();
+                hoveredSomething = true;
             }
         }
         s.takeTop(chipH + 8.0f);
     };
-    roleGrid("Das Dorf", [](Role role) { return roleFaction(role) == Faction::Village; });
-    roleGrid("Wölfe und Einzelgänger", [](Role role) { return roleFaction(role) != Faction::Village; });
+    roleGrid(L("Das Dorf", "The village"), [](Role role) { return roleFaction(role) == Faction::Village; });
+    roleGrid(L("Wölfe und Einzelgänger", "Wolves and loners"), [](Role role) { return roleFaction(role) != Faction::Village; });
 
     // Ablauf der Tage
     struct TimeStep {
@@ -218,10 +331,10 @@ void App::drawLobby() {
         uint16_t* value;
         std::vector<int> presets;
     };
-    const TimeStep steps[] = {{"Tag", "lobby/day", &edit.daySeconds, {60, 90, 120, 150, 180, 240, 300, 420, 600, 900}},
-                              {"Versammlung", "lobby/discussion", &edit.discussionSeconds, {30, 45, 60, 90, 120, 180, 300, 600}},
-                              {"Abstimmung", "lobby/vote", &edit.voteSeconds, {15, 20, 30, 40, 60, 90, 120, 180}},
-                              {"Nacht", "lobby/night", &edit.nightSeconds, {45, 60, 80, 100, 120, 150, 180, 240, 300, 600}}};
+    const TimeStep steps[] = {{L("Tag", "Day"), "lobby/day", &edit.daySeconds, {60, 90, 120, 150, 180, 240, 300, 420, 600, 900}},
+                              {L("Versammlung", "Gathering"), "lobby/discussion", &edit.discussionSeconds, {30, 45, 60, 90, 120, 180, 300, 600}},
+                              {L("Abstimmung", "Vote"), "lobby/vote", &edit.voteSeconds, {15, 20, 30, 40, 60, 90, 120, 180}},
+                              {L("Nacht", "Night"), "lobby/night", &edit.nightSeconds, {45, 60, 80, 100, 120, 150, 180, 240, 300, 600}}};
     const float timeW = (s.w - 30.0f) / 4.0f;
     for (size_t i = 0; i < 4; ++i) {
         const TimeStep& st = steps[i];
@@ -249,27 +362,29 @@ void App::drawLobby() {
     if (changed && host) m_net.sendSettings(edit);
 
     // Wer wird gebraucht? Oder was die Maus gerade beschreibt
-    std::string error;
+    Text error;
     const std::vector<Role> roles = buildRoleList(v.settings, playerCount, &error);
-    const std::string summaryText = hoveredDescription ? std::string(hoveredDescription)
-                                    : roles.empty()   ? error
-                                                      : std::format("Bei {} Bewohnern: {}.", playerCount, roleSummary(roles));
+    const std::string summaryText = hoveredSomething ? hoveredText
+                                    : roles.empty()  ? error.str()
+                                                     : Lf("Bei {} Bewohnern: {}.", "With {} villagers: {}.", playerCount, roleSummary(roles));
     float sy = s.y;
     for (const std::string& line : m_fonts.paperItalic.wrap(summaryText, s.w)) {
         if (sy > s.bottom() - 4.0f) break;
-        r.text(m_fonts.paperItalic, {s.x, sy}, line, roles.empty() && !hoveredDescription ? inkRed : inkSoft);
+        r.text(m_fonts.paperItalic, {s.x, sy}, line, roles.empty() && !hoveredSomething ? inkRed : inkSoft);
         sy += m_fonts.paperItalic.lineHeight();
     }
     m_kit.endTilt();
 
     // --- Schiefertafel mit dem Gespräch des Dorfes -----------------------------------------------
     drawChat(chat, false);
+    // Discord-Anfragen liegen obenauf
+    if (!m_joinRequests.empty()) drawJoinRequests({chat.x + 16.0f, chat.y + 16.0f, chat.w - 32.0f, chat.h * 0.5f});
 
     // --- Unten: gehen oder die Nacht beginnen lassen (auf eigenen Zetteln) ----------------------
     const Rect leaveSlip{footer.x, footer.y + 4.0f, 210.0f, 50.0f};
     m_kit.beginTilt(leaveSlip, 0.02f);
     m_kit.paper(leaveSlip, 9300u);
-    if (m_kit.inkButton("lobby/leave", leaveSlip.shrink(14.0f, 7.0f), m_hosting ? "Dorf auflösen" : "Gehen")) leaveSession();
+    if (m_kit.inkButton("lobby/leave", leaveSlip.shrink(14.0f, 7.0f), m_hosting ? L("Dorf auflösen", "Disband village") : L("Gehen", "Leave"))) leaveSession();
     m_kit.endTilt();
     const Rect start{chat.x, footer.y + 2.0f, chat.w, 56.0f};
     if (host) {
@@ -281,11 +396,12 @@ void App::drawLobby() {
         const float pulse = roles.empty() ? 0.0f : 0.5f + 0.5f * std::sin(static_cast<float>(m_time) * 2.2f);
         if (!roles.empty()) m_kit.candleLight({start.x + 30.0f, start.center().y}, 120.0f, 0.6f + 0.4f * pulse, 5.0f);
         // Das große Siegel: die Nacht beginnt
-        if (m_kit.inkButton("lobby/start", {start.x + 12.0f, start.y + 6.0f, start.w - 24.0f, 44.0f}, "Die Nacht beginnen lassen", true, !roles.empty()))
+        if (m_kit.inkButton("lobby/start", {start.x + 12.0f, start.y + 6.0f, start.w - 24.0f, 44.0f}, L("Die Nacht beginnen lassen", "Let the night begin"), true,
+                            !roles.empty()))
             m_net.sendStartGame();
     } else {
         const float pulse = 0.6f + 0.4f * std::sin(static_cast<float>(m_time) * 2.0f);
-        r.text(m_fonts.hand, {start.x + 10.0f, start.y + 14.0f}, "Warte auf den Dorfvorsteher …", chalk.withAlpha(pulse));
+        r.text(m_fonts.hand, {start.x + 10.0f, start.y + 14.0f}, L("Warte auf den Dorfvorsteher …", "Waiting for the headman …"), chalk.withAlpha(pulse));
     }
 }
 

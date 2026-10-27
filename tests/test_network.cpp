@@ -215,6 +215,68 @@ TEST(VersionWirdGeprueft) {
     server.stop();
 }
 
+TEST(AdressenMitPortUndIPv6) {
+    std::string host;
+    uint16_t port = 1;
+    CHECK(eng::net::parseEndpoint("192.168.178.20", host, port) && host == "192.168.178.20" && port == 1);
+    CHECK(eng::net::parseEndpoint(" 84.12.3.4:27778 ", host, port) && host == "84.12.3.4" && port == 27778);
+    CHECK(eng::net::parseEndpoint("[2001:db8::1]:27779", host, port) && host == "2001:db8::1" && port == 27779);
+    port = 5;
+    CHECK(eng::net::parseEndpoint("2001:db8::7", host, port) && host == "2001:db8::7" && port == 5);
+    CHECK(eng::net::parseEndpoint("dorf.example.org:3000", host, port) && host == "dorf.example.org" && port == 3000);
+    CHECK(!eng::net::parseEndpoint("dorf.example.org:99999", host, port));
+    CHECK(!eng::net::parseEndpoint("  ", host, port));
+    CHECK(eng::net::formatEndpoint("2001:db8::1", 27777) == "[2001:db8::1]:27777");
+    CHECK(eng::net::formatEndpoint("10.0.0.2", 27777) == "10.0.0.2:27777");
+    CHECK(eng::net::isPrivateIPv4("192.168.0.4") && eng::net::isPrivateIPv4("100.72.1.1") && !eng::net::isPrivateIPv4("84.12.3.4"));
+}
+
+TEST(ServerLauschtAufIPv6UndIPv4) {
+    ServerThread server;
+    ServerOptions options;
+    options.port = kTestPort + 2;
+    options.logChat = false;
+    std::string error;
+    CHECK(server.start(options, error));
+    // Über IPv4 und – falls der Rechner IPv6 kann – über IPv6-Loopback beitreten
+    for (const char* address : {"127.0.0.1", "::1"}) {
+        NetClient client;
+        if (!client.connect(address, options.port, "Netz")) {
+            CHECK(std::string(address) == "::1"); // IPv6 nicht verfügbar: nur dann darf es scheitern
+            continue;
+        }
+        const bool joined = pump(client, [&] { return client.status() == NetClient::Status::Connected && client.hasView(); }, 5.0);
+        if (std::string(address) == "127.0.0.1") CHECK(joined);
+        if (joined) std::printf("    verbunden über %s\n", client.address().c_str());
+        client.disconnect();
+    }
+    // Mehrere Adressen: die erste ist nicht erreichbar (TEST-NET-1), die zweite funktioniert
+    NetClient fallback;
+    CHECK(fallback.connect(std::vector<std::string>{"192.0.2.1", "127.0.0.1"}, options.port, "Ausweich"));
+    CHECK(pump(fallback, [&] { return fallback.status() == NetClient::Status::Connected && fallback.hasView(); }, 10.0));
+    fallback.disconnect();
+    server.stop();
+}
+
+TEST(TexteInBeidenSprachen) {
+    const Text t = tx("{} ist {}.", "{} is {}.", std::string("Anna"), roleText(Role::Seer));
+    CHECK(t.de == "Anna ist Seherin.");
+    CHECK(t.en == "Anna is Seer.");
+    CHECK(joinNames({"A", "B", "C"}).en == "A, B and C");
+    eng::ByteWriter w;
+    Text{"gleich", "gleich"}.write(w);
+    t.write(w);
+    eng::ByteReader r(w.data());
+    Text a, b;
+    CHECK(a.read(r) && b.read(r));
+    CHECK(a.en == "gleich" && b == t);
+    setLanguage(Lang::English);
+    CHECK(std::string(roleName(Role::Witch)) == "Witch");
+    CHECK(std::string(L("Hallo", "Hello")) == "Hello");
+    setLanguage(Lang::German);
+    CHECK(Lf("{} Spieler", "{} players", 3) == "3 Spieler");
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

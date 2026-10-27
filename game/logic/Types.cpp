@@ -5,160 +5,228 @@
 
 namespace ww {
 
-const char* roleName(Role role) {
+namespace {
+// Wählt den deutschen oder englischen Text
+struct Pick {
+    Lang lang;
+    const char* operator()(const char* de, const char* en) const { return lang == Lang::English ? en : de; }
+};
+} // namespace
+
+const char* roleName(Role role, Lang lang) {
+    const Pick t{lang};
     switch (role) {
-    case Role::Villager: return "Dorfbewohner";
-    case Role::Werewolf: return "Werwolf";
-    case Role::Seer: return "Seherin";
-    case Role::Witch: return "Hexe";
-    case Role::Hunter: return "Jäger";
-    case Role::Cupid: return "Amor";
-    case Role::Protector: return "Beschützer";
-    case Role::Elder: return "Dorfältester";
-    case Role::LittleGirl: return "Kleines Mädchen";
-    case Role::Medium: return "Medium";
-    case Role::Tracker: return "Fährtenleser";
-    case Role::Blacksmith: return "Schmied";
-    case Role::Priest: return "Pfarrer";
-    case Role::Mayor: return "Bürgermeister";
-    case Role::Idiot: return "Dorfdepp";
-    case Role::Cursed: return "Verfluchter";
-    case Role::AlphaWolf: return "Urwolf";
-    case Role::WolfCub: return "Wolfsjunges";
-    case Role::Jester: return "Narr";
-    case Role::SerialKiller: return "Serienmörder";
-    case Role::Arsonist: return "Brandstifter";
-    case Role::Thief: return "Dieb";
-    case Role::Scapegoat: return "Sündenbock";
-    case Role::Fox: return "Fuchs";
-    case Role::BearTamer: return "Bärenführer";
-    case Role::Knight: return "Ritter";
-    case Role::Servant: return "Ergebene Magd";
-    case Role::Judge: return "Stotternder Richter";
-    case Role::Actor: return "Schauspieler";
-    case Role::WildChild: return "Wildes Kind";
-    case Role::WolfHound: return "Wolfshund";
-    case Role::Sister: return "Schwester";
-    case Role::Brother: return "Bruder";
-    case Role::HonestVillager: return "Dorfbewohner-Dorfbewohner";
-    case Role::Raven: return "Rabe";
-    case Role::BigBadWolf: return "Großer böser Wolf";
-    case Role::WhiteWolf: return "Weißer Werwolf";
-    case Role::Piper: return "Flötenspieler";
-    case Role::Angel: return "Engel";
-    case Role::Sectarian: return "Sektierer";
-    default: return "Unbekannt";
+    case Role::Villager: return t("Dorfbewohner", "Villager");
+    case Role::Werewolf: return t("Werwolf", "Werewolf");
+    case Role::Seer: return t("Seherin", "Seer");
+    case Role::Witch: return t("Hexe", "Witch");
+    case Role::Hunter: return t("Jäger", "Hunter");
+    case Role::Cupid: return t("Amor", "Cupid");
+    case Role::Protector: return t("Beschützer", "Protector");
+    case Role::Elder: return t("Dorfältester", "Elder");
+    case Role::LittleGirl: return t("Kleines Mädchen", "Little Girl");
+    case Role::Medium: return t("Medium", "Medium");
+    case Role::Tracker: return t("Fährtenleser", "Tracker");
+    case Role::Blacksmith: return t("Schmied", "Blacksmith");
+    case Role::Priest: return t("Pfarrer", "Priest");
+    case Role::Mayor: return t("Bürgermeister", "Mayor");
+    case Role::Idiot: return t("Dorfdepp", "Village Idiot");
+    case Role::Cursed: return t("Verfluchter", "Cursed");
+    case Role::AlphaWolf: return t("Urwolf", "Alpha Wolf");
+    case Role::WolfCub: return t("Wolfsjunges", "Wolf Cub");
+    case Role::Jester: return t("Narr", "Jester");
+    case Role::SerialKiller: return t("Serienmörder", "Serial Killer");
+    case Role::Arsonist: return t("Brandstifter", "Arsonist");
+    case Role::Thief: return t("Dieb", "Thief");
+    case Role::Scapegoat: return t("Sündenbock", "Scapegoat");
+    case Role::Fox: return t("Fuchs", "Fox");
+    case Role::BearTamer: return t("Bärenführer", "Bear Tamer");
+    case Role::Knight: return t("Ritter", "Knight");
+    case Role::Servant: return t("Ergebene Magd", "Devoted Servant");
+    case Role::Judge: return t("Stotternder Richter", "Stuttering Judge");
+    case Role::Actor: return t("Schauspieler", "Actor");
+    case Role::WildChild: return t("Wildes Kind", "Wild Child");
+    case Role::WolfHound: return t("Wolfshund", "Wolf Hound");
+    case Role::Sister: return t("Schwester", "Sister");
+    case Role::Brother: return t("Bruder", "Brother");
+    case Role::HonestVillager: return t("Dorfbewohner-Dorfbewohner", "Villager-Villager");
+    case Role::Raven: return t("Rabe", "Raven");
+    case Role::BigBadWolf: return t("Großer böser Wolf", "Big Bad Wolf");
+    case Role::WhiteWolf: return t("Weißer Werwolf", "White Werewolf");
+    case Role::Piper: return t("Flötenspieler", "Pied Piper");
+    case Role::Angel: return t("Engel", "Angel");
+    case Role::Sectarian: return t("Sektierer", "Sectarian");
+    default: return t("Unbekannt", "Unknown");
     }
 }
 
-const char* roleDescription(Role role) {
+Text roleText(Role role) { return {roleName(role, Lang::German), roleName(role, Lang::English)}; }
+
+const char* roleDescription(Role role, Lang lang) {
+    const Pick t{lang};
     switch (role) {
     case Role::Villager:
-        return "Du hast keine besonderen Fähigkeiten. Beobachte, sammle Hinweise und überführe die Werwölfe in der "
-               "Versammlung.";
+        return t("Du hast keine besonderen Fähigkeiten. Beobachte, sammle Hinweise und überführe die Werwölfe in der "
+                 "Versammlung.",
+                 "You have no special abilities. Watch, gather clues and expose the werewolves at the gathering.");
     case Role::Werewolf:
-        return "Nachts verwandelst du dich (R) und reißt Opfer (Linksklick) – auch verriegelte Türen hältst du nicht "
-               "lange aus. Lass dich nicht beobachten.";
+        return t("Nachts verwandelst du dich (R) und reißt Opfer (Linksklick) – auch verriegelte Türen hältst du nicht "
+                 "lange aus. Lass dich nicht beobachten.",
+                 "At night you transform (R) and maul your victims (left click) – not even bolted doors keep you out "
+                 "for long. Don't let anyone see you.");
     case Role::Seer:
-        return "Einmal pro Nacht siehst du die wahre Rolle eines Spielers in deiner Nähe (anvisieren + E).";
+        return t("Einmal pro Nacht siehst du die wahre Rolle eines Spielers in deiner Nähe (anvisieren + E).",
+                 "Once per night you see the true role of a player near you (aim + E).");
     case Role::Witch:
-        return "Dein Heiltrank holt ein frisches Opfer ins Leben zurück (E an der Leiche), dein Gifttrank tötet sofort "
-               "(F). Jeder Trank wirkt nur einmal.";
+        return t("Dein Heiltrank holt ein frisches Opfer ins Leben zurück (E an der Leiche), dein Gifttrank tötet sofort "
+                 "(F). Jeder Trank wirkt nur einmal.",
+                 "Your healing potion brings a fresh victim back to life (E at the body), your poison kills instantly "
+                 "(F). Each potion works only once.");
     case Role::Hunter:
-        return "Stirbst du, bleiben dir 15 Sekunden für einen letzten Schuss (anvisieren + E).";
+        return t("Stirbst du, bleiben dir 15 Sekunden für einen letzten Schuss (anvisieren + E).",
+                 "When you die, you have 15 seconds for one last shot (aim + E).");
     case Role::Cupid:
-        return "In der ersten Nacht verliebst du zwei Spieler (anvisieren + E). Stirbt einer, stirbt auch der andere.";
+        return t("In der ersten Nacht verliebst du zwei Spieler (anvisieren + E). Stirbt einer, stirbt auch der andere.",
+                 "On the first night you make two players fall in love (aim + E). If one dies, so does the other.");
     case Role::Protector:
-        return "Jede Nacht beschützt du einen Spieler in deiner Nähe vor den Werwölfen (anvisieren + E) – nie "
-               "zweimal hintereinander denselben.";
+        return t("Jede Nacht beschützt du einen Spieler in deiner Nähe vor den Werwölfen (anvisieren + E) – nie "
+                 "zweimal hintereinander denselben.",
+                 "Every night you protect a player near you from the werewolves (aim + E) – never the same one twice "
+                 "in a row.");
     case Role::Elder:
-        return "Du bist zäh: Den ersten Angriff eines Werwolfs überlebst du.";
+        return t("Du bist zäh: Den ersten Angriff eines Werwolfs überlebst du.",
+                 "You are tough: you survive the first werewolf attack.");
     case Role::LittleGirl:
-        return "Nachts lauschst du heimlich: Du liest den Rudel-Chat der Werwölfe mit – nur ihre Namen erfährst du nicht.";
+        return t("Nachts lauschst du heimlich: Du liest den Rudel-Chat der Werwölfe mit – nur ihre Namen erfährst du nicht.",
+                 "At night you eavesdrop: you can read the werewolves' pack chat – only their names stay hidden.");
     case Role::Medium:
-        return "Nachts sprichst du mit den Toten (Tab wechselt in den Geisterchat). Vielleicht wissen sie, wer sie "
-               "ermordet hat.";
+        return t("Nachts sprichst du mit den Toten (Tab wechselt in den Geisterchat). Vielleicht wissen sie, wer sie "
+                 "ermordet hat.",
+                 "At night you talk to the dead (Tab switches to the ghost chat). Maybe they know who murdered them.");
     case Role::Tracker:
-        return "Einmal pro Nacht heftest du dich an die Fersen eines Spielers (anvisieren + E) und siehst bis zum "
-               "Morgen, wohin er geht.";
+        return t("Einmal pro Nacht heftest du dich an die Fersen eines Spielers (anvisieren + E) und siehst bis zum "
+                 "Morgen, wohin er geht.",
+                 "Once per night you follow a player's trail (aim + E) and see where they go until morning.");
     case Role::Blacksmith:
-        return "Einmal am Tag verstärkst oder reparierst du eine Tür (E an der Tür). Verstärkte Türen halten "
-               "Werwölfe doppelt so lange auf.";
+        return t("Einmal am Tag verstärkst oder reparierst du eine Tür (E an der Tür). Verstärkte Türen halten "
+                 "Werwölfe doppelt so lange auf.",
+                 "Once a day you reinforce or repair a door (E at the door). Reinforced doors hold werewolves back "
+                 "twice as long.");
     case Role::Priest:
-        return "Einmal im Spiel benetzt du jemanden mit Weihwasser (anvisieren + E). Ist er ein Werwolf, verbrennt er.";
+        return t("Einmal im Spiel benetzt du jemanden mit Weihwasser (anvisieren + E). Ist er ein Werwolf, verbrennt er.",
+                 "Once per game you sprinkle someone with holy water (aim + E). If they are a werewolf, they burn.");
     case Role::Mayor:
-        return "Alle wissen, wer du bist. Deine Stimme zählt bei der Abstimmung doppelt.";
+        return t("Alle wissen, wer du bist. Deine Stimme zählt bei der Abstimmung doppelt.",
+                 "Everyone knows who you are. Your vote counts double.");
     case Role::Idiot:
-        return "Wirst du hingerichtet, erkennt das Dorf deine Harmlosigkeit und lässt dich laufen – danach darfst du "
-               "aber nicht mehr abstimmen.";
+        return t("Wirst du hingerichtet, erkennt das Dorf deine Harmlosigkeit und lässt dich laufen – danach darfst du "
+                 "aber nicht mehr abstimmen.",
+                 "If you are executed, the village sees how harmless you are and lets you go – but afterwards you may "
+                 "no longer vote.");
     case Role::Cursed:
-        return "Du gehörst zum Dorf – doch wenn dich ein Werwolf angreift, stirbst du nicht, sondern wirst selbst einer.";
+        return t("Du gehörst zum Dorf – doch wenn dich ein Werwolf angreift, stirbst du nicht, sondern wirst selbst einer.",
+                 "You belong to the village – but if a werewolf attacks you, you don't die, you become one yourself.");
     case Role::AlphaWolf:
-        return "Du bist ein Werwolf. Einmal im Spiel kannst du dein Opfer infizieren statt es zu töten (F) – es wird "
-               "zu einem von euch.";
+        return t("Du bist ein Werwolf. Einmal im Spiel kannst du dein Opfer infizieren statt es zu töten (F) – es wird "
+                 "zu einem von euch.",
+                 "You are a werewolf. Once per game you can infect your victim instead of killing them (F) – they "
+                 "become one of you.");
     case Role::WolfCub:
-        return "Du bist ein junger Werwolf. Stirbst du, ist das Rudel in der folgenden Nacht so rasend, dass es zwei "
-               "Opfer reißen darf.";
+        return t("Du bist ein junger Werwolf. Stirbst du, ist das Rudel in der folgenden Nacht so rasend, dass es zwei "
+                 "Opfer reißen darf.",
+                 "You are a young werewolf. If you die, the pack is so enraged the following night that it may take "
+                 "two victims.");
     case Role::Jester:
-        return "Du gehörst zu niemandem. Bring das Dorf dazu, dich hinzurichten – dann hast du gewonnen.";
+        return t("Du gehörst zu niemandem. Bring das Dorf dazu, dich hinzurichten – dann hast du gewonnen.",
+                 "You belong to no one. Get the village to execute you – then you have won.");
     case Role::SerialKiller:
-        return "Du kämpfst allein. Jede Nacht tötest du mit dem Messer (Linksklick), ohne dich zu verwandeln. Werwölfe "
-               "können dir nichts anhaben. Gewinne als Letzter.";
+        return t("Du kämpfst allein. Jede Nacht tötest du mit dem Messer (Linksklick), ohne dich zu verwandeln. Werwölfe "
+                 "können dir nichts anhaben. Gewinne als Letzter.",
+                 "You fight alone. Every night you kill with your knife (left click) without transforming. Werewolves "
+                 "cannot harm you. Be the last one standing.");
     case Role::Arsonist:
-        return "Du kämpfst allein. Nachts tränkst du Häuser mit Öl (E an der Tür) und zündest alle auf einmal an (F) "
-               "– wer drinnen ist, verbrennt. Gewinne als Letzter.";
+        return t("Du kämpfst allein. Nachts tränkst du Häuser mit Öl (E an der Tür) und zündest alle auf einmal an (F) "
+                 "– wer drinnen ist, verbrennt. Gewinne als Letzter.",
+                 "You fight alone. At night you douse houses with oil (E at the door) and set them all ablaze at once "
+                 "(F) – whoever is inside burns. Be the last one standing.");
     case Role::Thief:
-        return "In der ersten Nacht stiehlst du die Rolle eines Spielers in deiner Nähe (anvisieren + E). Er wird zum "
-               "einfachen Dorfbewohner – stiehlst du einen Werwolf, gehörst du zum Rudel.";
+        return t("In der ersten Nacht stiehlst du die Rolle eines Spielers in deiner Nähe (anvisieren + E). Er wird zum "
+                 "einfachen Dorfbewohner – stiehlst du einen Werwolf, gehörst du zum Rudel.",
+                 "On the first night you steal the role of a player near you (aim + E). They become a plain villager "
+                 "– steal from a werewolf and you join the pack.");
     case Role::Scapegoat:
-        return "Endet eine Abstimmung im Gleichstand, wirst du an Stelle der anderen hingerichtet.";
+        return t("Endet eine Abstimmung im Gleichstand, wirst du an Stelle der anderen hingerichtet.",
+                 "If a vote ends in a tie, you are executed in place of the others.");
     case Role::Fox:
-        return "Einmal pro Nacht wittert deine Nase (anvisieren + E), ob die Person oder jemand in ihrer Nähe ein "
-               "Werwolf ist. Findest du keinen, verlierst du deinen Spürsinn.";
+        return t("Einmal pro Nacht wittert deine Nase (anvisieren + E), ob die Person oder jemand in ihrer Nähe ein "
+                 "Werwolf ist. Findest du keinen, verlierst du deinen Spürsinn.",
+                 "Once per night your nose sniffs out (aim + E) whether that person or someone near them is a "
+                 "werewolf. If you find none, you lose your scent.");
     case Role::BearTamer:
-        return "Alle kennen dich und deinen Bär. Er brummt, wenn ein Werwolf neben dir sitzt oder dir zu nahe kommt.";
+        return t("Alle kennen dich und deinen Bär. Er brummt, wenn ein Werwolf neben dir sitzt oder dir zu nahe kommt.",
+                 "Everyone knows you and your bear. It growls when a werewolf sits next to you or comes too close.");
     case Role::Knight:
-        return "Tötet dich ein Werwolf, bleibt deine rostige Klinge in ihm stecken – er stirbt in der folgenden Nacht.";
+        return t("Tötet dich ein Werwolf, bleibt deine rostige Klinge in ihm stecken – er stirbt in der folgenden Nacht.",
+                 "If a werewolf kills you, your rusty blade stays stuck in it – it dies the following night.");
     case Role::Servant:
-        return "Wird jemand hingerichtet, kannst du dich in den Sekunden des Urteils zu erkennen geben und seine Rolle "
-               "übernehmen (E). Seine Rolle bleibt dann für alle ein Geheimnis.";
+        return t("Wird jemand hingerichtet, kannst du dich in den Sekunden des Urteils zu erkennen geben und seine Rolle "
+                 "übernehmen (E). Seine Rolle bleibt dann für alle ein Geheimnis.",
+                 "When someone is executed, you can reveal yourself during the verdict and take over their role (E). "
+                 "Their role then stays a secret to everyone.");
     case Role::Judge:
-        return "Einmal im Spiel kannst du während einer Abstimmung heimlich eine zweite Abstimmung am selben Abend "
-               "verlangen (F).";
+        return t("Einmal im Spiel kannst du während einer Abstimmung heimlich eine zweite Abstimmung am selben Abend "
+                 "verlangen (F).",
+                 "Once per game you can secretly demand a second vote on the same evening during a vote (F).");
     case Role::Actor:
-        return "Jede Nacht spielst du eine andere Sonderrolle (Seherin, Beschützer, Fuchs oder Fährtenleser) – drei "
-               "Nächte lang.";
+        return t("Jede Nacht spielst du eine andere Sonderrolle (Seherin, Beschützer, Fuchs oder Fährtenleser) – drei "
+                 "Nächte lang.",
+                 "Every night you play a different special role (Seer, Protector, Fox or Tracker) – for three nights.");
     case Role::WildChild:
-        return "In der ersten Nacht wählst du ein Vorbild (anvisieren + E). Stirbt es, wirst du zum Werwolf.";
+        return t("In der ersten Nacht wählst du ein Vorbild (anvisieren + E). Stirbt es, wirst du zum Werwolf.",
+                 "On the first night you choose a role model (aim + E). If they die, you become a werewolf.");
     case Role::WolfHound:
-        return "In der ersten Nacht entscheidest du dich: dem Dorf treu bleiben (E) oder zum Werwolf werden (F).";
+        return t("In der ersten Nacht entscheidest du dich: dem Dorf treu bleiben (E) oder zum Werwolf werden (F).",
+                 "On the first night you decide: stay loyal to the village (E) or become a werewolf (F).");
     case Role::Sister:
-        return "Du und deine Schwester kennt euch und könnt euch heimlich absprechen (Tab).";
+        return t("Du und deine Schwester kennt euch und könnt euch heimlich absprechen (Tab).",
+                 "You and your sister know each other and can talk in secret (Tab).");
     case Role::Brother:
-        return "Du und deine zwei Brüder kennt euch und könnt euch heimlich absprechen (Tab).";
+        return t("Du und deine zwei Brüder kennt euch und könnt euch heimlich absprechen (Tab).",
+                 "You and your two brothers know each other and can talk in secret (Tab).");
     case Role::HonestVillager:
-        return "Alle wissen, dass du ein einfacher, ehrlicher Dorfbewohner bist.";
+        return t("Alle wissen, dass du ein einfacher, ehrlicher Dorfbewohner bist.",
+                 "Everyone knows you are a simple, honest villager.");
     case Role::Raven:
-        return "Einmal pro Nacht belastest du jemanden (anvisieren + E): Bei der nächsten Abstimmung hat er zwei "
-               "Stimmen gegen sich.";
+        return t("Einmal pro Nacht belastest du jemanden (anvisieren + E): Bei der nächsten Abstimmung hat er zwei "
+                 "Stimmen gegen sich.",
+                 "Once per night you accuse someone (aim + E): at the next vote they start with two votes against them.");
     case Role::BigBadWolf:
-        return "Du bist ein Werwolf. Solange noch kein Werwolf gestorben ist, darf das Rudel jede Nacht ein "
-               "zusätzliches Opfer reißen.";
+        return t("Du bist ein Werwolf. Solange noch kein Werwolf gestorben ist, darf das Rudel jede Nacht ein "
+                 "zusätzliches Opfer reißen.",
+                 "You are a werewolf. As long as no werewolf has died, the pack may take one extra victim every night.");
     case Role::WhiteWolf:
-        return "Du jagst mit dem Rudel, gewinnst aber nur allein. Jede zweite Nacht darfst du einen Werwolf reißen.";
+        return t("Du jagst mit dem Rudel, gewinnst aber nur allein. Jede zweite Nacht darfst du einen Werwolf reißen.",
+                 "You hunt with the pack but only win alone. Every second night you may kill a werewolf.");
     case Role::Piper:
-        return "Du spielst allein. Jede Nacht verzauberst du bis zu zwei Spieler in deiner Nähe (anvisieren + E). "
-               "Sind alle Lebenden verzaubert, hast du gewonnen.";
+        return t("Du spielst allein. Jede Nacht verzauberst du bis zu zwei Spieler in deiner Nähe (anvisieren + E). "
+                 "Sind alle Lebenden verzaubert, hast du gewonnen.",
+                 "You play alone. Every night you enchant up to two players near you (aim + E). Once all the living "
+                 "are enchanted, you have won.");
     case Role::Angel:
-        return "Du willst ins Paradies: Stirbst du in der ersten Nacht oder bei der ersten Hinrichtung, gewinnst du "
-               "allein.";
+        return t("Du willst ins Paradies: Stirbst du in der ersten Nacht oder bei der ersten Hinrichtung, gewinnst du "
+                 "allein.",
+                 "You long for paradise: if you die on the first night or at the first execution, you win alone.");
     case Role::Sectarian:
-        return "Das Dorf ist in zwei Hälften geteilt (Ost und West). Du gewinnst allein, wenn nur noch Bewohner deiner "
-               "Hälfte leben.";
+        return t("Das Dorf ist in zwei Hälften geteilt (Ost und West). Du gewinnst allein, wenn nur noch Bewohner deiner "
+                 "Hälfte leben.",
+                 "The village is split into two halves (east and west). You win alone once only residents of your "
+                 "half are left alive.");
     default:
         return "";
     }
 }
+
+Text roleDescriptionText(Role role) { return {roleDescription(role, Lang::German), roleDescription(role, Lang::English)}; }
 
 const char* roleIcon(Role role) {
     switch (role) {
@@ -249,44 +317,47 @@ bool isOptionalRole(Role role) {
     return role != Role::Unknown && role != Role::Villager && role != Role::Werewolf && role != Role::Count;
 }
 
-const char* teamName(Team team) {
+const char* teamName(Team team, Lang lang) {
+    const Pick t{lang};
     switch (team) {
-    case Team::Village: return "Dorf";
-    case Team::Wolves: return "Werwölfe";
-    case Team::Lovers: return "Verliebte";
-    case Team::Nobody: return "Niemand";
-    case Team::Jester: return "Narr (allein)";
-    case Team::Killer: return "Serienmörder (allein)";
-    case Team::Arsonist: return "Brandstifter (allein)";
-    case Team::Piper: return "Flötenspieler (allein)";
-    case Team::Angel: return "Engel (allein)";
-    case Team::WhiteWolf: return "Weißer Werwolf (allein)";
-    case Team::Sectarian: return "Sektierer (allein)";
+    case Team::Village: return t("Dorf", "Village");
+    case Team::Wolves: return t("Werwölfe", "Werewolves");
+    case Team::Lovers: return t("Verliebte", "Lovers");
+    case Team::Nobody: return t("Niemand", "Nobody");
+    case Team::Jester: return t("Narr (allein)", "Jester (alone)");
+    case Team::Killer: return t("Serienmörder (allein)", "Serial Killer (alone)");
+    case Team::Arsonist: return t("Brandstifter (allein)", "Arsonist (alone)");
+    case Team::Piper: return t("Flötenspieler (allein)", "Pied Piper (alone)");
+    case Team::Angel: return t("Engel (allein)", "Angel (alone)");
+    case Team::WhiteWolf: return t("Weißer Werwolf (allein)", "White Werewolf (alone)");
+    case Team::Sectarian: return t("Sektierer (allein)", "Sectarian (alone)");
     default: return "";
     }
 }
 
-const char* phaseTitle(Phase phase) {
+const char* phaseTitle(Phase phase, Lang lang) {
+    const Pick t{lang};
     switch (phase) {
-    case Phase::Lobby: return "Lobby";
-    case Phase::Day: return "Tag";
-    case Phase::Assembly: return "Versammlung";
-    case Phase::Vote: return "Abstimmung";
-    case Phase::Execution: return "Urteil";
-    case Phase::Night: return "Nacht";
-    case Phase::Morning: return "Morgengrauen";
-    case Phase::GameOver: return "Spielende";
+    case Phase::Lobby: return t("Lobby", "Lobby");
+    case Phase::Day: return t("Tag", "Day");
+    case Phase::Assembly: return t("Versammlung", "Gathering");
+    case Phase::Vote: return t("Abstimmung", "Vote");
+    case Phase::Execution: return t("Urteil", "Verdict");
+    case Phase::Night: return t("Nacht", "Night");
+    case Phase::Morning: return t("Morgengrauen", "Dawn");
+    case Phase::GameOver: return t("Spielende", "Game over");
     }
     return "";
 }
 
-const char* channelName(ChatChannel channel) {
+const char* channelName(ChatChannel channel, Lang lang) {
+    const Pick t{lang};
     switch (channel) {
-    case ChatChannel::Global: return "Alle";
-    case ChatChannel::Nearby: return "Nähe";
-    case ChatChannel::Wolves: return "Rudel";
-    case ChatChannel::Dead: return "Geister";
-    case ChatChannel::Family: return "Geschwister";
+    case ChatChannel::Global: return t("Alle", "All");
+    case ChatChannel::Nearby: return t("Nähe", "Nearby");
+    case ChatChannel::Wolves: return t("Rudel", "Pack");
+    case ChatChannel::Dead: return t("Geister", "Ghosts");
+    case ChatChannel::Family: return t("Geschwister", "Siblings");
     }
     return "";
 }
@@ -344,19 +415,19 @@ int autoWolfCount(int players) {
     return 4;
 }
 
-std::vector<Role> buildRoleList(const Settings& settings, int players, std::string* error) {
-    auto fail = [&](std::string msg) {
+std::vector<Role> buildRoleList(const Settings& settings, int players, Text* error) {
+    auto fail = [&](Text msg) {
         if (error) *error = std::move(msg);
         return std::vector<Role>{};
     };
     if (players < kMinPlayers)
-        return fail("Es werden mindestens " + std::to_string(kMinPlayers) + " Spieler benötigt.");
-    if (players > kMaxPlayers) return fail("Es dürfen höchstens " + std::to_string(kMaxPlayers) + " Spieler sein.");
+        return fail(tx("Es werden mindestens {} Spieler benötigt.", "At least {} players are needed.", kMinPlayers));
+    if (players > kMaxPlayers) return fail(tx("Es dürfen höchstens {} Spieler sein.", "At most {} players are allowed.", kMaxPlayers));
 
     const int wolves = settings.wolves ? settings.wolves : autoWolfCount(players);
     if (wolves * 2 >= players)
-        return fail("Zu viele Werwölfe für " + std::to_string(players) + " Spieler – es müssen weniger als die "
-                    "Hälfte sein.");
+        return fail(tx("Zu viele Werwölfe für {} Spieler – es müssen weniger als die Hälfte sein.",
+                       "Too many werewolves for {} players – they must be fewer than half.", players));
 
     // Besondere Wölfe ersetzen normale Werwölfe
     std::vector<Role> roles;

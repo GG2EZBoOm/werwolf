@@ -198,7 +198,7 @@ void App::drawSandboxOverlay() {
         const float dist = (head - m_lastCamera.position).length();
         if (dist > 30.0f) return;
         const float alpha = eng::clamp01((30.0f - dist) / 8.0f);
-        const std::string name = id == 0 ? std::string("Du") : std::format("Dorfbewohner {}", id);
+        const std::string name = id == 0 ? std::string(L("Du", "You")) : Lf("Dorfbewohner {}", "Villager {}", id);
         const Vec2 p = screen / scale;
         const float w = m_fonts.smallBold.measure(name) + 16.0f;
         const Rect plate{p.x - w * 0.5f, p.y - 11.0f, w, 22.0f};
@@ -210,15 +210,17 @@ void App::drawSandboxOverlay() {
     const int hours = static_cast<int>(m_previewTimeOfDay * 24.0f);
     const int minutes = static_cast<int>(std::fmod(m_previewTimeOfDay * 24.0f * 60.0f, 60.0f));
     r.text(m_fonts.small, {14.0f, 12.0f},
-           std::format("{:02}:{:02} Uhr · {:.0f} FPS · WASD laufen, Shift rennen, Maus umsehen, R verwandeln, Q Tür, T Zeit vorspulen, "
-                       "Esc Maus freigeben",
-                       hours, minutes, 1.0f / std::max(m_dt, 0.001f)),
+           Lf("{:02}:{:02} Uhr · {:.0f} FPS · WASD laufen, Shift rennen, Maus umsehen, R verwandeln, Q Tür, T Zeit vorspulen, "
+              "Esc Maus freigeben",
+              "{:02}:{:02} · {:.0f} FPS · WASD walk, Shift run, mouse look, R transform, Q door, T fast-forward time, "
+              "Esc release mouse",
+              hours, minutes, 1.0f / std::max(m_dt, 0.001f)),
            Color::hex(0xFFFFFF, 0.75f));
     if (!m_window.isMouseCaptured()) {
         const Rect hint{r.width() * 0.5f - 160.0f, r.height() * 0.5f - 24.0f, 320.0f, 48.0f};
         r.roundRect(hint, 12.0f, Color::hex(0x0A0D1A, 0.75f));
-        r.textCentered(m_fonts.ui, hint, "Klicken, um weiterzuspielen", theme::text);
-        if (m_ui.button("sandbox/menu", {r.width() * 0.5f - 90.0f, hint.bottom() + 12.0f, 180.0f, 38.0f}, "Hauptmenü"))
+        r.textCentered(m_fonts.ui, hint, L("Klicken, um weiterzuspielen", "Click to continue"), theme::text);
+        if (m_ui.button("sandbox/menu", {r.width() * 0.5f - 90.0f, hint.bottom() + 12.0f, 180.0f, 38.0f}, L("Hauptmenü", "Main menu")))
             m_screen = Screen::Menu;
     }
 }

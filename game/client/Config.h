@@ -25,9 +25,13 @@ struct Config {
     float mouseSensitivity = 1.0f; // Faktor
     bool invertY = false;
     // Oberfläche
+    std::string language;   // "de", "en" oder leer = wie Windows
     bool fadeChat = true;   // Chat blendet sich aus, wenn nichts passiert
     bool subtitles = true;  // Erzähler als Untertitel
     bool showFps = false;
+    // Netzwerk und Discord
+    bool upnp = true;       // Port beim Hosten automatisch im Router freigeben
+    bool discord = true;    // Status in Discord anzeigen und Einladungen erlauben
     // Ton (Prozent)
     int masterVolume = 75;
     int effectsVolume = 85;

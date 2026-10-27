@@ -82,20 +82,20 @@ bool App::imAlive() const {
 
 std::string App::headerTitle(const GameView& v) const {
     switch (v.phase) {
-    case Phase::Day: return std::format("Tag {}", v.day);
-    case Phase::Assembly: return v.election ? "Hauptmannwahl" : "Versammlung";
-    case Phase::Vote: return v.election ? "Hauptmannwahl" : "Abstimmung";
-    case Phase::Execution: return "Das Urteil";
-    case Phase::Night: return std::format("Nacht {}", v.day);
-    case Phase::Morning: return "Morgengrauen";
-    case Phase::GameOver: return "Spielende";
+    case Phase::Day: return Lf("Tag {}", "Day {}", v.day);
+    case Phase::Assembly: return v.election ? L("Hauptmannwahl", "Captain election") : L("Versammlung", "Gathering");
+    case Phase::Vote: return v.election ? L("Hauptmannwahl", "Captain election") : L("Abstimmung", "Vote");
+    case Phase::Execution: return L("Das Urteil", "The verdict");
+    case Phase::Night: return Lf("Nacht {}", "Night {}", v.day);
+    case Phase::Morning: return L("Morgengrauen", "Dawn");
+    case Phase::GameOver: return L("Spielende", "Game over");
     default: return "";
     }
 }
 
 std::string App::phaseWithDay(const GameView& v) const {
     if (v.phase == Phase::Day || v.phase == Phase::Night || v.day <= 0) return headerTitle(v);
-    return std::format("{} · Tag {}", headerTitle(v), v.day);
+    return Lf("{} · Tag {}", "{} · day {}", headerTitle(v), v.day);
 }
 
 // --- Einstieg ------------------------------------------------------------------
@@ -172,58 +172,75 @@ void App::buildPrompts(const GameView& v) {
         m_prompts.push_back(Prompt{kind, key, std::move(label), target, ready, param});
     };
 
+    // Beschriftung mit dem Namen des Ziels, sonst ein Hinweis, wen man anschauen soll
+    auto label = [&](uint8_t t, std::string_view de, std::string_view en, const char* noneDe, const char* noneEn) {
+        return t != kNoPlayer ? Lf(de, en, name(t)) : std::string(L(noneDe, noneEn));
+    };
+
     if (v.can(AbilityNameSuccessor)) {
         const uint8_t t = aim(60.0f, false, any);
-        add(Interaction::NameSuccessor, "E", t != kNoPlayer ? "Hauptmann-Amt an " + name(t) + " übergeben" : "Schau deinen Nachfolger an",
-            t, t != kNoPlayer);
+        add(Interaction::NameSuccessor, "E",
+            label(t, "Hauptmann-Amt an {} übergeben", "Hand the captaincy to {}", "Schau deinen Nachfolger an", "Look at your successor"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityTakeRole) && v.condemned != kNoPlayer)
-        add(Interaction::TakeRole, "E", "Als ergebene Magd die Rolle von " + name(v.condemned) + " übernehmen", v.condemned, true);
-    if (v.can(AbilitySecondVote)) add(Interaction::SecondVote, "F", "Heimlich eine zweite Abstimmung verlangen", 0, true);
+        add(Interaction::TakeRole, "E", Lf("Als ergebene Magd die Rolle von {} übernehmen", "As the devoted servant, take the role of {}", name(v.condemned)),
+            v.condemned, true);
+    if (v.can(AbilitySecondVote)) add(Interaction::SecondVote, "F", L("Heimlich eine zweite Abstimmung verlangen", "Secretly demand a second vote"), 0, true);
     if (v.can(AbilityChooseSide)) {
-        add(Interaction::ChooseSide, "E", "Dem Dorf treu bleiben", 0, true);
-        add(Interaction::ChooseSide, "F", "Zum Werwolf werden", 0, true, 1);
+        add(Interaction::ChooseSide, "E", L("Dem Dorf treu bleiben", "Stay loyal to the village"), 0, true);
+        add(Interaction::ChooseSide, "F", L("Zum Werwolf werden", "Become a werewolf"), 0, true, 1);
     }
     if (v.can(AbilitySteal)) {
         const uint8_t t = aim(kStealRange, false, any);
-        add(Interaction::Steal, "E", t != kNoPlayer ? "Rolle stehlen: " + name(t) : "Schleich dich an jemanden heran (Dieb)", t, t != kNoPlayer);
+        add(Interaction::Steal, "E", label(t, "Rolle stehlen: {}", "Steal role: {}", "Schleich dich an jemanden heran (Dieb)", "Sneak up on someone (thief)"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityEnchant)) {
         const uint8_t t = aim(kEnchantRange, false, [&](const EntityState& e) {
             const PlayerView* p = v.player(e.id);
             return !p || !p->enchanted;
         });
-        add(Interaction::Enchant, "E", t != kNoPlayer ? "Verzaubern: " + name(t) : "Spiel jemandem in der Nähe vor (Flöte)", t, t != kNoPlayer);
+        add(Interaction::Enchant, "E", label(t, "Verzaubern: {}", "Enchant: {}", "Spiel jemandem in der Nähe vor (Flöte)", "Play for someone nearby (flute)"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilitySniff)) {
         const uint8_t t = aim(kSniffRange, false, any);
-        add(Interaction::Sniff, "E", t != kNoPlayer ? "Wittern: " + name(t) + " und Umgebung" : "Schau jemanden an (Fuchsnase)", t, t != kNoPlayer);
+        add(Interaction::Sniff, "E", label(t, "Wittern: {} und Umgebung", "Sniff: {} and surroundings", "Schau jemanden an (Fuchsnase)", "Look at someone (fox nose)"),
+            t, t != kNoPlayer);
     }
     if (v.can(AbilityMark)) {
         const uint8_t t = aim(kMarkRange, false, any);
-        add(Interaction::Mark, "E", t != kNoPlayer ? "Rabe auf das Dach von " + name(t) : "Schau jemanden an (Rabe)", t, t != kNoPlayer);
+        add(Interaction::Mark, "E", label(t, "Rabe auf das Dach von {}", "Raven on the roof of {}", "Schau jemanden an (Rabe)", "Look at someone (raven)"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityChooseModel)) {
         const uint8_t t = aim(kModelRange, false, any);
-        add(Interaction::ChooseModel, "E", t != kNoPlayer ? "Vorbild wählen: " + name(t) : "Schau dein Vorbild an", t, t != kNoPlayer);
+        add(Interaction::ChooseModel, "E", label(t, "Vorbild wählen: {}", "Choose role model: {}", "Schau dein Vorbild an", "Look at your role model"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityHunterShot)) {
         const uint8_t t = aim(kHunterRange, false, any);
-        add(Interaction::HunterShot, "E", t != kNoPlayer ? "Letzter Schuss auf " + name(t) : "Ziele auf jemanden – dein letzter Schuss",
-            t, t != kNoPlayer);
+        add(Interaction::HunterShot, "E",
+            label(t, "Letzter Schuss auf {}", "Last shot at {}", "Ziele auf jemanden – dein letzter Schuss", "Aim at someone – your last shot"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityVote)) {
         const uint8_t t = aim(60.0f, false, any);
-        const std::string what = v.election ? "Stimme für " : "Stimme gegen ";
-        if (t != kNoPlayer && v.vote == t) add(Interaction::Vote, "E", what + name(t) + " zurückziehen", kNoPlayer, true);
-        else if (t != kNoPlayer) add(Interaction::Vote, "E", what + name(t), t, true);
-        else add(Interaction::Vote, "E", "Schau jemanden an, um abzustimmen", kNoPlayer, false);
+        if (t != kNoPlayer && v.vote == t)
+            add(Interaction::Vote, "E",
+                v.election ? Lf("Stimme für {} zurückziehen", "Withdraw vote for {}", name(t)) : Lf("Stimme gegen {} zurückziehen", "Withdraw vote against {}", name(t)),
+                kNoPlayer, true);
+        else if (t != kNoPlayer)
+            add(Interaction::Vote, "E", v.election ? Lf("Stimme für {}", "Vote for {}", name(t)) : Lf("Stimme gegen {}", "Vote against {}", name(t)), t, true);
+        else add(Interaction::Vote, "E", L("Schau jemanden an, um abzustimmen", "Look at someone to vote"), kNoPlayer, false);
     }
     if (v.can(AbilityRingBell) && distanceXZ(me, m_world.bell()) < kBellRange)
-        add(Interaction::RingBell, "E", "Glocke läuten – Versammlung einberufen", 0, true);
+        add(Interaction::RingBell, "E", L("Glocke läuten – Versammlung einberufen", "Ring the bell – call a gathering"), 0, true);
     if (v.can(AbilityTransform)) {
         const bool wolf = m_myTransform > 0.5f;
-        add(Interaction::Transform, "R", wolf ? "Zurückverwandeln" : "In einen Werwolf verwandeln", 0, true, wolf ? 0 : 1);
+        add(Interaction::Transform, "R", wolf ? L("Zurückverwandeln", "Change back") : L("In einen Werwolf verwandeln", "Turn into a werewolf"), 0, true,
+            wolf ? 0 : 1);
     }
     auto notPack = [&](const EntityState& e) {
         const PlayerView* p = v.player(e.id);
@@ -236,28 +253,33 @@ void App::buildPrompts(const GameView& v) {
         const PlayerView* tp = v.player(t);
         const bool packmate = tp && isWolfRole(tp->role);
         add(Interaction::Attack, "Klick",
-            t != kNoPlayer ? (packmate ? "Verrat: " : "Reißen: ") + name(t) : "Komm nah genug an ein Opfer heran", t, t != kNoPlayer);
+            packmate ? label(t, "Verrat: {}", "Betray: {}", "", "")
+                     : label(t, "Reißen: {}", "Maul: {}", "Komm nah genug an ein Opfer heran", "Get close enough to a victim"),
+            t, t != kNoPlayer);
     }
     if (v.can(AbilityInfect)) {
         const uint8_t t = aim(kAttackRange + 0.3f, false, notPack);
-        if (t != kNoPlayer) add(Interaction::Infect, "F", "Infizieren: " + name(t) + " wird zum Werwolf", t, true);
+        if (t != kNoPlayer) add(Interaction::Infect, "F", Lf("Infizieren: {} wird zum Werwolf", "Infect: {} becomes a werewolf", name(t)), t, true);
     }
     if (v.can(AbilityStab)) {
         const uint8_t t = aim(kAttackRange + 0.3f, false, any);
-        add(Interaction::Stab, "Klick", t != kNoPlayer ? "Erstechen: " + name(t) : "Schleich dich an ein Opfer heran", t, t != kNoPlayer);
+        add(Interaction::Stab, "Klick", label(t, "Erstechen: {}", "Stab: {}", "Schleich dich an ein Opfer heran", "Sneak up on a victim"), t, t != kNoPlayer);
     }
     if (v.can(AbilityTrack)) {
         const uint8_t t = aim(kTrackRange, false, any);
-        add(Interaction::Track, "E", t != kNoPlayer ? "Fährte aufnehmen: " + name(t) : "Schau jemanden an (Fährte)", t, t != kNoPlayer);
+        add(Interaction::Track, "E", label(t, "Fährte aufnehmen: {}", "Follow the trail: {}", "Schau jemanden an (Fährte)", "Look at someone (trail)"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityHolyWater)) {
         const uint8_t t = aim(kHolyWaterRange, false, any);
-        if (t != kNoPlayer) add(Interaction::HolyWater, "E", "Weihwasser auf " + name(t), t, true);
+        if (t != kNoPlayer) add(Interaction::HolyWater, "E", Lf("Weihwasser auf {}", "Holy water on {}", name(t)), t, true);
     }
     if (v.can(AbilityIgnite)) {
         const int count = std::popcount(v.doused);
-        add(Interaction::Ignite, "F", std::format("{} getränkte{} Haus{} anzünden", count, count == 1 ? "s" : "", count == 1 ? "" : "er"), 0,
-            true);
+        add(Interaction::Ignite, "F",
+            count == 1 ? std::string(L("1 getränktes Haus anzünden", "Set 1 doused house on fire"))
+                       : Lf("{} getränkte Häuser anzünden", "Set {} doused houses on fire", count),
+            0, true);
     }
 
     // Türen: nächste Tür in Reichweite
@@ -277,52 +299,66 @@ void App::buildPrompts(const GameView& v) {
         const bool inside = m_world.houseAt(me2, 0.3f) == door;
         const bool shut = !(d.flags & DoorOpen);
         if (!(d.flags & (DoorBroken | DoorBurnt))) {
-            if (!shut) add(Interaction::DoorToggle, "Q", inside ? "Tür schließen und verriegeln" : "Tür schließen", house, true);
-            else if ((d.flags & DoorLocked) && !inside) add(Interaction::DoorToggle, "Q", "Die Tür ist von innen verriegelt", house, false);
-            else add(Interaction::DoorToggle, "Q", (d.flags & DoorLocked) ? "Riegel lösen und öffnen" : "Tür öffnen", house, true);
+            if (!shut)
+                add(Interaction::DoorToggle, "Q", inside ? L("Tür schließen und verriegeln", "Close and bolt the door") : L("Tür schließen", "Close the door"), house,
+                    true);
+            else if ((d.flags & DoorLocked) && !inside)
+                add(Interaction::DoorToggle, "Q", L("Die Tür ist von innen verriegelt", "The door is bolted from the inside"), house, false);
+            else
+                add(Interaction::DoorToggle, "Q", (d.flags & DoorLocked) ? L("Riegel lösen und öffnen", "Unbolt and open") : L("Tür öffnen", "Open the door"),
+                    house, true);
         }
         if (v.can(AbilityBreakDoor) && shut && (d.flags & DoorLocked) && !inside && !(d.flags & (DoorBroken | DoorBurnt)))
-            add(Interaction::DoorBreak, "Klick", std::format("{} einschlagen ({} %)", (d.flags & DoorReinforced) ? "Beschlagene Tür" : "Tür", d.health),
+            add(Interaction::DoorBreak, "Klick",
+                (d.flags & DoorReinforced) ? Lf("Beschlagene Tür einschlagen ({} %)", "Break the reinforced door ({} %)", d.health)
+                                           : Lf("Tür einschlagen ({} %)", "Break the door ({} %)", d.health),
                 house, true);
         if (v.can(AbilityReinforce) && !(d.flags & DoorBurnt)) {
             const bool done = (d.flags & DoorReinforced) && !(d.flags & DoorBroken) && d.health >= 100;
             add(Interaction::Reinforce, "E",
-                done ? "Diese Tür ist schon beschlagen" : (d.flags & DoorBroken) ? "Tür reparieren und beschlagen" : "Tür mit Eisen beschlagen",
+                done                        ? L("Diese Tür ist schon beschlagen", "This door is already reinforced")
+                : (d.flags & DoorBroken) ? L("Tür reparieren und beschlagen", "Repair and reinforce the door")
+                                            : L("Tür mit Eisen beschlagen", "Reinforce the door with iron"),
                 house, !done);
         }
         if (v.can(AbilityDouse) && !(d.flags & (DoorBurnt | DoorBurning))) {
             const bool doused = v.doused & (1u << door);
             const bool chapel = door == m_world.chapelIndex();
             add(Interaction::Douse, "E",
-                doused ? (chapel ? "Die Kapelle ist schon getränkt" : "Dieses Haus ist schon getränkt")
-                       : (chapel ? "Kapelle mit Öl tränken" : "Haus mit Öl tränken"),
+                doused ? (chapel ? L("Die Kapelle ist schon getränkt", "The chapel is already doused") : L("Dieses Haus ist schon getränkt", "This house is already doused"))
+                       : (chapel ? L("Kapelle mit Öl tränken", "Douse the chapel with oil") : L("Haus mit Öl tränken", "Douse the house with oil")),
                 house, !doused);
         }
     }
     if (v.can(AbilityInspect)) {
         const uint8_t t = aim(kInspectRange, false, any);
-        add(Interaction::Inspect, "E", t != kNoPlayer ? "Vision: Wer ist " + name(t) + "?" : "Schau jemanden an (Vision)", t, t != kNoPlayer);
+        add(Interaction::Inspect, "E", label(t, "Vision: Wer ist {}?", "Vision: who is {}?", "Schau jemanden an (Vision)", "Look at someone (vision)"), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityProtect)) {
         uint8_t t = aim(kProtectRange, false, any);
         if (t == kNoPlayer) t = v.you;
         const bool allowed = t != v.lastProtected;
-        add(Interaction::Protect, "E", t == v.you ? "Dich selbst beschützen" : "Beschützen: " + name(t), t, allowed);
+        add(Interaction::Protect, "E", t == v.you ? std::string(L("Dich selbst beschützen", "Protect yourself")) : Lf("Beschützen: {}", "Protect: {}", name(t)), t,
+            allowed);
     }
     if (v.can(AbilityCupid)) {
         uint8_t t = aim(kCupidRange, false, [&](const EntityState& e) {
             return std::find(v.cupidPicks.begin(), v.cupidPicks.end(), e.id) == v.cupidPicks.end();
         });
         if (t == kNoPlayer && std::find(v.cupidPicks.begin(), v.cupidPicks.end(), v.you) == v.cupidPicks.end()) t = v.you;
-        add(Interaction::CupidPick, "E", t == v.you ? "Amors Pfeil auf dich selbst" : "Amors Pfeil: " + name(t), t, t != kNoPlayer);
+        add(Interaction::CupidPick, "E",
+            t == v.you ? std::string(L("Amors Pfeil auf dich selbst", "Cupid's arrow at yourself")) : Lf("Amors Pfeil: {}", "Cupid's arrow: {}", name(t)), t,
+            t != kNoPlayer);
     }
     if (v.can(AbilityHeal)) {
         const uint8_t t = aim(kHealRange + 0.5f, true, any);
-        if (t != kNoPlayer) add(Interaction::Heal, "E", "Heiltrank für " + name(t), t, true);
+        if (t != kNoPlayer) add(Interaction::Heal, "E", Lf("Heiltrank für {}", "Healing potion for {}", name(t)), t, true);
     }
     if (v.can(AbilityPoison)) {
         const uint8_t t = aim(kPoisonRange, false, any);
-        add(Interaction::Poison, "F", t != kNoPlayer ? "Gift für " + name(t) : "Gift: geh nah an jemanden heran", t, t != kNoPlayer);
+        add(Interaction::Poison, "F", label(t, "Gift für {}", "Poison for {}", "Gift: geh nah an jemanden heran", "Poison: get close to someone"), t,
+            t != kNoPlayer);
     }
     m_aimTarget = kNoPlayer;
     for (const Prompt& p : m_prompts) {
@@ -642,7 +678,7 @@ void App::drawNameTags(const GameView& v) {
             const double age = m_time - it->second.time;
             if (age < 6.0) {
                 const float ba = alpha * eng::clamp01(static_cast<float>(6.0 - age) / 0.8f);
-                std::vector<std::string> lines = m_fonts.small.wrap(it->second.text, 230.0f);
+                std::vector<std::string> lines = m_fonts.small.wrap(it->second.text.str(), 230.0f);
                 if (lines.size() > 3) lines.resize(3);
                 float bw = 0.0f;
                 for (const std::string& l : lines) bw = std::max(bw, m_fonts.small.measure(l));
@@ -714,9 +750,9 @@ void App::drawPhaseBox(const GameView& v) {
     int alive = 0;
     for (const PlayerView& p : v.players)
         if (p.alive) ++alive;
-    m_kit.label({c.x + R + 10.0f, c.y - 2.0f}, std::format("{} leben", alive), palette::ash);
+    m_kit.label({c.x + R + 10.0f, c.y - 2.0f}, Lf("{} leben", "{} alive", alive), palette::ash);
     if (v.day > 0 && v.phase != Phase::Day && v.phase != Phase::Night) {
-        const std::string day = std::format("Tag {}", v.day);
+        const std::string day = Lf("Tag {}", "Day {}", v.day);
         m_kit.label({c.x - R - 10.0f - m_kit.labelWidth(day), c.y - 2.0f}, day, palette::ash);
     }
 }
@@ -745,7 +781,7 @@ void App::drawRoleCard(Rect area, const GameView& v) {
         y += m_fonts.hand.lineHeight();
     }
     m_kit.endTilt();
-    m_kit.hint({card.x + 8.0f, card.bottom() + 6.0f}, "J", "Tagebuch", 0.85f);
+    m_kit.hint({card.x + 8.0f, card.bottom() + 6.0f}, "J", L("Tagebuch", "Journal"), 0.85f);
 }
 void App::drawPrompts(const GameView&) {
     eng::Renderer2D& r = m_renderer;
@@ -755,14 +791,16 @@ void App::drawPrompts(const GameView&) {
     int index = 0;
     for (const Prompt& p : m_prompts) {
         const float tw = m_fonts.paper.measure(p.label);
-        const float kw = m_kit.keycapWidth(p.key);
+        // "Klick" ist zugleich die interne Kennung der Maustaste
+        const char* key = std::string_view(p.key) == "Klick" ? L("Klick", "Click") : p.key;
+        const float kw = m_kit.keycapWidth(key);
         const float w = kw + tw + 52.0f;
         const Rect strip{std::round(r.width() * 0.5f - w * 0.5f), y, w, 38.0f};
         const float a = m_kit.animFrom(std::format("prompt/{}", p.label), 0.0f, 1.0f, 8.0f);
         const float alpha = (p.ready ? 1.0f : 0.7f) * a;
         m_kit.beginTilt(strip, (index % 2 == 0 ? -0.01f : 0.012f));
         m_kit.paper(strip.offset(0, (1.0f - a) * 14.0f), 14000u + static_cast<uint32_t>(index), alpha);
-        m_kit.keycap({strip.x + 14.0f, strip.y + 8.0f + (1.0f - a) * 14.0f, kw, 22.0f}, p.key, p.ready ? promptColor(p.kind) : smoke, alpha);
+        m_kit.keycap({strip.x + 14.0f, strip.y + 8.0f + (1.0f - a) * 14.0f, kw, 22.0f}, key, p.ready ? promptColor(p.kind) : smoke, alpha);
         r.text(m_fonts.paper, {strip.x + kw + 26.0f, strip.center().y - m_fonts.paper.lineHeight() * 0.5f + (1.0f - a) * 14.0f}, p.label,
                (p.ready ? inkDark : inkFaded).withAlpha(alpha));
         m_kit.endTilt();
@@ -786,7 +824,8 @@ void App::drawVotePanel(const GameView& v) {
     m_kit.beginTilt(panel, 0.012f);
     m_kit.paper(panel, 15000u);
     m_kit.nail({panel.center().x, panel.y + 12.0f});
-    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.election ? "Hauptmannwahl" : "Wer soll hängen?", inkRed);
+    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.election ? L("Hauptmannwahl", "Captain election") : L("Wer soll hängen?", "Who shall hang?"),
+           inkRed);
     float y = panel.y + 58.0f;
     const bool canVote = v.can(AbilityVote);
     for (const PlayerView* p : alive) {
@@ -874,7 +913,7 @@ void App::drawMinimap(Rect area, const GameView& v) {
         r.circle(p, 3.5f, inkRed);
     }
     // Windrose
-    const char* dirs[] = {"N", "O", "S", "W"};
+    const char* dirs[] = {"N", L("O", "E"), "S", "W"};
     const eng::Vec2 offs[] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
     for (int i = 0; i < 4; ++i) {
         const eng::Vec2 p = c + offs[i] * (R + 14.0f);
@@ -922,8 +961,9 @@ void App::drawPauseMenu(const GameView& v) {
     m_kit.beginTilt(head, 0.02f);
     m_kit.paper(head, 1777u, a);
     m_kit.nail({head.center().x, head.y + 14.0f}, a);
-    const float tw = m_fonts.calligraphyMid.measure("Atempause");
-    r.text(m_fonts.calligraphyMid, {head.center().x - tw * 0.5f, head.y + 64.0f - m_fonts.calligraphyMid.ascent()}, "Atempause", inkDark.withAlpha(a));
+    const char* pauseTitle = L("Atempause", "Respite");
+    const float tw = m_fonts.calligraphyMid.measure(pauseTitle);
+    r.text(m_fonts.calligraphyMid, {head.center().x - tw * 0.5f, head.y + 64.0f - m_fonts.calligraphyMid.ascent()}, pauseTitle, inkDark.withAlpha(a));
     const std::string when = phaseWithDay(v);
     r.text(m_fonts.script, {head.center().x - m_fonts.script.measure(when) * 0.5f, head.y + 76.0f}, when, inkSoft.withAlpha(a));
     m_kit.endTilt();
@@ -933,11 +973,12 @@ void App::drawPauseMenu(const GameView& v) {
         int action;
         float angle;
     };
-    std::vector<Item> items = {{"Weiterspielen", 0, -0.025f}, {"Tagebuch", 1, 0.02f}, {"Einstellungen", 2, -0.015f}};
+    std::vector<Item> items = {{L("Weiterspielen", "Resume"), 0, -0.025f}, {L("Tagebuch", "Journal"), 1, 0.02f}, {L("Einstellungen", "Settings"), 2, -0.015f}};
     const bool leaveArmed = m_time - m_leaveArmedTime < 3.0;
     const bool abortArmed = m_time - m_abortArmedTime < 3.0;
-    if (m_net.isHost() && v.phase != Phase::GameOver) items.push_back({abortArmed ? "Wirklich abbrechen?" : "Runde abbrechen", 3, 0.03f});
-    items.push_back({leaveArmed ? "Wirklich gehen?" : "Das Dorf verlassen", 4, -0.02f});
+    if (m_net.isHost() && v.phase != Phase::GameOver)
+        items.push_back({abortArmed ? L("Wirklich abbrechen?", "Really abort?") : L("Runde abbrechen", "Abort round"), 3, 0.03f});
+    items.push_back({leaveArmed ? L("Wirklich gehen?", "Really leave?") : L("Das Dorf verlassen", "Leave the village"), 4, -0.02f});
 
     eng::Input& in = m_window.input();
     const int count = static_cast<int>(items.size());
@@ -1008,17 +1049,17 @@ void App::drawGameOver(const GameView& v) {
 
     std::string title;
     switch (v.winner) {
-    case Team::Village: title = "Das Dorf hat gesiegt"; break;
-    case Team::Wolves: title = "Die Werwölfe haben gesiegt"; break;
-    case Team::Lovers: title = "Die Liebe hat gesiegt"; break;
-    case Team::Jester: title = "Der Narr hat gesiegt"; break;
-    case Team::Killer: title = "Der Serienmörder hat gesiegt"; break;
-    case Team::Arsonist: title = "Der Brandstifter hat gesiegt"; break;
-    case Team::Piper: title = "Der Flötenspieler hat gesiegt"; break;
-    case Team::Angel: title = "Der Engel hat gesiegt"; break;
-    case Team::WhiteWolf: title = "Der weiße Werwolf hat gesiegt"; break;
-    case Team::Sectarian: title = "Der Sektierer hat gesiegt"; break;
-    default: title = "Niemand hat überlebt"; break;
+    case Team::Village: title = L("Das Dorf hat gesiegt", "The village has won"); break;
+    case Team::Wolves: title = L("Die Werwölfe haben gesiegt", "The werewolves have won"); break;
+    case Team::Lovers: title = L("Die Liebe hat gesiegt", "Love has won"); break;
+    case Team::Jester: title = L("Der Narr hat gesiegt", "The jester has won"); break;
+    case Team::Killer: title = L("Der Serienmörder hat gesiegt", "The serial killer has won"); break;
+    case Team::Arsonist: title = L("Der Brandstifter hat gesiegt", "The arsonist has won"); break;
+    case Team::Piper: title = L("Der Flötenspieler hat gesiegt", "The pied piper has won"); break;
+    case Team::Angel: title = L("Der Engel hat gesiegt", "The angel has won"); break;
+    case Team::WhiteWolf: title = L("Der weiße Werwolf hat gesiegt", "The white werewolf has won"); break;
+    case Team::Sectarian: title = L("Der Sektierer hat gesiegt", "The sectarian has won"); break;
+    default: title = L("Niemand hat überlebt", "Nobody survived"); break;
     }
     // Kopfblatt
     const Rect head{W * 0.5f - 300.0f, 30.0f - (1.0f - a) * 40.0f, 600.0f, 150.0f};
@@ -1026,13 +1067,14 @@ void App::drawGameOver(const GameView& v) {
     m_kit.paper(head, 19000u, a);
     m_kit.nail({head.x + 22.0f, head.y + 16.0f}, a);
     m_kit.nail({head.right() - 22.0f, head.y + 16.0f}, a);
-    const float ew = m_fonts.calligraphyMid.measure("Epilog");
-    r.text(m_fonts.calligraphyMid, {head.center().x - ew * 0.5f, head.y + 62.0f - m_fonts.calligraphyMid.ascent()}, "Epilog", inkDark.withAlpha(a));
+    const char* epilog = L("Epilog", "Epilogue");
+    const float ew = m_fonts.calligraphyMid.measure(epilog);
+    r.text(m_fonts.calligraphyMid, {head.center().x - ew * 0.5f, head.y + 62.0f - m_fonts.calligraphyMid.ascent()}, epilog, inkDark.withAlpha(a));
     const float tw = m_fonts.scriptLarge.measure(title);
     m_kit.writeText(m_fonts.scriptLarge, {head.center().x - tw * 0.5f, head.y + 70.0f}, title, inkRed.withAlpha(a), eng::smoothstep(0.3f, 1.0f, a));
     const PlayerView* me = v.me();
     const bool won = me && me->winner;
-    const char* mine = won ? "Du hast gewonnen." : "Du hast verloren.";
+    const char* mine = won ? L("Du hast gewonnen.", "You have won.") : L("Du hast verloren.", "You have lost.");
     r.text(m_fonts.paperItalic, {head.center().x - m_fonts.paperItalic.measure(mine) * 0.5f, head.y + 116.0f}, mine, inkSoft.withAlpha(a));
     m_kit.endTilt();
 
@@ -1075,9 +1117,10 @@ void App::drawGameOver(const GameView& v) {
     m_kit.beginTilt(slip, 0.01f);
     m_kit.paper(slip, 21000u, a);
     if (m_net.isHost()) {
-        if (m_kit.inkButton("over/lobby", {slip.x + 16.0f, slip.y + 7.0f, 270.0f, 44.0f}, "Neue Nacht im Dorf", true)) m_net.sendReturnToLobby();
-        if (m_kit.inkButton("over/leave", {slip.right() - 196.0f, slip.y + 10.0f, 180.0f, 38.0f}, "Dorf verlassen")) leaveSession();
-    } else if (m_kit.inkButton("over/leave", {slip.center().x - 90.0f, slip.y + 10.0f, 180.0f, 38.0f}, "Dorf verlassen")) {
+        if (m_kit.inkButton("over/lobby", {slip.x + 16.0f, slip.y + 7.0f, 270.0f, 44.0f}, L("Neue Nacht im Dorf", "Another night in the village"), true))
+            m_net.sendReturnToLobby();
+        if (m_kit.inkButton("over/leave", {slip.right() - 196.0f, slip.y + 10.0f, 180.0f, 38.0f}, L("Dorf verlassen", "Leave village"))) leaveSession();
+    } else if (m_kit.inkButton("over/leave", {slip.center().x - 90.0f, slip.y + 10.0f, 180.0f, 38.0f}, L("Dorf verlassen", "Leave village"))) {
         leaveSession();
     }
     m_kit.endTilt();
@@ -1123,13 +1166,13 @@ void App::drawMatchHud() {
                             !m_window.isMouseCaptured() || over;
     const float chatA = m_kit.anim("hud/chat", chatActive ? 1.0f : 0.25f, 2.5f);
     if (chatA > 0.3f) drawChat(chat, true);
-    else m_kit.hint({chat.right() - 140.0f, chat.bottom() - 24.0f}, "Enter", "Sprechen", 0.6f);
+    else m_kit.hint({chat.right() - 140.0f, chat.bottom() - 24.0f}, "Enter", L("Sprechen", "Talk"), 0.6f);
 
     if (m_time - m_deathTime < 5.0 && !over) {
         const float a = eng::clamp01(static_cast<float>(5.0 - (m_time - m_deathTime)) / 1.5f);
-        m_kit.spacedCentered(m_fonts.display, {0, H * 0.4f, W, 60.0f}, "DU BIST GESTORBEN", 8.0f, palette::blood.withAlpha(a));
-        r.textCentered(m_fonts.subtitle, {0, H * 0.4f + 70.0f, W, 26.0f}, "Als Geist wanderst du ungesehen durchs Dorf.",
-                       palette::parchment.withAlpha(a));
+        m_kit.spacedCentered(m_fonts.display, {0, H * 0.4f, W, 60.0f}, L("DU BIST GESTORBEN", "YOU HAVE DIED"), 8.0f, palette::blood.withAlpha(a));
+        r.textCentered(m_fonts.subtitle, {0, H * 0.4f + 70.0f, W, 26.0f},
+                       L("Als Geist wanderst du ungesehen durchs Dorf.", "As a ghost you wander the village unseen."), palette::parchment.withAlpha(a));
     }
     if (m_config.showFps)
         r.text(m_fonts.small, {12.0f, 10.0f}, std::format("{:.0f} FPS", 1.0f / std::max(m_dt, 0.001f)), palette::ash);
@@ -1143,7 +1186,8 @@ void App::drawMatchHud() {
         const Rect hint{W * 0.5f - hw * 0.5f, H * 0.5f + 40.0f, hw, 34.0f};
         r.gradientH({hint.x, hint.y, hint.w * 0.5f, hint.h}, palette::ink.withAlpha(0.0f), palette::ink.withAlpha(0.75f));
         r.gradientH({hint.center().x, hint.y, hint.w * 0.5f, hint.h}, palette::ink.withAlpha(0.75f), palette::ink.withAlpha(0.0f));
-        r.textCentered(m_fonts.small, hint, "Klicke ins Bild, um weiterzuspielen  ·  Esc: Pause", palette::parchment);
+        r.textCentered(m_fonts.small, hint, L("Klicke ins Bild, um weiterzuspielen  ·  Esc: Pause", "Click into the picture to resume  ·  Esc: pause"),
+                       palette::parchment);
     }
     if (!m_pauseOpen && !over) m_kit.anim("pause/fade", 0.0f, 100.0f);
     if (!m_journalOpen) m_kit.anim("journal/open", 0.0f, 100.0f);

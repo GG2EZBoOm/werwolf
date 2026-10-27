@@ -44,10 +44,10 @@ Match makeMatch(const std::vector<Role>& roles, Settings settings = quickSetting
     std::vector<Match::Seat> seats;
     for (size_t i = 0; i < roles.size(); ++i) seats.push_back({static_cast<uint8_t>(i), "P" + std::to_string(i), false});
     Match m;
-    std::string error;
+    Text error;
     const bool ok = m.startWithRoles(seats, roles, settings, testWorld(), 42, error);
     CHECK(ok);
-    if (!ok) std::printf("    %s\n", error.c_str());
+    if (!ok) std::printf("    %s\n", error.de.c_str());
     return m;
 }
 
@@ -86,7 +86,7 @@ void becomeWolf(Match& m, uint8_t id) {
 
 TEST(RollenverteilungAutomatisch) {
     Settings s;
-    std::string err;
+    Text err;
     auto roles = buildRoleList(s, 8, &err);
     CHECK_EQ(roles.size(), 8u);
     CHECK_EQ(std::count(roles.begin(), roles.end(), Role::Werewolf), 2);
@@ -113,6 +113,9 @@ TEST(RollenverteilungAutomatisch) {
     CHECK(b.read(r));
     CHECK(b.has(Role::Arsonist) && !b.has(Role::Seer) && b.has(Role::Witch));
     CHECK(b.captain && b.revealRoles);
+    // Fehler gibt es in beiden Sprachen
+    CHECK(err.de.find("Werwölfe") != std::string::npos);
+    CHECK(err.en.find("werewolves") != std::string::npos);
     // Geschwister gibt es nur vollständig
     Settings fam;
     fam.roles = 0;
@@ -198,7 +201,8 @@ TEST(KapelleGehoertNiemandem) {
     const int c = testWorld().chapelIndex();
     for (const Match::Player& p : m.players()) CHECK(p.house != kNoPlayer && p.house != c);
     CHECK_EQ(m.doors().size(), testWorld().houses().size());
-    CHECK(m.houseLabel(c) == "die Kapelle");
+    CHECK(m.houseLabel(c).de == "die Kapelle");
+    CHECK(m.houseLabel(c).en == "the chapel");
     // Wer sich nachts in die Kapelle flüchtet, kann sie wie ein Haus verriegeln
     runUntil(m, Phase::Night);
     const House& h = testWorld().houses()[static_cast<size_t>(c)];
@@ -612,7 +616,7 @@ TEST(MaedchenMediumUndFaehrtenleser) {
     runUntil(m, Phase::Morning);
     const auto notices = m.takeNotices();
     CHECK(std::any_of(notices.begin(), notices.end(), [](const Notice& n) {
-        return n.player == 3 && n.text.find("Leiche von P4") != std::string::npos;
+        return n.player == 3 && n.text.de.find("Leiche von P4") != std::string::npos && n.text.en.find("body of P4") != std::string::npos;
     }));
 }
 TEST(HauptmannwahlUndNachfolger) {
@@ -824,7 +828,7 @@ TEST(GeschwisterUndBaerenfuehrer) {
     m.takeNotices();
     runUntil(m, Phase::Assembly);
     const auto notices = m.takeNotices();
-    CHECK(std::any_of(notices.begin(), notices.end(), [](const Notice& n) { return n.text.find("brummt bedrohlich") != std::string::npos; }));
+    CHECK(std::any_of(notices.begin(), notices.end(), [](const Notice& n) { return n.text.de.find("brummt bedrohlich") != std::string::npos; }));
 }
 TEST(BotsSpielenEchtzeitPartienZuEnde) {
     int finished = 0;
@@ -849,9 +853,9 @@ TEST(BotsSpielenEchtzeitPartienZuEnde) {
             bots.emplace_back(static_cast<uint8_t>(i), seed * 100 + static_cast<uint64_t>(i));
         }
         Match m;
-        std::string error;
+        Text error;
         if (!m.start(seats, s, testWorld(), seed, error)) continue;
-        const Bot::SayFn say = [](uint8_t, const std::string&, bool) {};
+        const Bot::SayFn say = [](uint8_t, const Text&, bool) {};
         float t = 0.0f;
         std::map<uint8_t, float> inChapel;
         for (; t < 3600.0f && m.phase() != Phase::GameOver; t += 0.1f) {

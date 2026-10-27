@@ -10,7 +10,7 @@
 // Jede Nachricht beginnt mit einem Typ-Byte, danach folgen die Felder.
 namespace ww::proto {
 
-constexpr uint16_t kVersion = 5;
+constexpr uint16_t kVersion = 6;
 constexpr uint16_t kDefaultPort = 27777;
 constexpr size_t kMaxNameLength = 16;  // Codepoints
 constexpr size_t kMaxChatLength = 240; // Codepoints
@@ -33,12 +33,13 @@ enum class ClientMsg : uint8_t {
     Leave,          // –
 };
 
+// Text = str Deutsch + str Englisch (leer, wenn gleich); jeder Client zeigt seine Sprache
 enum class ServerMsg : uint8_t {
     Welcome = 1, // u8 yourId, u64 token
-    Reject,      // str reason
+    Reject,      // Text reason
     State,       // GameView
-    Chat,        // u8 channel, u8 from, str name, str text
-    Notice,      // u8 kind, str text
+    Chat,        // u8 channel, u8 from, str name (leer = verborgener Werwolf), Text text
+    Notice,      // u8 kind, Text text
     Pong,        // –
     Snapshot,    // Entities, Türen
     Correction,  // f32 x, f32 z, f32 yaw – Server setzt die eigene Position

@@ -19,7 +19,6 @@ namespace {
 constexpr double kHelloTimeout = 5.0;
 constexpr double kStateResendInterval = 1.0;
 constexpr size_t kHistoryLimit = 150;
-constexpr const char* kHiddenWolfName = "Unbekannter Werwolf";
 
 const std::vector<std::string> kBotNames = {"Anton", "Berta", "Clara",  "Dieter", "Emil",  "Frieda",
                                             "Gustav", "Hanna", "Ida",   "Jakob",  "Karl",  "Luise",
@@ -52,7 +51,7 @@ void GameServer::shutdown() {
     for (auto& m : m_members) {
         if (!m->conn) continue;
         ByteWriter w = proto::begin(proto::ServerMsg::Reject);
-        w.str("Der Server wurde beendet.");
+        Text{"Der Server wurde beendet.", "The server has shut down."}.write(w);
         m->conn->send(w.data());
         m->conn->update();
     }
@@ -89,7 +88,7 @@ void GameServer::tick() {
 
     if (m_match) {
         m_match->update(dt);
-        const Bot::SayFn say = [this](uint8_t botId, const std::string& text, bool wolves) { chatFrom(botId, text, wolves); };
+        const Bot::SayFn say = [this](uint8_t botId, const Text& text, bool wolves) { chatFrom(botId, text, wolves); };
         for (Bot& bot : m_bots) bot.update(dt, *m_match, say);
         routeMatchNotices();
         sendCorrections();
@@ -127,7 +126,7 @@ void GameServer::updatePending(double now) {
         if (p.conn->receive(data)) {
             ByteReader r(data);
             if (static_cast<proto::ClientMsg>(r.u8()) == proto::ClientMsg::Hello) handleHello(p, r);
-            else reject(std::move(p.conn), "Ungültige Anmeldung.");
+            else reject(std::move(p.conn), {"Ungültige Anmeldung.", "Invalid login."});
             continue;
         }
         if (p.conn->state() == Connection::State::Disconnected || now - p.since > kHelloTimeout) p.conn.reset();
@@ -135,11 +134,11 @@ void GameServer::updatePending(double now) {
     std::erase_if(m_pending, [](const Pending& p) { return !p.conn; });
 }
 
-void GameServer::reject(std::unique_ptr<Connection> conn, const std::string& reason) {
+void GameServer::reject(std::unique_ptr<Connection> conn, const Text& reason) {
     if (!conn) return;
-    eng::log::info("Verbindung {} abgelehnt: {}", conn->address(), reason);
+    eng::log::info("Verbindung {} abgelehnt: {}", conn->address(), reason.de);
     ByteWriter w = proto::begin(proto::ServerMsg::Reject);
-    w.str(reason);
+    reason.write(w);
     conn->send(w.data());
     conn->closeAfterFlush();
     m_closing.push_back(Closing{std::move(conn), eng::nowSeconds() + 2.0});
@@ -150,13 +149,13 @@ void GameServer::handleHello(Pending& pending, ByteReader& r) {
     std::string name = eng::utf8::sanitize(r.str(256), proto::kMaxNameLength);
     const uint64_t token = r.u64();
     if (!r.ok()) {
-        reject(std::move(pending.conn), "Ungültige Anmeldung.");
+        reject(std::move(pending.conn), {"Ungültige Anmeldung.", "Invalid login."});
         return;
     }
     if (version != proto::kVersion) {
         reject(std::move(pending.conn),
-               std::format("Inkompatible Version (Server: {}, Client: {}). Bitte aktualisiere das Spiel.",
-                           proto::kVersion, version));
+               tx("Inkompatible Version (Server: {}, Client: {}). Bitte aktualisiere das Spiel.",
+                  "Incompatible version (server: {}, client: {}). Please update the game.", proto::kVersion, version));
         return;
     }
 
@@ -171,7 +170,7 @@ void GameServer::handleHello(Pending& pending, ByteReader& r) {
             w.u64(m->token);
             m->conn->send(w.data());
             sendHistory(*m);
-            broadcastNotice(NoticeKind::Info, m->name + " ist zurück.");
+            broadcastNotice(NoticeKind::Info, tx("{} ist zurück.", "{} is back.", m->name));
             eng::log::info("{} hat sich wieder verbunden", m->name);
             if (m_match) {
                 if (const Match::Player* p = m_match->find(m->id)) {
@@ -190,11 +189,12 @@ void GameServer::handleHello(Pending& pending, ByteReader& r) {
     }
 
     if (m_match) {
-        reject(std::move(pending.conn), "Im Dorf läuft gerade eine Runde. Bitte warte, bis sie vorbei ist.");
+        reject(std::move(pending.conn), {"Im Dorf läuft gerade eine Runde. Bitte warte, bis sie vorbei ist.",
+                                         "A round is under way in the village. Please wait until it is over."});
         return;
     }
     if (static_cast<int>(m_members.size()) >= kMaxPlayers) {
-        reject(std::move(pending.conn), std::format("Das Dorf ist voll ({} Spieler).", kMaxPlayers));
+        reject(std::move(pending.conn), tx("Das Dorf ist voll ({} Spieler).", "The village is full ({} players).", kMaxPlayers));
         return;
     }
 
@@ -215,7 +215,7 @@ void GameServer::handleHello(Pending& pending, ByteReader& r) {
     Member& ref = *m;
     m_members.push_back(std::move(m));
     sendHistory(ref);
-    broadcastNotice(NoticeKind::Info, ref.name + " hat das Dorf betreten.");
+    broadcastNotice(NoticeKind::Info, tx("{} hat das Dorf betreten.", "{} has entered the village.", ref.name));
     ensureHost();
     m_dirty = true;
 }
@@ -240,10 +240,10 @@ void GameServer::onConnectionLost(Member& m, const std::string& reason) {
     m.online = false;
     if (m_match) {
         m_match->setConnected(m.id, false);
-        broadcastNotice(NoticeKind::Warning, m.name + " hat die Verbindung verloren.");
+        broadcastNotice(NoticeKind::Warning, tx("{} hat die Verbindung verloren.", "{} lost the connection.", m.name));
     } else {
         m.removeRequested = true;
-        broadcastNotice(NoticeKind::Info, m.name + " hat das Dorf verlassen.");
+        broadcastNotice(NoticeKind::Info, tx("{} hat das Dorf verlassen.", "{} has left the village.", m.name));
     }
     m_dirty = true;
 }
@@ -281,7 +281,8 @@ void GameServer::ensureHost() {
             break;
         }
     }
-    if (m_host != previous && m_host != kNoPlayer) broadcastNotice(NoticeKind::Info, member(m_host)->name + " ist jetzt Spielleitung.");
+    if (m_host != previous && m_host != kNoPlayer)
+        broadcastNotice(NoticeKind::Info, tx("{} ist jetzt Spielleitung.", "{} is now the host.", member(m_host)->name));
     m_dirty = true;
 }
 
@@ -312,11 +313,11 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
         const bool wolves = r.boolean();
         if (text.empty() || !r.ok()) break;
         if (m->chatBudget < 1.0) {
-            sendNotice(*m, NoticeKind::Warning, "Nicht so schnell – das Dorf kommt kaum mit.");
+            sendNotice(*m, NoticeKind::Warning, {"Nicht so schnell – das Dorf kommt kaum mit.", "Not so fast – the village can barely keep up."});
             break;
         }
         m->chatBudget -= 1.0;
-        chatFrom(memberId, std::move(text), wolves);
+        chatFrom(memberId, Text::same(std::move(text)), wolves);
         break;
     }
     case proto::ClientMsg::Move: {
@@ -330,14 +331,14 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
         const auto kind = static_cast<Interaction>(r.u8());
         const uint8_t target = r.u8();
         if (m_match && r.ok()) {
-            const std::string err = m_match->interact(memberId, kind, target);
+            const Text err = m_match->interact(memberId, kind, target);
             if (!err.empty()) sendNotice(*m, NoticeKind::Warning, err);
             m_dirty = true;
         }
         break;
     }
     case proto::ClientMsg::StartGame:
-        if (!isHost) sendNotice(*m, NoticeKind::Warning, "Nur die Spielleitung kann das Spiel starten.");
+        if (!isHost) sendNotice(*m, NoticeKind::Warning, {"Nur die Spielleitung kann das Spiel starten.", "Only the host can start the game."});
         else if (!m_match) startGame(*m);
         break;
     case proto::ClientMsg::UpdateSettings: {
@@ -351,7 +352,8 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
     }
     case proto::ClientMsg::AddBot:
         if (isHost && !m_match) {
-            if (static_cast<int>(m_members.size()) >= kMaxPlayers) sendNotice(*m, NoticeKind::Warning, "Das Dorf ist bereits voll.");
+            if (static_cast<int>(m_members.size()) >= kMaxPlayers)
+                sendNotice(*m, NoticeKind::Warning, {"Das Dorf ist bereits voll.", "The village is already full."});
             else addBot();
         }
         break;
@@ -360,8 +362,8 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
         Member* t = member(target);
         if (isHost && !m_match && t && target != memberId) {
             t->removeRequested = true;
-            t->removeReason = "Die Spielleitung hat dich aus dem Dorf geworfen.";
-            broadcastNotice(NoticeKind::Info, t->name + " wurde aus dem Dorf geworfen.");
+            t->removeReason = {"Die Spielleitung hat dich aus dem Dorf geworfen.", "The host has thrown you out of the village."};
+            broadcastNotice(NoticeKind::Info, tx("{} wurde aus dem Dorf geworfen.", "{} was thrown out of the village.", t->name));
         }
         break;
     }
@@ -376,7 +378,7 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
     case proto::ClientMsg::Leave:
         m->removeRequested = true;
         eng::log::info("{} hat das Spiel verlassen", m->name);
-        broadcastNotice(NoticeKind::Info, m->name + " hat das Dorf verlassen.");
+        broadcastNotice(NoticeKind::Info, tx("{} hat das Dorf verlassen.", "{} has left the village.", m->name));
         break;
     default:
         eng::log::warn("Unbekannte Nachricht {} von {}", static_cast<int>(type), m->name);
@@ -394,7 +396,7 @@ void GameServer::startGame(Member& host) {
     const double t0 = eng::nowSeconds();
     m_world.generate(worldSeed);
     auto match = std::make_unique<Match>();
-    std::string error;
+    Text error;
     if (!match->start(seats, m_settings, m_world, m_rng.next64(), error)) {
         sendNotice(host, NoticeKind::Warning, error);
         return;
@@ -420,7 +422,7 @@ void GameServer::returnToLobby() {
         if (!m->bot && !m->online) m->removeRequested = true;
     processRemovals();
     m_history.clear();
-    broadcastNotice(NoticeKind::Info, "Zurück in der Lobby. Bereit für eine neue Runde?");
+    broadcastNotice(NoticeKind::Info, {"Zurück in der Lobby. Bereit für eine neue Runde?", "Back in the lobby. Ready for another round?"});
     eng::log::info("Zurück in der Lobby");
     m_dirty = true;
 }
@@ -436,7 +438,7 @@ void GameServer::addBot() {
     m->name = available.empty() ? uniqueName("Bot") : m_rng.pick(available);
     m->bot = true;
     m->online = true;
-    broadcastNotice(NoticeKind::Info, m->name + " (Bot) hat das Dorf betreten.");
+    broadcastNotice(NoticeKind::Info, tx("{} (Bot) hat das Dorf betreten.", "{} (bot) has entered the village.", m->name));
     m_members.push_back(std::move(m));
     m_dirty = true;
 }
@@ -497,7 +499,7 @@ bool GameServer::noticeVisible(const Notice& n, uint8_t memberId) const {
     return false;
 }
 
-void GameServer::chatFrom(uint8_t memberId, std::string text, bool wolves) {
+void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves) {
     Member* m = member(memberId);
     if (!m) return;
     ChatChannel channel = ChatChannel::Global;
@@ -506,20 +508,20 @@ void GameServer::chatFrom(uint8_t memberId, std::string text, bool wolves) {
         if (!ch) return;
         channel = *ch;
         const Match::Player* p = m_match->find(memberId);
-        if (channel == ChatChannel::Nearby && p && p->wolfForm()) text = "*knurrt bedrohlich*";
+        if (channel == ChatChannel::Nearby && p && p->wolfForm()) text = {"*knurrt bedrohlich*", "*growls menacingly*"};
     }
 
     ByteWriter w = proto::begin(proto::ServerMsg::Chat);
     w.u8(static_cast<uint8_t>(channel));
     w.u8(memberId);
     w.str(m->name);
-    w.str(text);
-    // Für das kleine Mädchen ohne Namen
+    text.write(w);
+    // Für das kleine Mädchen ohne Namen (der Client schreibt "Unbekannter Werwolf")
     ByteWriter anonymous = proto::begin(proto::ServerMsg::Chat);
     anonymous.u8(static_cast<uint8_t>(channel));
     anonymous.u8(kNoPlayer);
-    anonymous.str(kHiddenWolfName);
-    anonymous.str(text);
+    anonymous.str("");
+    text.write(anonymous);
     for (auto& target : m_members) {
         if (!target->conn) continue;
         const bool hears = m_match ? m_match->canHear(target->id, memberId, channel) : true;
@@ -542,13 +544,13 @@ void GameServer::chatFrom(uint8_t memberId, std::string text, bool wolves) {
         e.text = text;
         pushHistory(std::move(e));
     }
-    if (m_options.logChat) eng::log::info("[{}] {}: {}", channelName(channel), m->name, text);
+    if (m_options.logChat) eng::log::info("[{}] {}: {}", channelName(channel, Lang::German), m->name, text.de);
 }
 
 void GameServer::deliverNotice(const Notice& notice) {
     ByteWriter w = proto::begin(proto::ServerMsg::Notice);
     w.u8(static_cast<uint8_t>(notice.kind));
-    w.str(notice.text);
+    notice.text.write(w);
     for (auto& m : m_members)
         if (m->conn && noticeVisible(notice, m->id)) m->conn->send(w.data());
     if (notice.audience == Notice::Audience::Area) return; // Geräusche sind flüchtig
@@ -557,18 +559,18 @@ void GameServer::deliverNotice(const Notice& notice) {
     pushHistory(std::move(e));
 }
 
-void GameServer::broadcastNotice(NoticeKind kind, const std::string& text) {
+void GameServer::broadcastNotice(NoticeKind kind, const Text& text) {
     Notice n;
     n.kind = kind;
     n.text = text;
     deliverNotice(n);
 }
 
-void GameServer::sendNotice(Member& m, NoticeKind kind, const std::string& text) {
+void GameServer::sendNotice(Member& m, NoticeKind kind, const Text& text) {
     if (!m.conn) return;
     ByteWriter w = proto::begin(proto::ServerMsg::Notice);
     w.u8(static_cast<uint8_t>(kind));
-    w.str(text);
+    text.write(w);
     m.conn->send(w.data());
 }
 
@@ -576,7 +578,7 @@ void GameServer::routeMatchNotices() {
     if (!m_match) return;
     for (const Notice& n : m_match->takeNotices()) {
         deliverNotice(n);
-        if (n.audience == Notice::Audience::All) eng::log::info("» {}", n.text);
+        if (n.audience == Notice::Audience::All) eng::log::info("» {}", n.text.de);
     }
 }
 
@@ -594,14 +596,14 @@ void GameServer::sendHistory(Member& m) {
             ByteWriter w = proto::begin(proto::ServerMsg::Chat);
             w.u8(static_cast<uint8_t>(e.channel));
             w.u8(hidden ? kNoPlayer : e.from);
-            w.str(hidden ? std::string(kHiddenWolfName) : e.name);
-            w.str(e.text);
+            w.str(hidden ? std::string() : e.name);
+            e.text.write(w);
             m.conn->send(w.data());
         } else {
             if (!noticeVisible(e.notice, m.id)) continue;
             ByteWriter w = proto::begin(proto::ServerMsg::Notice);
             w.u8(static_cast<uint8_t>(e.notice.kind));
-            w.str(e.notice.text);
+            e.notice.text.write(w);
             m.conn->send(w.data());
         }
     }

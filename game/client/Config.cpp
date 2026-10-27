@@ -33,6 +33,9 @@ void Config::load() {
         else if (key == "fov") fieldOfView = std::clamp(static_cast<float>(std::atof(value.c_str())), 50.0f, 95.0f);
         else if (key == "mouse_sensitivity") mouseSensitivity = std::clamp(static_cast<float>(std::atof(value.c_str())), 0.2f, 3.0f);
         else if (key == "invert_y") invertY = value == "1";
+        else if (key == "language") language = value;
+        else if (key == "upnp") upnp = value == "1";
+        else if (key == "discord") discord = value == "1";
         else if (key == "fade_chat") fadeChat = value == "1";
         else if (key == "subtitles") subtitles = value == "1";
         else if (key == "show_fps") showFps = value == "1";
@@ -68,6 +71,9 @@ void Config::save() const {
     out << "fov=" << fieldOfView << "\n";
     out << "mouse_sensitivity=" << mouseSensitivity << "\n";
     out << "invert_y=" << (invertY ? 1 : 0) << "\n";
+    if (!language.empty()) out << "language=" << language << "\n";
+    out << "upnp=" << (upnp ? 1 : 0) << "\n";
+    out << "discord=" << (discord ? 1 : 0) << "\n";
     out << "fade_chat=" << (fadeChat ? 1 : 0) << "\n";
     out << "subtitles=" << (subtitles ? 1 : 0) << "\n";
     out << "show_fps=" << (showFps ? 1 : 0) << "\n";

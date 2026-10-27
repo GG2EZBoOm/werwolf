@@ -16,13 +16,13 @@ namespace ww {
 // nutzt nur das, was seine persönliche Spielansicht verrät (plus sichtbare Positionen).
 class Bot {
 public:
-    using SayFn = std::function<void(uint8_t botId, const std::string& text, bool wolves)>;
+    using SayFn = std::function<void(uint8_t botId, const Text& text, bool wolves)>;
 
     Bot(uint8_t id, uint64_t seed);
     uint8_t id() const { return m_id; }
     void update(float dt, Match& match, const SayFn& say);
     // Der Bot hört eine Chatnachricht und passt seinen Verdacht an.
-    void hear(const Match& match, uint8_t speaker, const std::string& text);
+    void hear(const Match& match, uint8_t speaker, const Text& text);
 
 private:
     enum class Nav { Moving, Arrived, Blocked };

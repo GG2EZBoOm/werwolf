@@ -1,5 +1,6 @@
 # --- Spielregeln + Protokoll (plattformunabhängig) -----------------------------
 add_library(werwolf_logic STATIC
+    i18n/Text.cpp
     logic/Types.cpp
     logic/Match.cpp
     world/World.cpp
@@ -30,7 +31,7 @@ if(WIN32)
     add_library(werwolf_updater STATIC
         client/Updater.cpp
     )
-    target_link_libraries(werwolf_updater PUBLIC werwolf_update engine_http)
+    target_link_libraries(werwolf_updater PUBLIC werwolf_update engine_http werwolf_logic)
 endif()
 
 # --- Dedizierter Server ---------------------------------------------------------
@@ -57,6 +58,8 @@ if(WERWOLF_BUILD_CLIENT)
         client/StyleMaterials.cpp
         client/OverlayScreens.cpp
         client/AudioScene.cpp
+        client/HostNetwork.cpp
+        client/Discord.cpp
     )
     target_link_libraries(werwolf PRIVATE werwolf_server_lib werwolf_updater engine_client werwolf_audio)
     set(WERWOLF_MUSIC_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/audio" CACHE PATH "Lokal importierte Musik")

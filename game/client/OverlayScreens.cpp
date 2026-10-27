@@ -19,23 +19,31 @@ std::vector<std::pair<std::string, Color>> App::roleStatusLines(const GameView& 
     const bool alive = imAlive();
 
     std::vector<std::pair<std::string, Color>> lines;
-    if (!alive) lines.push_back({"Du bist tot – als Geist siehst du alles.", theme::ghost});
+    auto ghostChat = [&] {
+        return std::string(m_chatWolves ? L("Chat: Geister (Tab wechselt)", "Chat: ghosts (Tab switches)") : L("Chat: Nähe (Tab: Geister)", "Chat: nearby (Tab: ghosts)"));
+    };
+    if (!alive) lines.push_back({L("Du bist tot – als Geist siehst du alles.", "You are dead – as a ghost you see everything."), theme::ghost});
     if (isWolfRole(role)) {
         std::string pack;
         for (const PlayerView& p : v.players)
             if (isWolfRole(p.role) && p.id != v.you && p.alive) pack += (pack.empty() ? "" : ", ") + p.name;
-        lines.push_back({pack.empty() ? "Du jagst allein." : "Rudel: " + pack, theme::blood});
-        if (v.phase == Phase::Night) lines.push_back({v.packKillsLeft ? "Das Rudel hungert noch." : "Das Rudel ist satt.", theme::muted});
-        lines.push_back({m_chatWolves ? "Chat: Rudel (Tab wechselt)" : "Chat: Nähe (Tab: Rudel)", theme::faint});
+        lines.push_back({pack.empty() ? std::string(L("Du jagst allein.", "You hunt alone.")) : Lf("Rudel: {}", "Pack: {}", pack), theme::blood});
+        if (v.phase == Phase::Night)
+            lines.push_back({v.packKillsLeft ? L("Das Rudel hungert noch.", "The pack is still hungry.") : L("Das Rudel ist satt.", "The pack is sated."), theme::muted});
+        lines.push_back({m_chatWolves ? L("Chat: Rudel (Tab wechselt)", "Chat: pack (Tab switches)") : L("Chat: Nähe (Tab: Rudel)", "Chat: nearby (Tab: pack)"),
+                         theme::faint});
     }
     if (v.loverPartner != kNoPlayer) {
         const PlayerView* p = v.player(v.loverPartner);
-        lines.push_back({std::string("♥ Verliebt in ") + (p ? p->name : "?"), theme::roleColor(Role::Cupid)});
+        lines.push_back({Lf("♥ Verliebt in {}", "♥ In love with {}", p ? p->name : std::string("?")), theme::roleColor(Role::Cupid)});
     }
-    if (const PlayerView* me = v.me(); me && me->captain) lines.push_back({"♛ Du bist der Hauptmann – doppelte Stimme.", palette::brassLight});
+    if (const PlayerView* me = v.me(); me && me->captain)
+        lines.push_back({L("♛ Du bist der Hauptmann – doppelte Stimme.", "♛ You are the captain – double vote."), palette::brassLight});
     if (role == Role::Witch) {
-        lines.push_back({std::string("Heiltrank: ") + (v.healAvailable ? "bereit" : "verbraucht"), v.healAvailable ? rc : theme::faint});
-        lines.push_back({std::string("Gifttrank: ") + (v.poisonAvailable ? "bereit" : "verbraucht"), v.poisonAvailable ? rc : theme::faint});
+        const char* ready = L("bereit", "ready");
+        const char* used = L("verbraucht", "used up");
+        lines.push_back({Lf("Heiltrank: {}", "Healing potion: {}", v.healAvailable ? ready : used), v.healAvailable ? rc : theme::faint});
+        lines.push_back({Lf("Gifttrank: {}", "Poison: {}", v.poisonAvailable ? ready : used), v.poisonAvailable ? rc : theme::faint});
     }
     for (const SeerResult& s : v.seerResults) {
         const PlayerView* p = v.player(s.player);
@@ -43,49 +51,53 @@ std::vector<std::pair<std::string, Color>> App::roleStatusLines(const GameView& 
     }
     if (v.protectedTarget != kNoPlayer) {
         const PlayerView* p = v.player(v.protectedTarget);
-        lines.push_back({"Beschützt: " + (p ? p->name : std::string("?")), theme::roleColor(Role::Protector)});
+        lines.push_back({Lf("Beschützt: {}", "Protected: {}", p ? p->name : std::string("?")), theme::roleColor(Role::Protector)});
     }
     if (alive) {
         switch (role) {
         case Role::Elder:
-            lines.push_back({v.shieldLeft ? "Du überstehst noch einen Wolfsangriff." : "Dein Schutz ist verbraucht.", v.shieldLeft ? rc : theme::faint});
+            lines.push_back({v.shieldLeft ? L("Du überstehst noch einen Wolfsangriff.", "You can still survive one wolf attack.")
+                                          : L("Dein Schutz ist verbraucht.", "Your protection is used up."),
+                             v.shieldLeft ? rc : theme::faint});
             break;
-        case Role::LittleGirl: lines.push_back({"Nachts liest du den Rudel-Chat mit.", theme::muted}); break;
+        case Role::LittleGirl: lines.push_back({L("Nachts liest du den Rudel-Chat mit.", "At night you read the pack chat."), theme::muted}); break;
         case Role::Medium:
-            lines.push_back({v.phase != Phase::Night ? "Nachts sprichst du mit den Toten."
-                             : m_chatWolves          ? "Chat: Geister (Tab wechselt)"
-                                                     : "Chat: Nähe (Tab: Geister)",
+            lines.push_back({v.phase != Phase::Night ? std::string(L("Nachts sprichst du mit den Toten.", "At night you talk to the dead.")) : ghostChat(),
                              theme::faint});
             break;
         case Role::Tracker:
-            if (const PlayerView* p = v.player(v.tracked)) lines.push_back({"Fährte: " + p->name, rc});
+            if (const PlayerView* p = v.player(v.tracked)) lines.push_back({Lf("Fährte: {}", "Trail: {}", p->name), rc});
             break;
         case Role::Blacksmith:
-            if (v.can(AbilityReinforce)) lines.push_back({"Heute kannst du eine Tür beschlagen (E).", rc});
+            if (v.can(AbilityReinforce)) lines.push_back({L("Heute kannst du eine Tür beschlagen (E).", "Today you can reinforce a door (E)."), rc});
             break;
         case Role::Priest:
-            if (v.can(AbilityHolyWater)) lines.push_back({"Weihwasser: bereit", rc});
+            if (v.can(AbilityHolyWater)) lines.push_back({L("Weihwasser: bereit", "Holy water: ready"), rc});
             break;
-        case Role::Mayor: lines.push_back({"Deine Stimme zählt doppelt.", rc}); break;
-        case Role::Arsonist: lines.push_back({std::format("Getränkte Häuser: {}", std::popcount(v.doused)), rc}); break;
-        case Role::Jester: lines.push_back({"Ziel: Lass dich hinrichten!", rc}); break;
+        case Role::Mayor: lines.push_back({L("Deine Stimme zählt doppelt.", "Your vote counts double."), rc}); break;
+        case Role::Arsonist: lines.push_back({Lf("Getränkte Häuser: {}", "Doused houses: {}", std::popcount(v.doused)), rc}); break;
+        case Role::Jester: lines.push_back({L("Ziel: Lass dich hinrichten!", "Goal: get yourself executed!"), rc}); break;
         case Role::Angel:
-            lines.push_back({v.day <= 1 ? "Ziel: Stirb in der ersten Runde!" : "Du lebst noch – das Paradies muss warten.", rc});
+            lines.push_back({v.day <= 1 ? L("Ziel: Stirb in der ersten Runde!", "Goal: die in the first round!")
+                                        : L("Du lebst noch – das Paradies muss warten.", "You are still alive – paradise will have to wait."),
+                             rc});
             break;
         case Role::Sister:
         case Role::Brother: {
             std::string family;
             for (const PlayerView& p : v.players)
                 if (p.id != v.you && p.role == role) family += (family.empty() ? "" : ", ") + p.name;
-            lines.push_back({(role == Role::Sister ? "Schwester: " : "Brüder: ") + family, rc});
-            lines.push_back({m_chatWolves ? "Chat: Geschwister (Tab wechselt)" : "Chat: Nähe (Tab: Geschwister)", theme::faint});
+            lines.push_back({role == Role::Sister ? Lf("Schwester: {}", "Sister: {}", family) : Lf("Brüder: {}", "Brothers: {}", family), rc});
+            lines.push_back({m_chatWolves ? L("Chat: Geschwister (Tab wechselt)", "Chat: siblings (Tab switches)")
+                                          : L("Chat: Nähe (Tab: Geschwister)", "Chat: nearby (Tab: siblings)"),
+                             theme::faint});
             break;
         }
         case Role::Actor:
-            if (v.acting != Role::Unknown) lines.push_back({std::string("Heute Nacht: ") + roleName(v.acting), theme::roleColor(v.acting)});
+            if (v.acting != Role::Unknown) lines.push_back({Lf("Heute Nacht: {}", "Tonight: {}", roleName(v.acting)), theme::roleColor(v.acting)});
             break;
         case Role::WildChild:
-            if (const PlayerView* p = v.player(v.model)) lines.push_back({"Vorbild: " + p->name, rc});
+            if (const PlayerView* p = v.player(v.model)) lines.push_back({Lf("Vorbild: {}", "Role model: {}", p->name), rc});
             break;
         case Role::Piper: {
             int enchanted = 0, alivePlayers = 0;
@@ -94,14 +106,13 @@ std::vector<std::pair<std::string, Color>> App::roleStatusLines(const GameView& 
                 ++alivePlayers;
                 if (p.enchanted) ++enchanted;
             }
-            lines.push_back({std::format("Verzaubert: {} von {}", enchanted, alivePlayers), rc});
+            lines.push_back({Lf("Verzaubert: {} von {}", "Enchanted: {} of {}", enchanted, alivePlayers), rc});
             break;
         }
-        case Role::Sectarian: lines.push_back({"Gegner: alle aus der anderen Dorfhälfte", rc}); break;
+        case Role::Sectarian: lines.push_back({L("Gegner: alle aus der anderen Dorfhälfte", "Enemies: everyone from the other half of the village"), rc}); break;
         default: break;
         }
-        if (v.acting == Role::Medium)
-            lines.push_back({m_chatWolves ? "Chat: Geister (Tab wechselt)" : "Chat: Nähe (Tab: Geister)", theme::faint});
+        if (v.acting == Role::Medium) lines.push_back({ghostChat(), theme::faint});
     }
     return lines;
 }
@@ -162,7 +173,7 @@ void App::drawRoleReveal(const GameView& v) {
     m_kit.light({c.x + 160.0f, c.y - 220.0f}, 1.2f);
     m_kit.candleLight({c.x + 180.0f, c.y - 200.0f}, 520.0f, eng::smoothstep(0.3f, 1.2f, age));
     const float labelA = eng::smoothstep(0.2f, 0.8f, age);
-    const char* title = "Das Schicksal zieht deine Karte …";
+    const char* title = L("Das Schicksal zieht deine Karte …", "Fate draws your card …");
     r.text(m_fonts.scriptBold, {W * 0.5f - m_fonts.scriptBold.measure(title) * 0.5f, H * 0.1f - 30.0f}, title, chalk.withAlpha(0.85f * labelA));
 
     // Die Karte fällt auf den Tisch und dreht sich um
@@ -199,8 +210,10 @@ void App::drawRoleReveal(const GameView& v) {
             y += m_fonts.subtitle.lineHeight() + 2.0f;
         }
         const float hintA = eng::smoothstep(2.2f + total * 0.7f, 2.8f + total * 0.7f, age) * (0.7f + 0.3f * std::sin(age * 3.0f));
-        const float hw = m_kit.keycapWidth("Leertaste") + 8.0f + m_fonts.small.measure("Ins Dorf");
-        m_kit.hint({W * 0.5f - hw * 0.5f, std::min(H - 50.0f, y + 24.0f)}, "Leertaste", "Ins Dorf", hintA);
+        const char* space = L("Leertaste", "Space");
+        const char* go = L("Ins Dorf", "Into the village");
+        const float hw = m_kit.keycapWidth(space) + 8.0f + m_fonts.small.measure(go);
+        m_kit.hint({W * 0.5f - hw * 0.5f, std::min(H - 50.0f, y + 24.0f)}, space, go, hintA);
     }
     m_kit.grain(m_config.filmGrain ? 0.05f : 0.0f);
 }
@@ -237,7 +250,7 @@ void App::drawJournal(const GameView& v) {
 
     // Linke Seite: ich
     Rect left = leftPage.shrink(46.0f, 40.0f);
-    r.text(m_fonts.scriptLarge, {left.x, left.y - 4.0f}, "Tagebuch", inkRed.withAlpha(a));
+    r.text(m_fonts.scriptLarge, {left.x, left.y - 4.0f}, L("Tagebuch", "Journal"), inkRed.withAlpha(a));
     r.text(m_fonts.paperItalic, {left.x, left.y + 40.0f}, phaseWithDay(v), inkFaded.withAlpha(a));
     float y = left.y + 74.0f;
     const Role role = v.yourRole;
@@ -252,11 +265,11 @@ void App::drawJournal(const GameView& v) {
         y += m_fonts.paper.lineHeight();
     }
     y += 16.0f;
-    r.text(m_fonts.script, {left.x, y}, "Was ich weiß", inkRed.withAlpha(a));
+    r.text(m_fonts.script, {left.x, y}, L("Was ich weiß", "What I know"), inkRed.withAlpha(a));
     y += m_fonts.script.lineHeight() + 2.0f;
     const std::vector<std::pair<std::string, Color>> lines = roleStatusLines(v);
     if (lines.empty()) {
-        r.text(m_fonts.hand, {left.x, y}, "Noch nichts. Augen und Ohren offen halten.", inkSoft.withAlpha(a));
+        r.text(m_fonts.hand, {left.x, y}, L("Noch nichts. Augen und Ohren offen halten.", "Nothing yet. Keep your eyes and ears open."), inkSoft.withAlpha(a));
         y += m_fonts.hand.lineHeight();
     }
     for (const auto& [text, color] : lines) {
@@ -266,19 +279,20 @@ void App::drawJournal(const GameView& v) {
         y += m_fonts.hand.lineHeight();
     }
     if (const PlayerView* me = v.me(); me && me->house != kNoPlayer)
-        r.text(m_fonts.paperItalic, {left.x, left.bottom() - 4.0f}, "Mein Haus ist auf der Karte markiert.", inkFaded.withAlpha(a));
+        r.text(m_fonts.paperItalic, {left.x, left.bottom() - 4.0f}, L("Mein Haus ist auf der Karte markiert.", "My house is marked on the map."),
+               inkFaded.withAlpha(a));
 
     // Rechte Seite: die anderen
     Rect right = rightPage.shrink(46.0f, 40.0f);
     right.x += 30.0f;
     right.w -= 30.0f;
-    r.text(m_fonts.scriptLarge, {right.x, right.y - 4.0f}, "Die Bewohner", inkRed.withAlpha(a));
+    r.text(m_fonts.scriptLarge, {right.x, right.y - 4.0f}, L("Die Bewohner", "The villagers"), inkRed.withAlpha(a));
     float ry = right.y + 48.0f;
     const float rowH = std::min(28.0f, (right.h * 0.6f) / std::max<float>(1.0f, static_cast<float>(v.players.size())));
     for (const PlayerView& p : v.players) {
         std::string name = p.name;
         if (p.captain) name = "♛ " + name;
-        if (p.id == v.you) name += " (ich)";
+        if (p.id == v.you) name += L(" (ich)", " (me)");
         const Color nameInk = p.alive ? eng::lerp(theme::playerColor(p.id), inkDark, 0.72f) : inkFaded;
         r.text(m_fonts.hand, {right.x, ry + rowH * 0.5f - m_fonts.hand.lineHeight() * 0.5f}, m_fonts.hand.ellipsize(name, right.w * 0.48f),
                nameInk.withAlpha(a));
@@ -301,19 +315,20 @@ void App::drawJournal(const GameView& v) {
         ry += rowH;
     }
     ry += 14.0f;
-    r.text(m_fonts.script, {right.x, ry}, "Chronik", inkRed.withAlpha(a));
+    r.text(m_fonts.script, {right.x, ry}, L("Chronik", "Chronicle"), inkRed.withAlpha(a));
     ry += m_fonts.script.lineHeight() + 2.0f;
     std::vector<const LogEntry*> deaths;
     for (const LogEntry& e : m_net.log())
         if (!e.isChat && e.kind == NoticeKind::Death) deaths.push_back(&e);
-    if (deaths.empty()) r.text(m_fonts.paperItalic, {right.x, ry}, "Noch ist niemand gestorben.", inkSoft.withAlpha(a));
+    if (deaths.empty()) r.text(m_fonts.paperItalic, {right.x, ry}, L("Noch ist niemand gestorben.", "Nobody has died yet."), inkSoft.withAlpha(a));
     for (auto it = deaths.rbegin(); it != deaths.rend() && ry < right.bottom() - 10.0f; ++it) {
-        r.text(m_fonts.paperItalic, {right.x, ry}, m_fonts.paperItalic.ellipsize("† " + (*it)->text, right.w), inkDark.withAlpha(a));
+        r.text(m_fonts.paperItalic, {right.x, ry}, m_fonts.paperItalic.ellipsize("† " + (*it)->text.str(), right.w), inkDark.withAlpha(a));
         ry += m_fonts.paperItalic.lineHeight() + 2.0f;
     }
 
-    const float hintW = m_kit.keycapWidth("J") + 8.0f + m_fonts.small.measure("Schließen");
-    m_kit.hint({book.center().x - hintW * 0.5f, book.bottom() + 20.0f}, "J", "Schließen", a);
+    const char* close = L("Schließen", "Close");
+    const float hintW = m_kit.keycapWidth("J") + 8.0f + m_fonts.small.measure(close);
+    m_kit.hint({book.center().x - hintW * 0.5f, book.bottom() + 20.0f}, "J", close, a);
 }
 void App::drawSubtitles() {
     if (!m_config.subtitles || m_subtitle.empty() || !m_revealDone || m_pauseOpen || m_journalOpen) return;
@@ -322,7 +337,7 @@ void App::drawSubtitles() {
     eng::Renderer2D& r = m_renderer;
     const float a = eng::smoothstep(0.0f, 0.3f, age) * (1.0f - eng::smoothstep(5.0f, 6.0f, age));
     const float W = r.width();
-    const std::vector<std::string> lines = m_fonts.subtitle.wrap(m_subtitle, std::min(760.0f, W - 120.0f));
+    const std::vector<std::string> lines = m_fonts.subtitle.wrap(m_subtitle.str(), std::min(760.0f, W - 120.0f));
     const float lh = m_fonts.subtitle.lineHeight();
     float y = r.height() * 0.68f - static_cast<float>(lines.size()) * lh * 0.5f;
     const float bandH = static_cast<float>(lines.size()) * lh + 20.0f;

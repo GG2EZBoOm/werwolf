@@ -48,7 +48,7 @@ private:
         bool online = false;
         std::unique_ptr<eng::net::Connection> conn;
         double chatBudget = 6.0;
-        std::string removeReason;
+        Text removeReason;
         bool removeRequested = false;
     };
     struct Pending {
@@ -65,7 +65,7 @@ private:
         uint8_t from = kNoPlayer;
         std::string name;
         Notice notice;
-        std::string text;
+        Text text;
     };
 
     void acceptConnections(double now);
@@ -82,10 +82,10 @@ private:
     void ensureHost();
     void resetIfEmpty();
 
-    void chatFrom(uint8_t memberId, std::string text, bool wolves);
+    void chatFrom(uint8_t memberId, Text text, bool wolves);
     void deliverNotice(const Notice& notice);
-    void broadcastNotice(NoticeKind kind, const std::string& text);
-    void sendNotice(Member& m, NoticeKind kind, const std::string& text);
+    void broadcastNotice(NoticeKind kind, const Text& text);
+    void sendNotice(Member& m, NoticeKind kind, const Text& text);
     void routeMatchNotices();
     void sendHistory(Member& m);
     void pushHistory(HistoryEntry entry);
@@ -94,7 +94,7 @@ private:
     void sendCorrections();
     GameView lobbyView(uint8_t viewer) const;
     bool noticeVisible(const Notice& n, uint8_t memberId) const;
-    void reject(std::unique_ptr<eng::net::Connection> conn, const std::string& reason);
+    void reject(std::unique_ptr<eng::net::Connection> conn, const Text& reason);
 
     Member* member(uint8_t id);
     uint8_t freeId() const;

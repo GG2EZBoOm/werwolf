@@ -1,5 +1,7 @@
 #pragma once
 
+#include "i18n/Text.h"
+
 #include "engine/core/ByteBuffer.h"
 
 #include <cstdint>
@@ -167,8 +169,13 @@ constexpr float kTransformSeconds = 1.6f;
 constexpr float kHunterShotSeconds = 15.0f;
 constexpr float kSuccessorSeconds = 15.0f;
 
-const char* roleName(Role role);
-const char* roleDescription(Role role);
+// Namen und Beschreibungen in einer Sprache; ohne Sprache in der Sprache der Oberfläche
+const char* roleName(Role role, Lang lang);
+inline const char* roleName(Role role) { return roleName(role, language()); }
+Text roleText(Role role);
+const char* roleDescription(Role role, Lang lang);
+inline const char* roleDescription(Role role) { return roleDescription(role, language()); }
+Text roleDescriptionText(Role role);
 const char* roleIcon(Role role);
 Faction roleFaction(Role role);
 Team roleTeam(Role role);
@@ -179,9 +186,13 @@ bool isOptionalRole(Role role);
 bool isPublicRole(Role role);
 // Zwei Schwestern bzw. drei Brüder: Anzahl Karten der Rolle
 int roleCardCount(Role role);
-const char* teamName(Team team);
-const char* phaseTitle(Phase phase);
-const char* channelName(ChatChannel channel);
+const char* teamName(Team team, Lang lang);
+inline const char* teamName(Team team) { return teamName(team, language()); }
+inline Text teamText(Team team) { return {teamName(team, Lang::German), teamName(team, Lang::English)}; }
+const char* phaseTitle(Phase phase, Lang lang);
+inline const char* phaseTitle(Phase phase) { return phaseTitle(phase, language()); }
+const char* channelName(ChatChannel channel, Lang lang);
+inline const char* channelName(ChatChannel channel) { return channelName(channel, language()); }
 
 struct Settings {
     uint8_t wolves = 0;       // 0 = automatisch nach Spielerzahl
@@ -202,7 +213,7 @@ struct Settings {
 };
 
 int autoWolfCount(int players);
-std::vector<Role> buildRoleList(const Settings& settings, int players, std::string* error = nullptr);
+std::vector<Role> buildRoleList(const Settings& settings, int players, Text* error = nullptr);
 
 struct SeerResult {
     uint8_t player = kNoPlayer;
@@ -314,7 +325,7 @@ struct Notice {
     Audience audience = Audience::All;
     uint8_t player = kNoPlayer;
     NoticeKind kind = NoticeKind::Info;
-    std::string text;
+    Text text;
     float x = 0.0f, z = 0.0f, radius = 0.0f; // für Area
 };
 
