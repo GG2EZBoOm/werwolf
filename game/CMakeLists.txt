@@ -49,6 +49,10 @@ if(WERWOLF_BUILD_CLIENT)
         client/Characters.cpp
         client/Controller.cpp
         client/SandboxScreen.cpp
+        client/SettingsScreen.cpp
+        client/Style.cpp
+        client/StyleMaterials.cpp
+        client/OverlayScreens.cpp
     )
     target_link_libraries(werwolf PRIVATE werwolf_server_lib werwolf_updater engine_client)
     target_compile_definitions(werwolf PRIVATE

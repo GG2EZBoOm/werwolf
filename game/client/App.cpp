@@ -70,8 +70,11 @@ bool App::init() {
         return false;
     }
     m_characters.init();
+    m_kit.init();
     ensureWorld(kBackdropSeed);
-    loadFonts(m_window.dpiScale());
+    loadFonts(uiScale());
+    applySettings();
+    m_menuEnteredAt = eng::nowSeconds();
     eng::net::initialize();
     m_lastFrame = eng::nowSeconds();
     m_startTime = m_lastFrame;
@@ -143,7 +146,8 @@ void App::drawUpdater() {
     }
 
     r.rect({0, 0, W, H}, Color::hex(0x02030A, 0.45f));
-    r.textCentered(m_fonts.title, {0, H * 0.18f, W, 92.0f}, "WERWOLF", theme::goldLight);
+    m_kit.vignette(1.0f);
+    m_kit.spacedCentered(m_fonts.title, {0, H * 0.18f, W, 92.0f}, "WERWOLF", 10.0f, palette::brassLight);
 
     const std::string notes = m_updater.notes();
     const bool downloading = state == Updater::State::Downloading || state == Updater::State::ReadyToInstall ||
@@ -209,6 +213,13 @@ void App::parseCommandLine() {
         else if (a == "--autoplay") m_dev.autoPlay = true;
         else if (a == "--preview") m_dev.preview = true;
         else if (a == "--sandbox") m_dev.sandbox = true;
+        else if (a == "--indoors") m_dev.indoors = true;
+        else if (a == "--journal") m_dev.journal = true;
+        else if (a == "--pause") m_dev.pause = true;
+        else if (a == "--page" && hasValue) {
+            const std::string page = arg(++i);
+            m_menuPage = page == "host" ? MenuPage::Host : page == "join" ? MenuPage::Join : page == "settings" ? MenuPage::Settings : MenuPage::None;
+        }
         else if (a == "--wolf") m_playerWolfTarget = true;
         else if (a == "--orbit") m_dev.cameraOrbit = "orbit";
         else if (a == "--camera" && hasValue) m_dev.previewCamera = std::atoi(arg(++i).c_str());
@@ -272,11 +283,50 @@ void App::renderBackdrop3D() {
     ensureWorld(m_inMatch ? m_world.seed() : kBackdropSeed);
     const float t = static_cast<float>(m_time - m_startTime);
     const float a = t * 0.025f + 2.2f;
+    // Je Untermenü eine eigene Einstellung, zwischen denen die Kamera weich fährt
+    eng::Vec3 wantPos{std::cos(a) * 38.0f, 9.5f + std::sin(t * 0.05f) * 1.5f, std::sin(a) * 38.0f};
+    eng::Vec3 wantTarget{0.0f, 2.5f, 0.0f};
+    if (m_screen == Screen::Menu) {
+        switch (m_menuPage) {
+        case MenuPage::Host: // dicht am Lagerfeuer
+            wantPos = {5.5f + std::sin(t * 0.2f) * 0.4f, 1.9f, 8.5f};
+            wantTarget = {-1.0f, 1.2f, 0.0f};
+            break;
+        case MenuPage::Join: // der Weg ins Dorf
+            wantPos = {-1.0f + std::sin(t * 0.15f) * 0.5f, 2.4f, 36.0f};
+            wantTarget = {1.0f, 2.2f, 4.0f};
+            break;
+        case MenuPage::Settings: // hoch über den Dächern
+            wantPos = {-26.0f, 24.0f + std::sin(t * 0.1f), 30.0f};
+            wantTarget = {4.0f, 0.0f, -4.0f};
+            break;
+        default: break;
+        }
+        // Leichte Parallaxe mit der Maus
+        const eng::Vec2 m = m_window.input().mouse;
+        const float mx = std::clamp(m.x / std::max(1.0f, m_renderer.width()) - 0.5f, -0.5f, 0.5f);
+        const float my = std::clamp(m.y / std::max(1.0f, m_renderer.height()) - 0.5f, -0.5f, 0.5f);
+        wantTarget = wantTarget + eng::Vec3{mx * 2.4f, -my * 1.2f, 0.0f};
+    }
+    const float follow = 1.0f - std::exp(-m_dt * 1.4f);
+    m_menuCamPos = m_menuCamPos + (wantPos - m_menuCamPos) * follow;
+    m_menuCamTarget = m_menuCamTarget + (wantTarget - m_menuCamTarget) * follow;
     eng::Camera cam;
-    cam.position = {std::cos(a) * 30.0f, 7.0f + std::sin(t * 0.05f) * 1.5f, std::sin(a) * 30.0f};
-    cam.target = {0.0f, 2.5f, 0.0f};
-    const eng::Environment env = m_worldRenderer.environment(0.93f, cam.target, t);
+    cam.position = m_menuCamPos;
+    cam.target = m_menuCamTarget;
+    eng::Environment env = m_worldRenderer.environment(0.93f, cam.target, t);
+    applyGraphics(env);
+    // Tiefenunschärfe: im Hauptmenü bleibt das Dorf rechts scharf, sonst verschwimmt es hinter den Blättern
+    if (m_screen == Screen::Menu) {
+        env.focusBlur = m_menuPage == MenuPage::None ? 0.75f : 1.0f;
+        env.focusCenter = {0.7f, 0.55f};
+        env.focusRadius = m_menuPage == MenuPage::None ? 0.16f : 0.02f;
+    } else {
+        env.focusBlur = 1.0f;
+        env.focusRadius = 0.0f;
+    }
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), cam, env);
+    m_worldRenderer.setHiddenRoof(-1);
     m_worldRenderer.draw(m_renderer3d, env, t);
     m_renderer3d.endFrame();
 }
@@ -317,8 +367,10 @@ void App::renderPreview3D() {
         break;
     }
     }
-    const eng::Environment env = m_worldRenderer.environment(m_previewTimeOfDay, cam.target, t);
+    eng::Environment env = m_worldRenderer.environment(m_previewTimeOfDay, cam.target, t);
+    applyGraphics(env);
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), cam, env);
+    m_worldRenderer.setHiddenRoof(-1);
     m_worldRenderer.draw(m_renderer3d, env, t);
     m_renderer3d.endFrame();
 }
@@ -348,6 +400,7 @@ void App::shutdown() {
     m_server.stop();
     m_config.name = eng::utf8::sanitize(m_nameInput, proto::kMaxNameLength);
     m_config.save();
+    m_kit.shutdown();
     m_renderer3d.shutdown();
     m_renderer.shutdown();
     m_window.destroy();
@@ -372,11 +425,53 @@ void App::loadFonts(float scale) {
     load(m_fonts.narration, "Georgia", 15, 400, true);
     load(m_fonts.icon, "Segoe UI Symbol", 15, 400);
     load(m_fonts.iconLarge, "Segoe UI Symbol", 40, 400);
+    load(m_fonts.iconHuge, "Segoe UI Symbol", 92, 400);
+    load(m_fonts.display, "Georgia", 44, 700);
+    load(m_fonts.menu, "Georgia", 23, 400);
+    load(m_fonts.label, "Segoe UI Semibold", 11, 400);
+    load(m_fonts.subtitle, "Georgia", 19, 400, true);
+    load(m_fonts.script, "Segoe Script", 17, 400);
+    load(m_fonts.scriptBold, "Segoe Script", 21, 700);
+    load(m_fonts.scriptLarge, "Segoe Script", 30, 700);
+    load(m_fonts.hand, "Ink Free", 19, 400);
+    load(m_fonts.handLarge, "Ink Free", 28, 400);
+    load(m_fonts.handSmall, "Ink Free", 16, 400);
+    load(m_fonts.calligraphy, "Gabriola", 124, 400);
+    load(m_fonts.calligraphyMid, "Gabriola", 58, 400);
+    load(m_fonts.paper, "Georgia", 16, 400);
+    load(m_fonts.paperItalic, "Georgia", 15, 400, true);
     m_fontScale = scale;
 
     for (LogEntry& e : m_net.log()) e.wrapWidth = -1.0f;
-    m_ui.theme().font = &m_fonts.ui;
-    m_ui.theme().fontSmall = &m_fonts.small;
+    eng::ui::Theme& t = m_ui.theme();
+    t.font = &m_fonts.ui;
+    t.fontSmall = &m_fonts.small;
+    // Bedienelemente der Engine an die Farbwelt des Spiels anpassen
+    t.text = palette::parchment;
+    t.textMuted = palette::ash;
+    t.panel = Color::hex(0x0B0C11, 0.9f);
+    t.panelBorder = palette::brass.withAlpha(0.2f);
+    t.button = Color::hex(0x16181F);
+    t.buttonHover = Color::hex(0x22252E);
+    t.buttonPressed = Color::hex(0x101217);
+    t.primary = Color::hex(0xB8914A);
+    t.primaryHover = Color::hex(0xD2AE62);
+    t.primaryText = Color::hex(0x1A1308);
+    t.danger = Color::hex(0x9C3A30);
+    t.dangerHover = Color::hex(0xB8473B);
+    t.inputBg = Color::hex(0x06070A, 0.85f);
+    t.inputBorder = palette::brass.withAlpha(0.28f);
+    t.focus = palette::brassLight;
+    t.disabled = Color::hex(0x1C1D21);
+    t.disabledText = palette::smoke;
+    t.radius = 3.0f;
+}
+
+float App::uiScale() const {
+    // Gestaltet für 820 logische Pixel Höhe; größere Fenster vergrößern die Oberfläche
+    const float dpi = m_window.dpiScale();
+    const float logicalH = static_cast<float>(m_window.framebufferHeight()) / dpi;
+    return dpi * std::clamp(logicalH / 820.0f, 1.0f, 2.4f);
 }
 
 void App::frame() {
@@ -385,15 +480,24 @@ void App::frame() {
     m_lastFrame = now;
     m_time = now;
 
-    if (m_window.dpiScale() != m_fontScale) loadFonts(m_window.dpiScale());
+    // Die Oberfläche wächst mit der Fenstergröße; Schriften werden passend neu gerastert
+    const float ui = uiScale();
+    if (std::fabs(ui - m_fontScale) > 0.01f) loadFonts(ui);
     m_net.update(now);
     updateSession();
     runDevAutomation();
 
     eng::Input& in = m_window.input();
-    if (in.pressed(eng::Key::F11)) m_window.toggleFullscreen();
+    const eng::Vec2 rawMouse = in.mouse;
+    in.mouse = rawMouse * (m_window.dpiScale() / ui); // in Oberflächen-Pixel umrechnen
+    if (in.pressed(eng::Key::F11)) {
+        m_window.toggleFullscreen();
+        m_config.fullscreen = m_window.isFullscreen();
+        m_config.save();
+    }
 
     if (m_window.isMinimized()) {
+        in.mouse = rawMouse;
         in.endFrame();
         eng::sleepSeconds(0.02);
         return;
@@ -420,8 +524,9 @@ void App::frame() {
     }
 
     // 2D-Oberfläche
-    m_renderer.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), m_window.dpiScale());
+    m_renderer.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), ui);
     m_ui.beginFrame(m_window, m_renderer, now);
+    m_kit.beginFrame(m_ui, m_renderer, m_fonts, now, m_dt);
     switch (m_screen) {
     case Screen::Updating: drawUpdater(); break;
     case Screen::Preview: drawPreviewOverlay(); break;
@@ -435,6 +540,17 @@ void App::frame() {
         else drawLobby();
         break;
     }
+    // Funken, Bildschirmübergang und eigener Zeiger liegen über allem
+    m_kit.drawBursts();
+    const bool matchNow = m_screen == Screen::Session && m_inMatch;
+    if (m_screen != m_transitionScreen || matchNow != m_transitionMatch) {
+        if (m_transitionScreen != Screen::Updating || m_screen != Screen::Menu) m_transitionStart = now;
+        m_transitionScreen = m_screen;
+        m_transitionMatch = matchNow;
+    }
+    m_kit.clawWipe(static_cast<float>((now - m_transitionStart) / 1.1));
+    m_ui.setCustomCursor(true);
+    if (!m_window.isMouseCaptured() && m_window.hasFocus()) m_kit.cursor(in.mouse, m_ui.cursor());
     m_ui.endFrame();
     m_renderer.endFrame();
 
@@ -450,6 +566,7 @@ void App::frame() {
     }
 
     m_window.swapBuffers();
+    in.mouse = rawMouse;
     in.endFrame();
 }
 
@@ -480,8 +597,14 @@ void App::updateSession() {
         return;
     }
 
-    for (const LogEntry& e : fresh)
+    for (const LogEntry& e : fresh) {
         if (e.isChat && e.from != kNoPlayer) m_bubbles[e.from] = Bubble{e.text, m_time, e.channel};
+        if (!e.isChat && e.kind == NoticeKind::Narration) {
+            m_subtitle = e.text;
+            m_subtitleTime = m_time;
+        }
+        m_lastChatActivity = m_time;
+    }
 
     if (!m_net.hasView()) return;
     const GameView& v = m_net.view();
@@ -616,12 +739,12 @@ void App::leaveSession() {
     m_chatInput.clear();
     m_window.setMouseCaptured(false);
     m_screen = Screen::Menu;
+    m_menuPage = MenuPage::None;
+    m_menuEnteredAt = m_time;
+    m_journalOpen = false;
+    m_pauseOpen = false;
 }
 
-void App::drawPanel(const Rect& r, float radius) {
-    m_renderer.roundRect(r.offset(0, 4), radius, Color::hex(0x000000, 0.25f));
-    m_renderer.roundRect(r, radius, theme::panel);
-    m_renderer.roundRectOutline(r, radius, 1.0f, theme::panelBorder);
-}
+void App::drawPanel(const Rect& r, float) { m_kit.panel(r); }
 
 } // namespace ww

@@ -10,7 +10,7 @@
 // Jede Nachricht beginnt mit einem Typ-Byte, danach folgen die Felder.
 namespace ww::proto {
 
-constexpr uint16_t kVersion = 2;
+constexpr uint16_t kVersion = 4;
 constexpr uint16_t kDefaultPort = 27777;
 constexpr size_t kMaxNameLength = 16;  // Codepoints
 constexpr size_t kMaxChatLength = 240; // Codepoints
@@ -40,7 +40,7 @@ enum class ServerMsg : uint8_t {
     Chat,        // u8 channel, u8 from, str name, str text
     Notice,      // u8 kind, str text
     Pong,        // –
-    Snapshot,    // Entities
+    Snapshot,    // Entities, Türen
     Correction,  // f32 x, f32 z, f32 yaw – Server setzt die eigene Position
 };
 

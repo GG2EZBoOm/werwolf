@@ -19,7 +19,7 @@ struct Mover {
     float speed = 0.0f; // 0 = steht, 1 = geht, 2 = rennt (für die Animation)
 
     // Bewegt die Figur in Richtung `wish` (Länge 0..1). Ohne Welt-Kollision, wenn `collide` false ist (Geister).
-    void move(Vec2 wish, float maxSpeed, float dt, const World& world, bool collide = true);
+    void move(Vec2 wish, float maxSpeed, float dt, const World& world, bool collide = true, DoorMask closedDoors = 0);
     // Für Figuren, deren Position von außen gesetzt wird: Animation aus der Bewegung ableiten.
     void animateTo(Vec3 newPosition, float newYaw, float dt);
 };

@@ -19,6 +19,7 @@ namespace {
 constexpr double kHelloTimeout = 5.0;
 constexpr double kStateResendInterval = 1.0;
 constexpr size_t kHistoryLimit = 150;
+constexpr const char* kHiddenWolfName = "Unbekannter Werwolf";
 
 const std::vector<std::string> kBotNames = {"Anton", "Berta", "Clara",  "Dieter", "Emil",  "Frieda",
                                             "Gustav", "Hanna", "Ida",   "Jakob",  "Karl",  "Luise",
@@ -476,12 +477,21 @@ bool GameServer::noticeVisible(const Notice& n, uint8_t memberId) const {
     case Notice::Audience::Wolves: {
         if (!m_match) return false;
         const Match::Player* p = m_match->find(memberId);
-        return p && (p->role == Role::Werewolf || !p->alive);
+        return p && (isWolfRole(p->role) || !p->alive);
     }
     case Notice::Audience::Dead: {
         if (!m_match) return false;
         const Match::Player* p = m_match->find(memberId);
         return p && !p->alive;
+    }
+    case Notice::Audience::Area: {
+        // Geräusche hört, wer in der Nähe ist – Geister hören alles
+        if (!m_match) return false;
+        const Match::Player* p = m_match->find(memberId);
+        if (!p) return false;
+        if (!p->alive) return true;
+        const float dx = p->position.x - n.x, dz = p->position.z - n.z;
+        return dx * dx + dz * dz <= n.radius * n.radius;
     }
     }
     return false;
@@ -504,17 +514,26 @@ void GameServer::chatFrom(uint8_t memberId, std::string text, bool wolves) {
     w.u8(memberId);
     w.str(m->name);
     w.str(text);
+    // Für das kleine Mädchen ohne Namen
+    ByteWriter anonymous = proto::begin(proto::ServerMsg::Chat);
+    anonymous.u8(static_cast<uint8_t>(channel));
+    anonymous.u8(kNoPlayer);
+    anonymous.str(kHiddenWolfName);
+    anonymous.str(text);
     for (auto& target : m_members) {
         if (!target->conn) continue;
         const bool hears = m_match ? m_match->canHear(target->id, memberId, channel) : true;
-        if (hears) target->conn->send(w.data());
+        if (!hears) continue;
+        const bool hidden = m_match && m_match->hidesSpeaker(target->id, channel);
+        target->conn->send(hidden ? anonymous.data() : w.data());
     }
     if (m_match) {
         for (Bot& bot : m_bots)
-            if (m_match->canHear(bot.id(), memberId, channel)) bot.hear(*m_match, memberId, text);
+            if (m_match->canHear(bot.id(), memberId, channel) && !m_match->hidesSpeaker(bot.id(), channel))
+                bot.hear(*m_match, memberId, text);
     }
 
-    if (channel != ChatChannel::Nearby) {
+    if (channel != ChatChannel::Nearby && channel != ChatChannel::Family) {
         HistoryEntry e;
         e.isChat = true;
         e.channel = channel;
@@ -532,13 +551,17 @@ void GameServer::deliverNotice(const Notice& notice) {
     w.str(notice.text);
     for (auto& m : m_members)
         if (m->conn && noticeVisible(notice, m->id)) m->conn->send(w.data());
+    if (notice.audience == Notice::Audience::Area) return; // Geräusche sind flüchtig
     HistoryEntry e;
     e.notice = notice;
     pushHistory(std::move(e));
 }
 
 void GameServer::broadcastNotice(NoticeKind kind, const std::string& text) {
-    deliverNotice(Notice{Notice::Audience::All, kNoPlayer, kind, text});
+    Notice n;
+    n.kind = kind;
+    n.text = text;
+    deliverNotice(n);
 }
 
 void GameServer::sendNotice(Member& m, NoticeKind kind, const std::string& text) {
@@ -567,10 +590,11 @@ void GameServer::sendHistory(Member& m) {
     for (const HistoryEntry& e : m_history) {
         if (e.isChat) {
             if (m_match && !m_match->canReadChannel(m.id, e.channel)) continue;
+            const bool hidden = m_match && m_match->hidesSpeaker(m.id, e.channel);
             ByteWriter w = proto::begin(proto::ServerMsg::Chat);
             w.u8(static_cast<uint8_t>(e.channel));
-            w.u8(e.from);
-            w.str(e.name);
+            w.u8(hidden ? kNoPlayer : e.from);
+            w.str(hidden ? std::string(kHiddenWolfName) : e.name);
             w.str(e.text);
             m.conn->send(w.data());
         } else {
@@ -619,6 +643,7 @@ void GameServer::broadcastSnapshots() {
         if (!m->conn) continue;
         ByteWriter w = proto::begin(proto::ServerMsg::Snapshot);
         writeEntities(w, m_match->entitiesFor(m->id));
+        writeDoors(w, m_match->doors());
         m->conn->send(w.data());
     }
 }

@@ -5,6 +5,7 @@
 #include "engine/gfx/Font.h"
 #include "engine/gfx/GL.h"
 
+#include <cmath>
 #include <cstddef>
 
 namespace eng {
@@ -43,6 +44,11 @@ in vec2 vLocal;
 in vec2 vHalf;
 in vec3 vParams;
 uniform sampler2D uTex;
+uniform vec2 uLightPos;     // Framebuffer-Pixel, Ursprung unten links
+uniform float uLightHeight;
+uniform vec3 uLightColor;
+uniform vec3 uAmbient;
+uniform float uLightRange;
 out vec4 fragColor;
 
 float sdRoundBox(vec2 p, vec2 b, float r) {
@@ -66,6 +72,31 @@ void main() {
     } else if (mode == 2) {
         float t = clamp(1.0 - length(vLocal / vHalf), 0.0, 1.0);
         fragColor = vec4(vColor.rgb, vColor.a * t * t);
+    } else if (mode == 4) {
+        // Beleuchtetes Material: Farbe aus RGB, Relief aus dem Alphakanal
+        vec2 texel = 1.0 / vec2(textureSize(uTex, 0));
+        vec4 t = texture(uTex, vUV);
+        float hL = texture(uTex, vUV - vec2(texel.x, 0.0)).a, hR = texture(uTex, vUV + vec2(texel.x, 0.0)).a;
+        float hT = texture(uTex, vUV - vec2(0.0, texel.y)).a, hB = texture(uTex, vUV + vec2(0.0, texel.y)).a;
+        float relief = vParams.x;
+        vec3 n = normalize(vec3((hL - hR) * relief, (hB - hT) * relief, 1.0));
+        vec2 toLight = uLightPos - gl_FragCoord.xy;
+        vec3 L = normalize(vec3(toLight, uLightHeight));
+        float dist = length(toLight) / max(uLightRange, 1.0);
+        float att = 1.0 / (1.0 + dist * dist * 2.5);
+        float diff = max(dot(n, L), 0.0);
+        vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+        float spec = pow(max(dot(n, H), 0.0), 28.0) * 0.18 * att * t.a;
+        // Vertiefungen bekommen etwas weniger Umgebungslicht
+        float cavity = mix(0.72, 1.0, t.a);
+        vec3 light = uAmbient * cavity + uLightColor * diff * att;
+        fragColor = vec4(t.rgb * vColor.rgb * light + uLightColor * spec, vColor.a);
+    } else if (mode == 5) {
+        // Weicher Schatten: abgerundetes Rechteck mit breitem Verlauf
+        float soft = max(vParams.y, 0.5);
+        float d = sdRoundBox(vLocal, vHalf - vec2(soft), vParams.x);
+        float a = 1.0 - smoothstep(-soft, soft, d);
+        fragColor = vec4(vColor.rgb, vColor.a * a);
     } else {
         fragColor = vColor;
     }
@@ -113,6 +144,11 @@ bool Renderer2D::init() {
     m_projLocation = glGetUniformLocation(m_program, "uProj");
     glUseProgram(m_program);
     glUniform1i(glGetUniformLocation(m_program, "uTex"), 0);
+    m_lightPosLoc = glGetUniformLocation(m_program, "uLightPos");
+    m_lightHeightLoc = glGetUniformLocation(m_program, "uLightHeight");
+    m_lightColorLoc = glGetUniformLocation(m_program, "uLightColor");
+    m_ambientLoc = glGetUniformLocation(m_program, "uAmbient");
+    m_lightRangeLoc = glGetUniformLocation(m_program, "uLightRange");
 
     glGenVertexArrays(1, &m_vao);
     glBindVertexArray(m_vao);
@@ -160,11 +196,14 @@ void Renderer2D::beginFrame(int framebufferWidth, int framebufferHeight, float d
     m_height = static_cast<float>(m_fbHeight) / m_scale;
     m_drawCalls = 0;
     m_clipStack.clear();
+    m_transforms.clear();
 
     glViewport(0, 0, m_fbWidth, m_fbHeight);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_SCISSOR_TEST);
+    // Standardlicht für Materialien: warm, von oben
+    setLight({m_width * 0.5f, -m_height * 0.2f}, 500.0f, {0.75f, 0.68f, 0.6f}, {0.62f, 0.58f, 0.54f}, m_width * 1.4f);
     glEnable(GL_BLEND);
     m_blend = BlendMode::Alpha;
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -209,9 +248,75 @@ void Renderer2D::flush() {
     ++m_drawCalls;
 }
 
+Affine2 Affine2::around(Vec2 pivot, float angle, float scale) {
+    const float cs = std::cos(angle) * scale, sn = std::sin(angle) * scale;
+    Affine2 t{cs, sn, -sn, cs, 0, 0};
+    t.tx = pivot.x - (cs * pivot.x - sn * pivot.y);
+    t.ty = pivot.y - (sn * pivot.x + cs * pivot.y);
+    return t;
+}
+
 void Renderer2D::push(const Vertex& v) {
     if (m_vertices.size() >= kMaxVertices && m_vertices.size() % 3 == 0) flush();
-    m_vertices.push_back(v);
+    if (m_transforms.empty()) {
+        m_vertices.push_back(v);
+        return;
+    }
+    Vertex t = v;
+    const Vec2 p = m_transforms.back().apply({v.x, v.y});
+    t.x = p.x;
+    t.y = p.y;
+    m_vertices.push_back(t);
+}
+
+void Renderer2D::pushTransform(const Affine2& t) {
+    m_transforms.push_back(m_transforms.empty() ? t : m_transforms.back() * t);
+}
+
+void Renderer2D::popTransform() {
+    if (!m_transforms.empty()) m_transforms.pop_back();
+}
+
+void Renderer2D::texturedTriangle(unsigned texture, Vec2 p0, Vec2 p1, Vec2 p2, Vec2 uv0, Vec2 uv1, Vec2 uv2, Color tint) {
+    setTexture(texture);
+    const uint32_t col = tint.packed();
+    push(Vertex{p0.x, p0.y, uv0.x, uv0.y, col, 0, 0, 0, 0, 0, 0, 0});
+    push(Vertex{p1.x, p1.y, uv1.x, uv1.y, col, 0, 0, 0, 0, 0, 0, 0});
+    push(Vertex{p2.x, p2.y, uv2.x, uv2.y, col, 0, 0, 0, 0, 0, 0, 0});
+}
+
+void Renderer2D::litTriangle(unsigned texture, Vec2 p0, Vec2 p1, Vec2 p2, Vec2 uv0, Vec2 uv1, Vec2 uv2, Color tint, float relief) {
+    setTexture(texture);
+    const uint32_t col = tint.packed();
+    push(Vertex{p0.x, p0.y, uv0.x, uv0.y, col, 0, 0, 0, 0, relief, 0, 4.0f});
+    push(Vertex{p1.x, p1.y, uv1.x, uv1.y, col, 0, 0, 0, 0, relief, 0, 4.0f});
+    push(Vertex{p2.x, p2.y, uv2.x, uv2.y, col, 0, 0, 0, 0, relief, 0, 4.0f});
+}
+
+void Renderer2D::litImage(unsigned texture, const Rect& r, Vec2 uv0, Vec2 uv1, Color tint, float relief) {
+    litTriangle(texture, {r.x, r.y}, {r.right(), r.y}, {r.right(), r.bottom()}, uv0, {uv1.x, uv0.y}, uv1, tint, relief);
+    litTriangle(texture, {r.x, r.y}, {r.right(), r.bottom()}, {r.x, r.bottom()}, uv0, uv1, {uv0.x, uv1.y}, tint, relief);
+}
+
+void Renderer2D::softRect(const Rect& r, float radius, float softness, Color c) {
+    const Rect grown{r.x - softness, r.y - softness, r.w + softness * 2.0f, r.h + softness * 2.0f};
+    shape(grown, radius + softness, softness, 5.0f, c, c);
+}
+
+void Renderer2D::setLight(Vec2 position, float height, Vec3 color, Vec3 ambient, float range) {
+    flush();
+    glUseProgram(m_program);
+    glUniform2f(m_lightPosLoc, position.x * m_scale, static_cast<float>(m_fbHeight) - position.y * m_scale);
+    glUniform1f(m_lightHeightLoc, height * m_scale);
+    glUniform3f(m_lightColorLoc, color.x, color.y, color.z);
+    glUniform3f(m_ambientLoc, ambient.x, ambient.y, ambient.z);
+    glUniform1f(m_lightRangeLoc, range * m_scale);
+}
+
+void Renderer2D::triangleColors(Vec2 a, Vec2 b, Vec2 c, Color ca, Color cb, Color cc) {
+    push(Vertex{a.x, a.y, 0, 0, ca.packed(), 0, 0, 0, 0, 0, 0, 3.0f});
+    push(Vertex{b.x, b.y, 0, 0, cb.packed(), 0, 0, 0, 0, 0, 0, 3.0f});
+    push(Vertex{c.x, c.y, 0, 0, cc.packed(), 0, 0, 0, 0, 0, 0, 3.0f});
 }
 
 void Renderer2D::setTexture(unsigned texture) {
@@ -282,6 +387,53 @@ void Renderer2D::shape(const Rect& r, float radius, float border, float mode, Co
 void Renderer2D::rect(const Rect& r, Color c) { shape(r, 0.0f, 0.0f, 3.0f, c, c); }
 
 void Renderer2D::gradientV(const Rect& r, Color top, Color bottom) { shape(r, 0.0f, 0.0f, 3.0f, top, bottom); }
+
+void Renderer2D::gradientH(const Rect& r, Color left, Color right) {
+    if (r.w <= 0.0f || r.h <= 0.0f) return;
+    const uint32_t cl = left.packed(), cr = right.packed();
+    const Vertex a{r.x, r.y, 0, 0, cl, 0, 0, 0, 0, 0, 0, 3.0f};
+    const Vertex b{r.right(), r.y, 0, 0, cr, 0, 0, 0, 0, 0, 0, 3.0f};
+    const Vertex c{r.right(), r.bottom(), 0, 0, cr, 0, 0, 0, 0, 0, 0, 3.0f};
+    const Vertex d{r.x, r.bottom(), 0, 0, cl, 0, 0, 0, 0, 0, 0, 3.0f};
+    push(a);
+    push(b);
+    push(c);
+    push(a);
+    push(c);
+    push(d);
+}
+
+void Renderer2D::image(unsigned texture, const Rect& r, Vec2 uv0, Vec2 uv1, Color tint) {
+    if (!texture || r.w <= 0.0f || r.h <= 0.0f) return;
+    setTexture(texture);
+    const uint32_t col = tint.packed();
+    const Vertex a{r.x, r.y, uv0.x, uv0.y, col, 0, 0, 0, 0, 0, 0, 0};
+    const Vertex b{r.right(), r.y, uv1.x, uv0.y, col, 0, 0, 0, 0, 0, 0, 0};
+    const Vertex c{r.right(), r.bottom(), uv1.x, uv1.y, col, 0, 0, 0, 0, 0, 0, 0};
+    const Vertex d{r.x, r.bottom(), uv0.x, uv1.y, col, 0, 0, 0, 0, 0, 0, 0};
+    push(a);
+    push(b);
+    push(c);
+    push(a);
+    push(c);
+    push(d);
+}
+
+unsigned Renderer2D::createTexture(int width, int height, const uint8_t* rgba, bool repeat) {
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    return tex;
+}
+
+void Renderer2D::destroyTexture(unsigned texture) {
+    if (texture) glDeleteTextures(1, &texture);
+}
 
 void Renderer2D::roundRect(const Rect& r, float radius, Color c) { shape(r, radius, 0.0f, 1.0f, c, c); }
 
@@ -386,6 +538,29 @@ void Renderer2D::textCentered(Font& font, const Rect& r, std::string_view s, Col
 
 void Renderer2D::textRight(Font& font, Vec2 topRight, std::string_view s, Color c) {
     text(font, {topRight.x - font.measure(s), topRight.y}, s, c);
+}
+
+float Renderer2D::measureSpaced(Font& font, std::string_view s, float spacing) {
+    float w = 0.0f;
+    int count = 0;
+    for (size_t i = 0; i < s.size();) {
+        const size_t start = i;
+        utf8::next(s, i);
+        w += font.measure(s.substr(start, i - start));
+        ++count;
+    }
+    return w + spacing * static_cast<float>(std::max(0, count - 1));
+}
+
+void Renderer2D::textSpaced(Font& font, Vec2 pos, std::string_view s, float spacing, Color c) {
+    float x = pos.x;
+    for (size_t i = 0; i < s.size();) {
+        const size_t start = i;
+        utf8::next(s, i);
+        const std::string_view ch = s.substr(start, i - start);
+        text(font, {x, pos.y}, ch, c);
+        x += font.measure(ch) + spacing;
+    }
 }
 
 } // namespace eng

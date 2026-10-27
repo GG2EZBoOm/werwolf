@@ -76,7 +76,7 @@ void buildGrass(std::vector<MeshBuilder>& chunks, const World& w) {
         const float r = 6.0f + std::sqrt(rnd(state)) * 90.0f;
         const float x = std::cos(a) * r, z = std::sin(a) * r;
         if (w.pathFactor(x, z) > 0.2f || w.squareFactor(x, z) > 0.2f || w.fieldFactor(x, z) > 0.0f) continue;
-        if (w.blocked({x, z}, 0.3f)) continue;
+        if (w.blocked({x, z}, 0.3f) || w.houseAt({x, z}, 0.6f) >= 0) continue;
         MeshBuilder& b = chunks[static_cast<size_t>(chunkOf(x, z))];
         const Vec3 base = w.ground(x, z);
         const float h = 0.25f + rnd(state) * 0.35f;
@@ -96,7 +96,7 @@ void buildGrass(std::vector<MeshBuilder>& chunks, const World& w) {
         const float a = rnd(state) * 2.0f * kPi;
         const float r = 13.0f + rnd(state) * 30.0f;
         const float x = std::cos(a) * r, z = std::sin(a) * r;
-        if (w.pathFactor(x, z) > 0.1f || w.blocked({x, z}, 0.3f)) continue;
+        if (w.pathFactor(x, z) > 0.1f || w.blocked({x, z}, 0.3f) || w.houseAt({x, z}, 0.6f) >= 0) continue;
         MeshBuilder& b = chunks[static_cast<size_t>(chunkOf(x, z))];
         b.setColorJitter(0.1f);
         b.setColor(flowers[static_cast<size_t>(rnd(state) * 3.99f)]);
@@ -145,25 +145,34 @@ void buildDeadTree(MeshBuilder& b, float s) {
 
 // --- Gebäude -------------------------------------------------------------------
 
+// Fenster in der Wandmitte c: außen leuchtet die Scheibe nachts warm, innen sieht man die dunkle Nacht.
 void buildWindow(MeshBuilder& b, Vec3 c, bool sideX, uint32_t frame, float outward) {
+    const float pane = House::kWall * 0.5f + 0.02f;
+    const Vec3 half = sideX ? Vec3{pane * 0.5f, 0, 0} : Vec3{0, 0, pane * 0.5f};
+    const Vec3 size = sideX ? Vec3{pane, 0.78f, 0.72f} : Vec3{0.72f, 0.78f, pane};
     b.setColorJitter(0.0f);
     b.setGlow(1.0f);
     b.setColor(0x2B3340);
-    if (sideX) b.box(c, {0.08f, 0.78f, 0.72f});
-    else b.box(c, {0.72f, 0.78f, 0.08f});
+    b.box(c + half * outward, size);
     b.setGlow(0.0f);
+    b.setColor(0x1C2433);
+    b.box(c - half * outward, size);
     b.setColor(frame);
-    const Vec3 o = sideX ? Vec3{outward * 0.03f, 0, 0} : Vec3{0, 0, outward * 0.03f};
-    if (sideX) {
-        b.box(c + o, {0.06f, 0.82f, 0.08f});
-        b.box(c + o, {0.06f, 0.08f, 0.76f});
-        b.box(c + o + Vec3{0, -0.45f, 0}, {0.14f, 0.1f, 0.9f});
-    } else {
-        b.box(c + o, {0.08f, 0.82f, 0.06f});
-        b.box(c + o, {0.76f, 0.08f, 0.06f});
-        b.box(c + o + Vec3{0, -0.45f, 0}, {0.9f, 0.1f, 0.14f});
+    const float face = House::kWall * 0.5f + 0.03f;
+    for (float side : {outward, -outward}) {
+        const Vec3 o = sideX ? Vec3{side * face, 0, 0} : Vec3{0, 0, side * face};
+        if (sideX) {
+            b.box(c + o, {0.06f, 0.82f, 0.08f});
+            b.box(c + o, {0.06f, 0.08f, 0.76f});
+        } else {
+            b.box(c + o, {0.08f, 0.82f, 0.06f});
+            b.box(c + o, {0.76f, 0.08f, 0.06f});
+        }
     }
-    // Fensterläden
+    // Fensterbank und Läden außen
+    const Vec3 o = sideX ? Vec3{outward * face, 0, 0} : Vec3{0, 0, outward * face};
+    if (sideX) b.box(c + o + Vec3{0, -0.45f, 0}, {0.14f, 0.1f, 0.9f});
+    else b.box(c + o + Vec3{0, -0.45f, 0}, {0.9f, 0.1f, 0.14f});
     b.setColorJitter(0.05f);
     b.setColor(0x4D5E44);
     if (sideX) {
@@ -175,105 +184,232 @@ void buildWindow(MeshBuilder& b, Vec3 c, bool sideX, uint32_t frame, float outwa
     }
 }
 
-void buildHouse(MeshBuilder& b, const House& h) {
-    b.setTransform(eng::trs(h.position, h.yaw));
-    const float w = h.width, d = h.depth, wh = h.wallHeight, rh = h.roofHeight;
-    const float fy = 0.35f;
+constexpr float kDoorTop = 2.05f; // Höhe der Türöffnung über dem Fußboden
 
+// Fundament, hohle Wände mit Türöffnung, Fachwerk, Fenster und Einrichtung (lokale Koordinaten).
+void buildHouseShell(MeshBuilder& b, const House& h) {
+    const float w = h.width, d = h.depth, wh = h.wallHeight;
+    const float fy = h.floorY - h.position.y;
+    const float t = House::kWall, hw = w * 0.5f, hd = d * 0.5f, gap = House::kDoorWidth * 0.5f;
+
+    // Fundament und Dielenboden
     b.setColorJitter(0.08f);
     b.setColor(0x726C64);
-    b.box({0, -0.8f, 0}, {w + 0.4f, 2.3f, d + 0.4f});
+    b.box({0, fy - 1.15f, 0}, {w + 0.4f, 2.3f, d + 0.4f});
+    b.setColorJitter(0.05f);
+    const int planks = std::max(1, static_cast<int>((d - 2.0f * t) / 0.42f));
+    const float plank = (d - 2.0f * t) / static_cast<float>(planks);
+    for (int i = 0; i < planks; ++i) {
+        b.setColor(i % 2 ? 0x83643F : 0x8E6E48);
+        b.box({0, fy + 0.01f, -hd + t + plank * (static_cast<float>(i) + 0.5f)}, {w - 2.0f * t, 0.02f, plank - 0.015f});
+    }
 
+    // Wände (die Seitenwände liegen zwischen Vorder- und Rückwand, damit sich nichts überlappt)
     b.setColorJitter(0.025f);
     b.setColor(h.wallColor);
-    b.box({0, fy + wh * 0.5f, 0}, {w, wh, d});
-    b.gableWalls({0, fy + wh, 0}, w, d, rh, 0.45f);
+    const float wy = fy + wh * 0.5f;
+    const float seg = hw - gap;
+    b.box({0, wy, -hd + t * 0.5f}, {w, wh, t});
+    b.box({-hw + t * 0.5f, wy, 0}, {t, wh, d - 2.0f * t});
+    b.box({hw - t * 0.5f, wy, 0}, {t, wh, d - 2.0f * t});
+    b.box({-(gap + seg * 0.5f), wy, hd - t * 0.5f}, {seg, wh, t});
+    b.box({gap + seg * 0.5f, wy, hd - t * 0.5f}, {seg, wh, t});
+    b.box({0, fy + (kDoorTop + wh) * 0.5f, hd - t * 0.5f}, {gap * 2.0f, wh - kDoorTop, t});
 
     // Fachwerk
     b.setColorJitter(0.07f);
     b.setColor(h.timberColor);
-    const float t = 0.2f, o = 0.03f;
+    const float tt = 0.2f, o = 0.03f;
     for (int sx = -1; sx <= 1; sx += 2)
         for (int sz = -1; sz <= 1; sz += 2)
-            b.box({static_cast<float>(sx) * (w * 0.5f - t * 0.5f + o), fy + wh * 0.5f,
-                   static_cast<float>(sz) * (d * 0.5f - t * 0.5f + o)},
-                  {t, wh, t});
+            b.box({static_cast<float>(sx) * (hw - tt * 0.5f + o), wy, static_cast<float>(sz) * (hd - tt * 0.5f + o)}, {tt, wh, tt});
     for (float y : {fy + 0.08f, fy + wh * 0.5f + 0.25f, fy + wh - 0.08f}) {
-        b.box({0, y, d * 0.5f + o}, {w + 0.04f, 0.16f, 0.08f});
-        b.box({0, y, -d * 0.5f - o}, {w + 0.04f, 0.16f, 0.08f});
-        b.box({w * 0.5f + o, y, 0}, {0.08f, 0.16f, d + 0.04f});
-        b.box({-w * 0.5f - o, y, 0}, {0.08f, 0.16f, d + 0.04f});
+        if (y < fy + kDoorTop + 0.1f) {
+            // vorne nicht quer durch die Türöffnung
+            const float len = hw + 0.02f - 0.69f;
+            b.box({-(0.69f + len * 0.5f), y, hd + o}, {len, 0.16f, 0.08f});
+            b.box({0.69f + len * 0.5f, y, hd + o}, {len, 0.16f, 0.08f});
+        } else {
+            b.box({0, y, hd + o}, {w + 0.04f, 0.16f, 0.08f});
+        }
+        b.box({0, y, -hd - o}, {w + 0.04f, 0.16f, 0.08f});
+        b.box({hw + o, y, 0}, {0.08f, 0.16f, d + 0.04f});
+        b.box({-hw - o, y, 0}, {0.08f, 0.16f, d + 0.04f});
     }
-    // schräge Streben an der Rückseite und den Seiten
-    b.beam({-w * 0.5f + 0.2f, fy + 0.1f, -d * 0.5f - o}, {-w * 0.2f, fy + wh * 0.5f + 0.2f, -d * 0.5f - o}, 0.12f);
-    b.beam({w * 0.5f - 0.2f, fy + 0.1f, -d * 0.5f - o}, {w * 0.2f, fy + wh * 0.5f + 0.2f, -d * 0.5f - o}, 0.12f);
-    b.beam({w * 0.5f + o, fy + wh * 0.5f + 0.3f, -d * 0.45f}, {w * 0.5f + o, fy + wh - 0.1f, -d * 0.1f}, 0.12f);
-    b.beam({-w * 0.5f - o, fy + wh * 0.5f + 0.3f, d * 0.45f}, {-w * 0.5f - o, fy + wh - 0.1f, d * 0.1f}, 0.12f);
-    // Giebel-Fachwerk vorne
-    b.beam({-w * 0.5f, fy + wh + 0.05f, d * 0.5f + o}, {0, fy + wh + rh * 0.85f, d * 0.5f + o}, 0.12f);
-    b.beam({w * 0.5f, fy + wh + 0.05f, d * 0.5f + o}, {0, fy + wh + rh * 0.85f, d * 0.5f + o}, 0.12f);
+    b.beam({-hw + 0.2f, fy + 0.1f, -hd - o}, {-w * 0.2f, fy + wh * 0.5f + 0.2f, -hd - o}, 0.12f);
+    b.beam({hw - 0.2f, fy + 0.1f, -hd - o}, {w * 0.2f, fy + wh * 0.5f + 0.2f, -hd - o}, 0.12f);
+    b.beam({hw + o, fy + wh * 0.5f + 0.3f, -d * 0.45f}, {hw + o, fy + wh - 0.1f, -d * 0.1f}, 0.12f);
+    b.beam({-hw - o, fy + wh * 0.5f + 0.3f, d * 0.45f}, {-hw - o, fy + wh - 0.1f, d * 0.1f}, 0.12f);
 
-    // Tür mit Rahmen und Stufe
-    b.setColorJitter(0.05f);
-    b.setColor(0x5A3A22);
-    b.box({0, fy + 0.98f, d * 0.5f + 0.05f}, {1.05f, 1.96f, 0.1f});
-    b.setColor(0x3A2618);
-    b.box({0.3f, fy + 0.95f, d * 0.5f + 0.12f}, {0.08f, 0.08f, 0.06f});
+    // Türrahmen (außen und innen) und Stufe
     b.setColor(h.timberColor);
-    b.box({0, fy + 2.02f, d * 0.5f + 0.07f}, {1.4f, 0.14f, 0.12f});
-    b.box({0.62f, fy + 1.0f, d * 0.5f + 0.07f}, {0.14f, 2.0f, 0.12f});
-    b.box({-0.62f, fy + 1.0f, d * 0.5f + 0.07f}, {0.14f, 2.0f, 0.12f});
+    for (float z : {hd + 0.07f, hd - t - 0.05f}) {
+        b.box({0, fy + kDoorTop + 0.02f, z}, {1.4f, 0.14f, 0.12f});
+        b.box({0.62f, fy + 1.0f, z}, {0.14f, 2.0f, 0.12f});
+        b.box({-0.62f, fy + 1.0f, z}, {0.14f, 2.0f, 0.12f});
+    }
     b.setColor(0x7A746A);
-    b.box({0, fy - 0.12f, d * 0.5f + 0.45f}, {1.5f, 0.24f, 0.7f});
+    b.box({0, fy - 0.12f, hd + 0.45f}, {1.5f, 0.24f, 0.7f});
 
     // Fenster
-    const float wy = fy + wh * 0.6f;
-    buildWindow(b, {-w * 0.3f, wy, d * 0.5f + 0.04f}, false, h.timberColor, 1.0f);
-    buildWindow(b, {w * 0.3f, wy, d * 0.5f + 0.04f}, false, h.timberColor, 1.0f);
-    buildWindow(b, {w * 0.5f + 0.04f, wy, -d * 0.15f}, true, h.timberColor, 1.0f);
-    buildWindow(b, {-w * 0.5f - 0.04f, wy, d * 0.1f}, true, h.timberColor, -1.0f);
-    buildWindow(b, {0, wy, -d * 0.5f - 0.04f}, false, h.timberColor, -1.0f);
+    const float winY = fy + wh * 0.6f;
+    buildWindow(b, {-w * 0.3f, winY, hd - t * 0.5f}, false, h.timberColor, 1.0f);
+    buildWindow(b, {w * 0.3f, winY, hd - t * 0.5f}, false, h.timberColor, 1.0f);
+    buildWindow(b, {hw - t * 0.5f, winY, d * 0.25f}, true, h.timberColor, 1.0f);
+    buildWindow(b, {-hw + t * 0.5f, winY, d * 0.1f}, true, h.timberColor, -1.0f);
+    buildWindow(b, {0, winY, -hd + t * 0.5f}, false, h.timberColor, -1.0f);
 
-    // Dach mit Firstbalken
+    // --- Einrichtung (passend zu den Kollisionsboxen in World::addHouseColliders) ---
+    const uint32_t blankets[] = {0x8C3B33, 0x3E5A7A, 0x5E7A3E, 0x7A5A8C};
+    const uint32_t accent = blankets[static_cast<size_t>(h.variant) % 4];
+
+    // Bett an der linken Rückwand
+    const Vec2 bed{-hw + t + 0.5f, -hd + t + 1.0f};
+    b.setColorJitter(0.06f);
+    b.setColor(0x6B4A30);
+    b.box({bed.x, fy + 0.2f, bed.y}, {0.96f, 0.4f, 1.96f});
+    b.box({bed.x, fy + 0.5f, bed.y - 0.94f}, {0.96f, 0.95f, 0.08f});
+    b.setColor(0xD8D0BC);
+    b.box({bed.x, fy + 0.47f, bed.y - 0.66f}, {0.72f, 0.12f, 0.38f});
+    b.setColor(accent);
+    b.box({bed.x, fy + 0.45f, bed.y + 0.24f}, {0.92f, 0.1f, 1.42f});
+
+    // Tisch mit Hocker, Krug und Kerze
+    const Vec2 table{hw * 0.25f, 0.15f};
+    b.setColor(0x7A5A3C);
+    b.box({table.x, fy + 0.74f, table.y}, {1.1f, 0.07f, 0.8f});
+    for (float lx : {-0.47f, 0.47f})
+        for (float lz : {-0.32f, 0.32f}) b.box({table.x + lx, fy + 0.36f, table.y + lz}, {0.07f, 0.72f, 0.07f});
+    b.setColor(0x6E5038);
+    b.box({table.x - 0.1f, fy + 0.22f, table.y - 0.62f}, {0.36f, 0.44f, 0.36f});
+    b.setColor(0xB89A70);
+    b.cylinder({table.x + 0.25f, fy + 0.78f, table.y + 0.1f}, 0.08f, 0.16f, 6);
+    b.setColor(0x9A9288);
+    b.cylinder({table.x - 0.2f, fy + 0.78f, table.y}, 0.15f, 0.02f, 8);
+    b.setColor(0xE8E0C8);
+    b.box({table.x + 0.05f, fy + 0.84f, table.y - 0.2f}, {0.05f, 0.14f, 0.05f});
+    b.setGlow(1.0f);
+    b.setColor(0x3A2A10);
+    b.box({table.x + 0.05f, fy + 0.94f, table.y - 0.2f}, {0.04f, 0.06f, 0.04f});
+    b.setGlow(0.0f);
+
+    // Kamin an der rechten Wand mit Rauchfang bis unters Dach
+    const Vec2 fire{hw - t - 0.32f, -hd * 0.25f};
+    b.setColorJitter(0.1f);
+    b.setColor(0x6E665E);
+    b.box({fire.x, fy + 0.06f, fire.y}, {0.64f, 0.12f, 1.2f});
+    b.box({fire.x, fy + 0.55f, fire.y - 0.5f}, {0.64f, 0.9f, 0.2f});
+    b.box({fire.x, fy + 0.55f, fire.y + 0.5f}, {0.64f, 0.9f, 0.2f});
+    b.box({fire.x + 0.22f, fy + 0.55f, fire.y}, {0.2f, 0.9f, 0.8f});
+    b.setColor(0x5A4030);
+    b.box({fire.x - 0.04f, fy + 1.06f, fire.y}, {0.74f, 0.12f, 1.3f});
+    b.setColor(0x6E665E);
+    b.box({fire.x + 0.08f, fy + (1.12f + wh) * 0.5f, fire.y}, {0.48f, wh - 1.12f, 0.9f});
+    b.setColor(0x221A14);
+    b.box({fire.x - 0.02f, fy + 0.13f, fire.y}, {0.4f, 0.02f, 0.7f});
+    b.setColorJitter(0.12f);
+    b.setColor(0x4A3424);
+    b.beam({fire.x - 0.1f, fy + 0.17f, fire.y - 0.25f}, {fire.x + 0.05f, fy + 0.2f, fire.y + 0.25f}, 0.09f);
+    b.beam({fire.x + 0.05f, fy + 0.17f, fire.y - 0.25f}, {fire.x - 0.1f, fy + 0.22f, fire.y + 0.25f}, 0.09f);
+
+    // Truhe in der rechten hinteren Ecke
+    const Vec2 chest{hw - t - 0.45f, -hd + t + 0.3f};
+    b.setColorJitter(0.08f);
+    b.setColor(0x7A5534);
+    b.box({chest.x, fy + 0.25f, chest.y}, {0.9f, 0.5f, 0.56f});
+    b.setColor(0x3A3430);
+    b.box({chest.x - 0.3f, fy + 0.26f, chest.y}, {0.06f, 0.52f, 0.58f});
+    b.box({chest.x + 0.3f, fy + 0.26f, chest.y}, {0.06f, 0.52f, 0.58f});
+
+    // Wandbord mit Töpfen an der Rückwand und ein Teppich
+    b.setColor(0x6B4A30);
+    b.box({-0.15f, fy + 1.4f, -hd + t + 0.13f}, {1.3f, 0.06f, 0.26f});
+    const uint32_t pots[] = {0x9A6A4A, 0x5E6E7A, 0xB8A878, 0x7A4A3A};
+    for (int i = 0; i < 4; ++i) {
+        b.setColor(pots[i]);
+        b.cylinder({-0.6f + static_cast<float>(i) * 0.3f, fy + 1.43f, -hd + t + 0.13f}, 0.08f, 0.14f + 0.04f * static_cast<float>(i % 2), 6);
+    }
+    b.setColorJitter(0.04f);
+    b.setColor(eng::lerp(hex(accent), hex(0xC8B890), 0.45f));
+    b.box({-0.35f, fy + 0.025f, 0.75f}, {1.5f, 0.012f, 1.1f});
+
+    // Varianten außen
+    if (h.variant == 0) {
+        b.setColorJitter(0.07f);
+        b.setColor(0x5C3E28);
+        b.box({-w * 0.3f, winY - 0.55f, hd + 0.22f}, {0.9f, 0.2f, 0.25f});
+        b.box({w * 0.3f, winY - 0.55f, hd + 0.22f}, {0.9f, 0.2f, 0.25f});
+        b.setColorJitter(0.2f);
+        b.setColor(0xC8423B);
+        for (float x : {-0.35f, -0.15f, 0.05f, 0.25f}) {
+            b.box({-w * 0.3f + x * 1.2f + 0.05f, winY - 0.4f, hd + 0.22f}, {0.12f, 0.12f, 0.12f});
+            b.box({w * 0.3f + x * 1.2f + 0.05f, winY - 0.4f, hd + 0.22f}, {0.12f, 0.12f, 0.12f});
+        }
+    } else if (h.variant == 1) {
+        b.setColorJitter(0.07f);
+        b.setColor(0x6B5038);
+        b.box({w * 0.32f, fy + 0.45f, hd + 0.45f}, {1.4f, 0.1f, 0.4f});
+        b.box({w * 0.32f - 0.55f, fy + 0.2f, hd + 0.45f}, {0.1f, 0.4f, 0.35f});
+        b.box({w * 0.32f + 0.55f, fy + 0.2f, hd + 0.45f}, {0.1f, 0.4f, 0.35f});
+    } else if (h.variant == 2) {
+        // kleiner Anbau
+        b.setColorJitter(0.03f);
+        b.setColor(h.wallColor);
+        b.box({-hw - 1.0f, fy + 1.1f, -d * 0.15f}, {2.0f, 2.2f, d * 0.6f});
+        b.setColor(h.roofColor);
+        b.setColorJitter(0.08f);
+        b.quad({-hw - 2.2f, fy + 2.0f, d * 0.2f}, {-hw, fy + 2.9f, d * 0.2f}, {-hw, fy + 2.9f, -d * 0.5f},
+               {-hw - 2.2f, fy + 2.0f, -d * 0.5f});
+    }
+}
+
+// Dach, Giebel und Schornstein (lokale Koordinaten) – wird ausgeblendet, wenn man drinnen ist.
+void buildHouseRoof(MeshBuilder& b, const House& h) {
+    const float w = h.width, d = h.depth, wh = h.wallHeight, rh = h.roofHeight;
+    const float fy = h.floorY - h.position.y;
+    const float hw = w * 0.5f, hd = d * 0.5f, o = 0.03f;
+    b.setColorJitter(0.025f);
+    b.setColor(h.wallColor);
+    b.gableWalls({0, fy + wh, 0}, w, d, rh, 0.45f);
+    b.setColorJitter(0.07f);
+    b.setColor(h.timberColor);
+    b.beam({-hw, fy + wh + 0.05f, hd + o}, {0, fy + wh + rh * 0.85f, hd + o}, 0.12f);
+    b.beam({hw, fy + wh + 0.05f, hd + o}, {0, fy + wh + rh * 0.85f, hd + o}, 0.12f);
     b.setColorJitter(0.08f);
     b.setColor(h.roofColor);
     b.gableRoof({0, fy + wh, 0}, w, d, rh, 0.45f, false);
     b.setColor(eng::lerp(hex(h.roofColor), hex(0x000000), 0.35f));
     b.box({0, fy + wh + rh + 0.03f, 0}, {0.2f, 0.16f, d + 0.95f});
-    if (h.chimney) {
-        b.setColor(0x6E665E);
-        b.box({w * 0.22f, fy + wh + (rh + 0.9f) * 0.5f, -d * 0.18f}, {0.6f, rh + 0.9f, 0.6f});
-        b.setColor(0x4E4740);
-        b.box({w * 0.22f, fy + wh + rh + 0.9f, -d * 0.18f}, {0.72f, 0.12f, 0.72f});
-    }
+    // Schornstein direkt über dem Kamin
+    const Vec2 fire{hw - House::kWall - 0.24f, -hd * 0.25f};
+    const float top = fy + wh + rh * 0.55f + 0.9f;
+    b.setColor(0x6E665E);
+    b.box({fire.x, fy + wh + (top - fy - wh) * 0.5f, fire.y}, {0.5f, top - fy - wh, 0.6f});
+    b.setColor(0x4E4740);
+    b.box({fire.x, top, fire.y}, {0.62f, 0.12f, 0.72f});
+}
 
-    // Varianten
-    if (h.variant == 0) {
-        b.setColor(0x5C3E28);
-        b.box({-w * 0.3f, wy - 0.55f, d * 0.5f + 0.22f}, {0.9f, 0.2f, 0.25f});
-        b.box({w * 0.3f, wy - 0.55f, d * 0.5f + 0.22f}, {0.9f, 0.2f, 0.25f});
-        b.setColorJitter(0.2f);
-        b.setColor(0xC8423B);
-        for (float x : {-0.35f, -0.15f, 0.05f, 0.25f}) {
-            b.box({-w * 0.3f + x * 1.2f + 0.05f, wy - 0.4f, d * 0.5f + 0.22f}, {0.12f, 0.12f, 0.12f});
-            b.box({w * 0.3f + x * 1.2f + 0.05f, wy - 0.4f, d * 0.5f + 0.22f}, {0.12f, 0.12f, 0.12f});
-        }
-    } else if (h.variant == 1) {
-        b.setColor(0x6B5038);
-        b.box({w * 0.32f, fy + 0.45f, d * 0.5f + 0.45f}, {1.4f, 0.1f, 0.4f});
-        b.box({w * 0.32f - 0.55f, fy + 0.2f, d * 0.5f + 0.45f}, {0.1f, 0.4f, 0.35f});
-        b.box({w * 0.32f + 0.55f, fy + 0.2f, d * 0.5f + 0.45f}, {0.1f, 0.4f, 0.35f});
-    } else if (h.variant == 2) {
-        // kleiner Anbau
-        b.setColorJitter(0.03f);
-        b.setColor(h.wallColor);
-        b.box({-w * 0.5f - 1.0f, fy + 1.1f, -d * 0.15f}, {2.0f, 2.2f, d * 0.6f});
-        b.setColor(h.roofColor);
-        b.setColorJitter(0.08f);
-        b.quad({-w * 0.5f - 2.2f, fy + 2.0f, d * 0.2f}, {-w * 0.5f, fy + 2.9f, d * 0.2f},
-               {-w * 0.5f, fy + 2.9f, -d * 0.5f}, {-w * 0.5f - 2.2f, fy + 2.0f, -d * 0.5f});
+// Türblatt, Ursprung an der Angel (links), öffnet sich um die Y-Achse nach innen.
+void buildDoorLeaf(MeshBuilder& b, bool reinforced) {
+    const float wd = House::kDoorWidth - 0.1f;
+    b.setColorJitter(0.05f);
+    b.setColor(0x5A3A22);
+    b.box({wd * 0.5f, 0.98f, 0}, {wd, 1.96f, 0.08f});
+    b.setColor(0x4A2E1A);
+    for (float y : {0.35f, 1.6f})
+        for (float z : {0.05f, -0.05f}) b.box({wd * 0.5f, y, z}, {wd - 0.08f, 0.12f, 0.03f});
+    b.setColor(0x3A2618);
+    b.box({wd - 0.15f, 0.95f, 0.08f}, {0.08f, 0.08f, 0.06f});
+    b.box({wd - 0.15f, 0.95f, -0.08f}, {0.08f, 0.08f, 0.06f});
+    if (!reinforced) return;
+    b.setColorJitter(0.03f);
+    b.setColor(0x4A4E55);
+    for (float y : {0.3f, 0.98f, 1.66f}) {
+        for (float z : {0.056f, -0.056f}) b.box({wd * 0.5f, y, z}, {wd + 0.02f, 0.11f, 0.03f});
+        b.setColor(0x6A6E75);
+        for (float x : {0.12f, wd * 0.5f, wd - 0.12f}) b.box({x, y, 0.075f}, {0.05f, 0.05f, 0.03f});
+        b.setColor(0x4A4E55);
     }
-    b.setTransform(Mat4::identity());
 }
 
 void buildChapel(MeshBuilder& b, Vec3 pos, float yaw) {
@@ -558,8 +694,30 @@ void WorldRenderer::build(const World& world) {
     buildGrass(builders, world);
 
     for (const Tree& t : world.trees()) buildTree(builders[static_cast<size_t>(chunkOf(t.position.x, t.position.z))], t);
-    for (const House& h : world.houses())
-        buildHouse(builders[static_cast<size_t>(chunkOf(h.position.x, h.position.z))], h);
+    m_houses.clear();
+    m_houses.resize(world.houses().size());
+    for (size_t i = 0; i < world.houses().size(); ++i) {
+        const House& h = world.houses()[i];
+        HouseGfx& g = m_houses[i];
+        MeshBuilder shell, roof;
+        buildHouseShell(shell, h);
+        buildHouseRoof(roof, h);
+        shell.uploadTo(g.shell);
+        roof.uploadTo(g.roof);
+        g.position = h.position;
+        g.yaw = h.yaw;
+        g.hinge = {-House::kDoorWidth * 0.5f + 0.05f, h.floorY - h.position.y, h.depth * 0.5f - House::kWall * 0.5f};
+        g.hearth = h.hearth;
+        g.center = {h.position.x, h.floorY + h.wallHeight, h.position.z};
+        g.width = h.width;
+        g.depth = h.depth;
+        g.height = h.wallHeight;
+    }
+    MeshBuilder door, reinforced;
+    buildDoorLeaf(door, false);
+    buildDoorLeaf(reinforced, true);
+    door.uploadTo(m_door);
+    reinforced.uploadTo(m_doorReinforced);
     buildChapel(builders[static_cast<size_t>(chunkOf(world.chapel().x, world.chapel().z))], world.chapel(),
                 world.chapelYaw());
     buildWell(builders[static_cast<size_t>(chunkOf(world.well().x, world.well().z))], world.well());
@@ -650,10 +808,80 @@ eng::Environment WorldRenderer::environment(float timeOfDay, Vec3 focus, float t
     return env;
 }
 
+void WorldRenderer::updateHouses(const std::vector<DoorState>& doors, float dt) {
+    for (size_t i = 0; i < m_houses.size(); ++i) {
+        HouseGfx& g = m_houses[i];
+        g.flags = i < doors.size() ? doors[i].flags : 0;
+        const bool open = g.flags & (DoorOpen | DoorBroken);
+        g.door = eng::approach(g.door, open ? 1.0f : 0.0f, dt * 3.5f);
+    }
+}
+
+void WorldRenderer::drawHouses(eng::Renderer3D& r, float night, float time) const {
+    const Color ruin{0.2f, 0.18f, 0.17f, 0.0f};
+    for (size_t i = 0; i < m_houses.size(); ++i) {
+        const HouseGfx& g = m_houses[i];
+        const Mat4 m = eng::trs(g.position, g.yaw);
+        const bool burnt = g.flags & DoorBurnt;
+        const bool burning = g.flags & DoorBurning;
+        r.draw(g.shell, m, burnt ? ruin : Color{1, 1, 1, 1});
+        if (burnt) {
+            // Glutnester in der Ruine
+            for (int k = 0; k < 6; ++k) {
+                const float fk = static_cast<float>(k);
+                const Vec3 p = m.transformPoint({std::sin(fk * 2.7f) * g.width * 0.3f, g.hinge.y + 0.15f, std::cos(fk * 1.9f) * g.depth * 0.3f});
+                r.particle(p, 0.25f, Vec3{2.2f, 0.6f, 0.15f} * (0.5f + 0.5f * std::sin(time * 1.3f + fk)), 0.8f);
+            }
+            continue;
+        }
+        if (static_cast<int>(i) != m_hiddenRoof) r.draw(g.roof, m, burning ? Color{0.55f, 0.45f, 0.4f, 1.0f} : Color{1, 1, 1, 1});
+
+        // Tür: offen, zu oder eingeschlagen
+        const eng::Mesh& leaf = (g.flags & DoorReinforced) ? m_doorReinforced : m_door;
+        if (g.flags & DoorBroken) {
+            r.draw(leaf, m * Mat4::translation({-0.45f, g.hinge.y + 0.05f, g.hinge.z - 0.3f}) * Mat4::rotationY(0.35f) *
+                             Mat4::rotationX(-kPi * 0.5f),
+                   Color{0.75f, 0.7f, 0.65f, 1.0f});
+        } else {
+            const float angle = eng::smoothstep(0.0f, 1.0f, g.door) * kPi * 0.5f * 0.94f;
+            r.draw(leaf, m * Mat4::translation(g.hinge) * Mat4::rotationY(angle));
+        }
+
+        // Kaminfeuer: brennt immer, nachts heller
+        if (!burning) {
+            const float flicker = 0.85f + 0.15f * std::sin(time * 11.0f + static_cast<float>(i)) * std::sin(time * 6.1f + static_cast<float>(i) * 2.0f);
+            r.light({g.hearth + Vec3{-0.25f, 0.1f, 0}, 5.5f, {1.0f, 0.52f, 0.2f}, (0.7f + 1.5f * night) * flicker});
+            for (int k = 0; k < 8; ++k) {
+                const float fk = static_cast<float>(k);
+                const float life = std::fmod(time * (1.1f + std::fmod(fk * 0.31f, 0.5f)) + fk * 0.618f, 1.0f);
+                const Vec3 base = m.transformPoint({g.width * 0.5f - House::kWall - 0.34f, g.hinge.y + 0.2f, -g.depth * 0.125f});
+                const Vec3 p = base + Vec3{std::sin(fk * 2.1f) * 0.12f * (1.0f - life), life * 0.45f, std::cos(fk * 1.7f) * 0.18f * (1.0f - life)};
+                r.particle(p, (1.0f - life) * 0.32f + 0.08f, eng::lerp(Vec3{4.0f, 2.6f, 1.0f}, Vec3{2.8f, 0.6f, 0.1f}, life), 1.0f - life);
+            }
+            continue;
+        }
+
+        // Das Haus brennt lichterloh
+        const float flicker = 0.8f + 0.2f * std::sin(time * 9.0f + static_cast<float>(i)) * std::sin(time * 4.3f);
+        r.light({g.center + Vec3{0, 1.0f, 0}, 16.0f, {1.0f, 0.45f, 0.14f}, 4.5f * flicker});
+        for (int k = 0; k < 70; ++k) {
+            const float fk = static_cast<float>(k);
+            const float life = std::fmod(time * (0.7f + std::fmod(fk * 0.23f, 0.6f)) + fk * 0.618f, 1.0f);
+            const float lx = (std::fmod(fk * 0.377f, 1.0f) - 0.5f) * g.width;
+            const float lz = (std::fmod(fk * 0.611f, 1.0f) - 0.5f) * g.depth;
+            const float roofY = g.height * (0.4f + 0.6f * std::fmod(fk * 0.13f, 1.0f));
+            const Vec3 base = m.transformPoint({lx, g.hinge.y + roofY, lz});
+            const Vec3 p = base + Vec3{std::sin(time * 2.0f + fk) * 0.3f, life * 2.8f, std::cos(time * 1.7f + fk) * 0.3f};
+            r.particle(p, (1.0f - life) * 1.5f + 0.3f, eng::lerp(Vec3{5.0f, 3.0f, 1.0f}, Vec3{3.0f, 0.5f, 0.08f}, life), 1.0f - life);
+        }
+    }
+}
+
 void WorldRenderer::draw(eng::Renderer3D& r, const eng::Environment& env, float time) const {
     for (const Chunk& c : m_chunks) r.draw(c.mesh, Mat4::identity());
 
     const float night = env.emissive;
+    drawHouses(r, night, time);
 
     // Lagerfeuer: Licht, Flammen und Funken
     const float flicker = 0.85f + 0.1f * std::sin(time * 13.0f) * std::sin(time * 7.3f + 1.0f) + 0.05f * std::sin(time * 23.0f);

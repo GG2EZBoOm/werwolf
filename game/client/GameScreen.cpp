@@ -2,6 +2,7 @@
 #include "client/Theme.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <format>
 #include <map>
@@ -27,14 +28,48 @@ std::string clockText(float seconds) {
 
 Color promptColor(Interaction kind) {
     switch (kind) {
-    case Interaction::Attack: return theme::blood;
+    case Interaction::Attack:
+    case Interaction::DoorBreak: return theme::blood;
+    case Interaction::Infect: return theme::roleColor(Role::AlphaWolf);
     case Interaction::Inspect: return theme::roleColor(Role::Seer);
     case Interaction::Protect: return theme::roleColor(Role::Protector);
     case Interaction::Heal:
     case Interaction::Poison: return theme::roleColor(Role::Witch);
     case Interaction::CupidPick: return theme::roleColor(Role::Cupid);
     case Interaction::HunterShot: return theme::roleColor(Role::Hunter);
+    case Interaction::Track: return theme::roleColor(Role::Tracker);
+    case Interaction::Reinforce: return theme::roleColor(Role::Blacksmith);
+    case Interaction::HolyWater: return theme::roleColor(Role::Priest);
+    case Interaction::Stab: return theme::roleColor(Role::SerialKiller);
+    case Interaction::Douse:
+    case Interaction::Ignite: return theme::roleColor(Role::Arsonist);
+    case Interaction::DoorToggle: return Color::hex(0xC9B48C);
+    case Interaction::Steal: return theme::roleColor(Role::Thief);
+    case Interaction::Enchant: return theme::roleColor(Role::Piper);
+    case Interaction::Sniff: return theme::roleColor(Role::Fox);
+    case Interaction::TakeRole: return theme::roleColor(Role::Servant);
+    case Interaction::SecondVote: return theme::roleColor(Role::Judge);
+    case Interaction::ChooseModel: return theme::roleColor(Role::WildChild);
+    case Interaction::ChooseSide: return theme::roleColor(Role::WolfHound);
+    case Interaction::Mark: return theme::roleColor(Role::Raven);
+    case Interaction::NameSuccessor: return theme::goldLight;
     default: return theme::gold;
+    }
+}
+
+// Zielt die Aktion auf einen Spieler (und nicht auf ein Haus oder auf nichts)?
+bool targetsPlayer(Interaction kind) {
+    switch (kind) {
+    case Interaction::Transform:
+    case Interaction::RingBell:
+    case Interaction::DoorToggle:
+    case Interaction::DoorBreak:
+    case Interaction::Reinforce:
+    case Interaction::Douse:
+    case Interaction::Ignite:
+    case Interaction::SecondVote:
+    case Interaction::ChooseSide: return false;
+    default: return true;
     }
 }
 
@@ -48,14 +83,19 @@ bool App::imAlive() const {
 std::string App::headerTitle(const GameView& v) const {
     switch (v.phase) {
     case Phase::Day: return std::format("Tag {}", v.day);
-    case Phase::Assembly: return "Versammlung";
-    case Phase::Vote: return "Abstimmung";
+    case Phase::Assembly: return v.election ? "Hauptmannwahl" : "Versammlung";
+    case Phase::Vote: return v.election ? "Hauptmannwahl" : "Abstimmung";
     case Phase::Execution: return "Das Urteil";
     case Phase::Night: return std::format("Nacht {}", v.day);
     case Phase::Morning: return "Morgengrauen";
     case Phase::GameOver: return "Spielende";
     default: return "";
     }
+}
+
+std::string App::phaseWithDay(const GameView& v) const {
+    if (v.phase == Phase::Day || v.phase == Phase::Night || v.day <= 0) return headerTitle(v);
+    return std::format("{} · Tag {}", headerTitle(v), v.day);
 }
 
 // --- Einstieg ------------------------------------------------------------------
@@ -78,6 +118,14 @@ void App::enterMatch() {
     m_timeOfDay = timeOfDay(v.phase, v.timeLeft, v.phaseDuration);
     m_window.setMouseCaptured(true);
     m_autoTarget = {0, 8};
+    m_journalOpen = false;
+    m_pauseSettings = false;
+    // Zu Beginn wird die eigene Rolle feierlich aufgedeckt (nicht beim Wiederverbinden mitten im Spiel)
+    m_revealDone = v.day > 1 || v.phase == Phase::GameOver || m_dev.autoPlay || m_dev.journal || m_dev.pause;
+    m_revealStart = m_time;
+    m_journalOpen = m_dev.journal;
+    m_pauseOpen = m_dev.pause;
+    if (m_journalOpen || m_pauseOpen) m_window.setMouseCaptured(false);
 }
 
 // --- Aktionen und Zielauswahl ----------------------------------------------------
@@ -85,7 +133,10 @@ void App::enterMatch() {
 void App::buildPrompts(const GameView& v) {
     m_prompts.clear();
     const Vec3 me = m_player.position;
+    const Vec2 me2{me.x, me.z};
     const Vec2 fwd{std::sin(m_camera.yaw), std::cos(m_camera.yaw)};
+    const bool alive = imAlive();
+    const DoorMask closed = m_net.closedDoors();
     auto name = [&](uint8_t id) {
         const PlayerView* p = v.player(id);
         return p ? p->name : std::string("?");
@@ -101,6 +152,8 @@ void App::buildPrompts(const GameView& v) {
             const Vec2 d{e.x - me.x, e.z - me.z};
             const float dist = d.length();
             if (dist > range) continue;
+            if (alive && m_world.lineBlocked(me2, {e.x, e.z}, closed)) continue; // hinter Wänden und Türen
+
             const float angle = dist < 0.05f ? 0.0f : std::acos(std::clamp((fwd.x * d.x + fwd.y * d.y) / dist, -1.0f, 1.0f));
             const float maxAngle = dist < 3.0f ? 0.95f : 0.42f;
             if (angle > maxAngle) continue;
@@ -117,6 +170,41 @@ void App::buildPrompts(const GameView& v) {
         m_prompts.push_back(Prompt{kind, key, std::move(label), target, ready, param});
     };
 
+    if (v.can(AbilityNameSuccessor)) {
+        const uint8_t t = aim(60.0f, false, any);
+        add(Interaction::NameSuccessor, "E", t != kNoPlayer ? "Hauptmann-Amt an " + name(t) + " übergeben" : "Schau deinen Nachfolger an",
+            t, t != kNoPlayer);
+    }
+    if (v.can(AbilityTakeRole) && v.condemned != kNoPlayer)
+        add(Interaction::TakeRole, "E", "Als ergebene Magd die Rolle von " + name(v.condemned) + " übernehmen", v.condemned, true);
+    if (v.can(AbilitySecondVote)) add(Interaction::SecondVote, "F", "Heimlich eine zweite Abstimmung verlangen", 0, true);
+    if (v.can(AbilityChooseSide)) {
+        add(Interaction::ChooseSide, "E", "Dem Dorf treu bleiben", 0, true);
+        add(Interaction::ChooseSide, "F", "Zum Werwolf werden", 0, true, 1);
+    }
+    if (v.can(AbilitySteal)) {
+        const uint8_t t = aim(kStealRange, false, any);
+        add(Interaction::Steal, "E", t != kNoPlayer ? "Rolle stehlen: " + name(t) : "Schleich dich an jemanden heran (Dieb)", t, t != kNoPlayer);
+    }
+    if (v.can(AbilityEnchant)) {
+        const uint8_t t = aim(kEnchantRange, false, [&](const EntityState& e) {
+            const PlayerView* p = v.player(e.id);
+            return !p || !p->enchanted;
+        });
+        add(Interaction::Enchant, "E", t != kNoPlayer ? "Verzaubern: " + name(t) : "Spiel jemandem in der Nähe vor (Flöte)", t, t != kNoPlayer);
+    }
+    if (v.can(AbilitySniff)) {
+        const uint8_t t = aim(kSniffRange, false, any);
+        add(Interaction::Sniff, "E", t != kNoPlayer ? "Wittern: " + name(t) + " und Umgebung" : "Schau jemanden an (Fuchsnase)", t, t != kNoPlayer);
+    }
+    if (v.can(AbilityMark)) {
+        const uint8_t t = aim(kMarkRange, false, any);
+        add(Interaction::Mark, "E", t != kNoPlayer ? "Rabe auf das Dach von " + name(t) : "Schau jemanden an (Rabe)", t, t != kNoPlayer);
+    }
+    if (v.can(AbilityChooseModel)) {
+        const uint8_t t = aim(kModelRange, false, any);
+        add(Interaction::ChooseModel, "E", t != kNoPlayer ? "Vorbild wählen: " + name(t) : "Schau dein Vorbild an", t, t != kNoPlayer);
+    }
     if (v.can(AbilityHunterShot)) {
         const uint8_t t = aim(kHunterRange, false, any);
         add(Interaction::HunterShot, "E", t != kNoPlayer ? "Letzter Schuss auf " + name(t) : "Ziele auf jemanden – dein letzter Schuss",
@@ -124,8 +212,9 @@ void App::buildPrompts(const GameView& v) {
     }
     if (v.can(AbilityVote)) {
         const uint8_t t = aim(60.0f, false, any);
-        if (t != kNoPlayer && v.vote == t) add(Interaction::Vote, "E", "Stimme gegen " + name(t) + " zurückziehen", kNoPlayer, true);
-        else if (t != kNoPlayer) add(Interaction::Vote, "E", "Stimme gegen " + name(t), t, true);
+        const std::string what = v.election ? "Stimme für " : "Stimme gegen ";
+        if (t != kNoPlayer && v.vote == t) add(Interaction::Vote, "E", what + name(t) + " zurückziehen", kNoPlayer, true);
+        else if (t != kNoPlayer) add(Interaction::Vote, "E", what + name(t), t, true);
         else add(Interaction::Vote, "E", "Schau jemanden an, um abzustimmen", kNoPlayer, false);
     }
     if (v.can(AbilityRingBell) && distanceXZ(me, m_world.bell()) < kBellRange)
@@ -134,12 +223,75 @@ void App::buildPrompts(const GameView& v) {
         const bool wolf = m_myTransform > 0.5f;
         add(Interaction::Transform, "R", wolf ? "Zurückverwandeln" : "In einen Werwolf verwandeln", 0, true, wolf ? 0 : 1);
     }
-    if (v.can(AbilityAttack)) {
+    auto notPack = [&](const EntityState& e) {
+        const PlayerView* p = v.player(e.id);
+        return !p || !isWolfRole(p->role);
+    };
+    if (v.can(AbilityAttack) || v.can(AbilityBetray)) {
         const uint8_t t = aim(kAttackRange + 0.3f, false, [&](const EntityState& e) {
-            const PlayerView* p = v.player(e.id);
-            return !p || p->role != Role::Werewolf;
+            return v.can(AbilityBetray) || (notPack(e) && v.can(AbilityAttack));
         });
-        add(Interaction::Attack, "Klick", t != kNoPlayer ? "Reißen: " + name(t) : "Komm nah genug an ein Opfer heran", t, t != kNoPlayer);
+        const PlayerView* tp = v.player(t);
+        const bool packmate = tp && isWolfRole(tp->role);
+        add(Interaction::Attack, "Klick",
+            t != kNoPlayer ? (packmate ? "Verrat: " : "Reißen: ") + name(t) : "Komm nah genug an ein Opfer heran", t, t != kNoPlayer);
+    }
+    if (v.can(AbilityInfect)) {
+        const uint8_t t = aim(kAttackRange + 0.3f, false, notPack);
+        if (t != kNoPlayer) add(Interaction::Infect, "F", "Infizieren: " + name(t) + " wird zum Werwolf", t, true);
+    }
+    if (v.can(AbilityStab)) {
+        const uint8_t t = aim(kAttackRange + 0.3f, false, any);
+        add(Interaction::Stab, "Klick", t != kNoPlayer ? "Erstechen: " + name(t) : "Schleich dich an ein Opfer heran", t, t != kNoPlayer);
+    }
+    if (v.can(AbilityTrack)) {
+        const uint8_t t = aim(kTrackRange, false, any);
+        add(Interaction::Track, "E", t != kNoPlayer ? "Fährte aufnehmen: " + name(t) : "Schau jemanden an (Fährte)", t, t != kNoPlayer);
+    }
+    if (v.can(AbilityHolyWater)) {
+        const uint8_t t = aim(kHolyWaterRange, false, any);
+        if (t != kNoPlayer) add(Interaction::HolyWater, "E", "Weihwasser auf " + name(t), t, true);
+    }
+    if (v.can(AbilityIgnite)) {
+        const int count = std::popcount(v.doused);
+        add(Interaction::Ignite, "F", std::format("{} getränkte{} Haus{} anzünden", count, count == 1 ? "s" : "", count == 1 ? "" : "er"), 0,
+            true);
+    }
+
+    // Türen: nächste Tür in Reichweite
+    const std::vector<DoorState>& doors = m_net.doors();
+    int door = -1;
+    float doorDist = kDoorRange;
+    for (size_t i = 0; i < m_world.houses().size() && i < doors.size(); ++i) {
+        const float d = (m_world.doorCenter(static_cast<int>(i)) - me2).length();
+        if (d < doorDist) {
+            doorDist = d;
+            door = static_cast<int>(i);
+        }
+    }
+    if (alive && door >= 0) {
+        const DoorState& d = doors[static_cast<size_t>(door)];
+        const uint8_t house = static_cast<uint8_t>(door);
+        const bool inside = m_world.houseAt(me2, 0.3f) == door;
+        const bool shut = !(d.flags & DoorOpen);
+        if (!(d.flags & (DoorBroken | DoorBurnt))) {
+            if (!shut) add(Interaction::DoorToggle, "Q", inside ? "Tür schließen und verriegeln" : "Tür schließen", house, true);
+            else if ((d.flags & DoorLocked) && !inside) add(Interaction::DoorToggle, "Q", "Die Tür ist von innen verriegelt", house, false);
+            else add(Interaction::DoorToggle, "Q", (d.flags & DoorLocked) ? "Riegel lösen und öffnen" : "Tür öffnen", house, true);
+        }
+        if (v.can(AbilityBreakDoor) && shut && (d.flags & DoorLocked) && !inside && !(d.flags & (DoorBroken | DoorBurnt)))
+            add(Interaction::DoorBreak, "Klick", std::format("{} einschlagen ({} %)", (d.flags & DoorReinforced) ? "Beschlagene Tür" : "Tür", d.health),
+                house, true);
+        if (v.can(AbilityReinforce) && !(d.flags & DoorBurnt)) {
+            const bool done = (d.flags & DoorReinforced) && !(d.flags & DoorBroken) && d.health >= 100;
+            add(Interaction::Reinforce, "E",
+                done ? "Diese Tür ist schon beschlagen" : (d.flags & DoorBroken) ? "Tür reparieren und beschlagen" : "Tür mit Eisen beschlagen",
+                house, !done);
+        }
+        if (v.can(AbilityDouse) && !(d.flags & (DoorBurnt | DoorBurning))) {
+            const bool doused = v.doused & (1u << door);
+            add(Interaction::Douse, "E", doused ? "Dieses Haus ist schon getränkt" : "Haus mit Öl tränken", house, !doused);
+        }
     }
     if (v.can(AbilityInspect)) {
         const uint8_t t = aim(kInspectRange, false, any);
@@ -168,7 +320,7 @@ void App::buildPrompts(const GameView& v) {
     }
     m_aimTarget = kNoPlayer;
     for (const Prompt& p : m_prompts) {
-        if (p.target != kNoPlayer && p.kind != Interaction::Transform && p.kind != Interaction::RingBell) {
+        if (p.target != kNoPlayer && targetsPlayer(p.kind)) {
             m_aimTarget = p.target;
             break;
         }
@@ -203,28 +355,49 @@ void App::updateMatch() {
     if (over) m_window.setMouseCaptured(false);
     if (m_chatWasFocused && !chatFocused && !m_pauseOpen && !over) m_window.setMouseCaptured(true);
     m_chatWasFocused = chatFocused;
-    if (!chatFocused && !over && in.pressed(eng::Key::Escape)) {
-        if (m_window.isMouseCaptured()) {
+    // Rollenkarte zu Beginn: Leertaste, Klick oder Esc deckt auf und schließt
+    if (!m_revealDone) {
+        const double age = m_time - m_revealStart;
+        if (age > 9.0 || (age > 1.8 && (in.pressed(eng::Key::Space) || in.mousePressed() || in.pressed(eng::Key::Escape) ||
+                                        in.pressed(eng::Key::Enter)))) {
+            m_revealDone = true;
+            in.consumeMouse();
+        }
+    } else if (!chatFocused && !over && in.pressed(eng::Key::J) && !m_pauseOpen) {
+        m_journalOpen = !m_journalOpen;
+        m_window.setMouseCaptured(!m_journalOpen);
+    } else if (!chatFocused && !over && in.pressed(eng::Key::Escape)) {
+        if (m_journalOpen) {
+            m_journalOpen = false;
+            m_window.setMouseCaptured(true);
+        } else if (m_pauseSettings) {
+            m_pauseSettings = false;
+        } else if (m_window.isMouseCaptured()) {
             m_window.setMouseCaptured(false);
             m_pauseOpen = true;
+            m_pauseFocus = 0;
         } else {
             m_pauseOpen = false;
             m_window.setMouseCaptured(true);
         }
     }
-    if (!chatFocused && !over && in.pressed(eng::Key::Enter) && !m_pauseOpen) {
+    if (!chatFocused && !over && in.pressed(eng::Key::Enter) && !m_pauseOpen && !m_journalOpen && m_revealDone) {
         m_ui.focus("chat");
         m_chatFocusTime = m_time;
         m_window.setMouseCaptured(false);
     }
-    if (!m_window.isMouseCaptured() && !m_pauseOpen && !over && !chatFocused && in.mousePressed()) {
+    if (!m_window.isMouseCaptured() && !m_pauseOpen && !m_journalOpen && m_revealDone && !over && !chatFocused && in.mousePressed()) {
         const bool onHud = std::any_of(m_hudBlockers.begin(), m_hudBlockers.end(), [&](const Rect& r) { return r.contains(in.mouse); });
         if (!onHud) {
             m_window.setMouseCaptured(true);
             in.consumeMouse();
         }
     }
-    if (in.pressed(eng::Key::Tab) && v.yourRole == Role::Werewolf && alive) m_chatWolves = !m_chatWolves;
+    const bool medium = (v.yourRole == Role::Medium || v.acting == Role::Medium) && v.phase == Phase::Night;
+    const bool family = v.yourRole == Role::Sister || v.yourRole == Role::Brother;
+    const bool secretChat = isWolfRole(v.yourRole) || medium || family;
+    if (in.pressed(eng::Key::Tab) && secretChat && alive) m_chatWolves = !m_chatWolves;
+    if (!secretChat) m_chatWolves = false;
     const bool captured = m_window.isMouseCaptured();
 
     // Figuren aus den Snapshots
@@ -269,7 +442,9 @@ void App::updateMatch() {
     else if (m_myTransform >= 0.99f) speed = kWolfSpeed;
     else if (m_myTransform > 0.01f) speed = 0.0f; // während der Verwandlung erstarrt
     if (!canMoveFreely()) speed = 0.0f;
-    m_player.move(wish, speed, dt, m_world, alive);
+    m_player.move(wish, speed, dt, m_world, alive, m_net.closedDoors());
+    m_worldRenderer.updateHouses(m_net.doors(), dt);
+    m_worldRenderer.setHiddenRoof(m_world.houseAt({m_player.position.x, m_player.position.z}, 0.25f));
     if (m_time - m_lastMoveSent >= proto::kMoveInterval) {
         m_net.sendMove(m_player.position.x, m_player.position.z, m_player.yaw, sprint && wish.length() > 0.1f ? EntitySprint : 0);
         m_lastMoveSent = m_time;
@@ -281,12 +456,14 @@ void App::updateMatch() {
         auto trigger = [&](const char* key) {
             for (const Prompt& p : m_prompts) {
                 if (std::string_view(p.key) != key || !p.ready) continue;
-                m_net.sendInteract(p.kind, p.kind == Interaction::Transform ? p.param : p.target);
+                const bool param = p.kind == Interaction::Transform || p.kind == Interaction::ChooseSide;
+                m_net.sendInteract(p.kind, param ? p.param : p.target);
                 return;
             }
         };
         if (in.pressed(eng::Key::E)) trigger("E");
         if (in.pressed(eng::Key::F)) trigger("F");
+        if (in.pressed(eng::Key::Q)) trigger("Q");
         if (in.pressed(eng::Key::R)) trigger("R");
         if (in.mousePressed()) trigger("Klick");
     }
@@ -308,6 +485,11 @@ void App::renderMatch3D() {
 
     m_lastCamera = m_camera.camera(m_player.position + Vec3{0, alive ? 0.0f : 0.4f, 0}, m_world);
     eng::Environment env = m_worldRenderer.environment(m_timeOfDay, m_player.position, t);
+    applyGraphics(env);
+    // Hinter Tagebuch, Pause, Rollenkarte und Epilog verschwimmt das Dorf
+    const bool overlay = m_journalOpen || m_pauseOpen || !m_revealDone || v.phase == Phase::GameOver;
+    env.focusBlur = m_kit.anim("hud/blur", overlay ? 1.0f : 0.0f, 3.0f);
+    env.focusRadius = 0.0f;
     if (!alive && v.phase != Phase::GameOver) {
         env.saturation *= 0.45f;
         env.gradeTint = mul(env.gradeTint, Vec3{0.85f, 0.95f, 1.2f});
@@ -351,6 +533,20 @@ void App::renderMatch3D() {
     }
     for (const auto& [key, f] : m_figures) drawFigure(static_cast<uint8_t>(key / 4), f.mover, f.transform, f.flags, f.kind);
 
+    // Fährtenleser: die verfolgte Person leuchtet auch durch Wände
+    if (v.tracked != kNoPlayer && alive) {
+        for (const EntityState& e : m_entities) {
+            if (e.id != v.tracked || e.kind != EntityLiving) continue;
+            const Vec3 base = m_world.ground(e.x, e.z);
+            const Color c = theme::roleColor(Role::Tracker);
+            for (int i = 0; i < 10; ++i) {
+                const float fi = static_cast<float>(i);
+                const float life = std::fmod(t * 0.6f + fi * 0.1f, 1.0f);
+                m_renderer3d.particle(base + Vec3{0, 2.4f + life * 3.0f, 0}, 0.35f, Vec3{c.r, c.g, c.b} * 2.5f, 1.0f - life);
+            }
+        }
+    }
+
     // Zielmarkierung am Boden
     if (m_aimTarget != kNoPlayer && !m_prompts.empty()) {
         Color c = theme::gold;
@@ -387,11 +583,13 @@ void App::renderMatch3D() {
 
 void App::drawNameTags(const GameView& v) {
     eng::Renderer2D& r = m_renderer;
-    const float scale = m_window.dpiScale();
+    const float scale = m_renderer.dpiScale();
     const bool night = m_timeOfDay > 0.78f || m_timeOfDay < 0.22f;
     std::map<uint8_t, int> votes;
     for (const PlayerView& p : v.players)
         if (p.vote != kNoPlayer) ++votes[p.vote];
+    const bool seeThroughWalls = !imAlive() || v.phase == Phase::GameOver;
+    const DoorMask closed = m_net.closedDoors();
 
     auto tag = [&](uint8_t id, Vec3 feet, float height, bool corpse, bool ghost) {
         const PlayerView* p = v.player(id);
@@ -399,14 +597,22 @@ void App::drawNameTags(const GameView& v) {
         Vec2 screen;
         const Vec3 head = feet + Vec3{0, height, 0};
         if (!m_renderer3d.worldToScreen(head, screen)) return;
+        const bool tracked = id == v.tracked && !corpse && !ghost;
         const float dist = (head - m_lastCamera.position).length();
-        const float maxDist = corpse ? 14.0f : night ? 11.0f : 26.0f;
+        const float maxDist = tracked ? 80.0f : corpse ? 14.0f : night ? 11.0f : 26.0f;
         if (dist > maxDist) return;
+        if (!tracked && !seeThroughWalls &&
+            m_world.lineBlocked({m_player.position.x, m_player.position.z}, {feet.x, feet.z}, closed))
+            return;
         const float alpha = eng::clamp01((maxDist - dist) / 5.0f);
         const Vec2 pt = screen / scale;
 
         std::string label = p->name;
         if (corpse) label = "† " + label;
+        if (tracked) label = std::string(roleIcon(Role::Tracker)) + " " + label;
+        if (p->captain) label = "♛ " + label;
+        if (p->enchanted) label += " ♪";
+        if (p->marked) label += " ♠";
         if (p->role != Role::Unknown && id != v.you) label = std::string(roleIcon(p->role)) + " " + label;
         const float w = m_fonts.smallBold.measure(label) + 16.0f;
         const Rect plate{pt.x - w * 0.5f, pt.y - 11.0f, w, 22.0f};
@@ -465,100 +671,100 @@ void App::drawNameTags(const GameView& v) {
 void App::drawPhaseBox(const GameView& v) {
     eng::Renderer2D& r = m_renderer;
     const float W = r.width();
-    const float w = 360.0f;
-    const Rect box{W * 0.5f - w * 0.5f, 14.0f, w, 66.0f};
-    r.roundRect(box, 14.0f, Color::hex(0x0A0D1A, 0.62f));
-    r.roundRectOutline(box, 14.0f, 1.0f, theme::panelBorder);
-    r.textCentered(m_fonts.heading, {box.x, box.y + 4.0f, box.w, 40.0f}, headerTitle(v), theme::goldLight);
+    const eng::Vec2 c{W * 0.5f, 74.0f};
+    const float R = 54.0f;
     const float timeLeft = m_net.timeLeft(m_time);
+    const float progress = v.phaseDuration > 0.0f ? eng::clamp01(1.0f - timeLeft / v.phaseDuration) : 1.0f;
+    const bool night = v.phase == Phase::Night;
+
+    r.glow({c.x, c.y - 10.0f}, 150.0f, palette::ink.withAlpha(0.55f));
+    // Himmelsbogen: der Weg von Sonne bzw. Mond über das Dorf
+    constexpr int kSegments = 40;
+    for (int i = 0; i < kSegments; ++i) {
+        const float a0 = eng::kPi + eng::kPi * static_cast<float>(i) / kSegments;
+        const float a1 = eng::kPi + eng::kPi * static_cast<float>(i + 1) / kSegments;
+        const bool done = static_cast<float>(i) / kSegments < progress;
+        r.line(c + eng::Vec2{std::cos(a0) * R, std::sin(a0) * R}, c + eng::Vec2{std::cos(a1) * R, std::sin(a1) * R}, 1.4f,
+               done ? palette::brass.withAlpha(0.8f) : palette::smoke.withAlpha(0.35f));
+    }
+    m_kit.diamond(c + eng::Vec2{-R, 0}, 2.5f, palette::brass.withAlpha(0.6f));
+    m_kit.diamond(c + eng::Vec2{R, 0}, 2.5f, palette::brass.withAlpha(0.6f));
+    const float a = eng::kPi + eng::kPi * progress;
+    const eng::Vec2 body = c + eng::Vec2{std::cos(a) * R, std::sin(a) * R};
+    const Color bodyColor = night ? palette::moon : Color::hex(0xF6C86A);
+    r.glow(body, 26.0f, bodyColor.withAlpha(0.35f));
+    r.circle(body, 7.0f, bodyColor);
+    if (night) r.circle(body + eng::Vec2{3.0f, -2.0f}, 6.0f, palette::ink.withAlpha(0.85f)); // Mondsichel
+
+    m_kit.spacedCentered(m_fonts.menu, {c.x - 200.0f, c.y - 22.0f, 400.0f, 30.0f}, upper(headerTitle(v)), 3.0f, palette::brassLight);
     if (v.phaseDuration > 0.0f && v.phase != Phase::GameOver) {
         const bool urgent = timeLeft < 10.0f;
-        const Color tc = urgent ? theme::blood.fade(0.6f + 0.4f * std::sin(static_cast<float>(m_time) * 8.0f)) : theme::text;
-        r.textRight(m_fonts.uiBold, {box.right() - 16.0f, box.y + 14.0f}, clockText(timeLeft), tc);
-        const Rect bar{box.x + 18.0f, box.bottom() - 14.0f, box.w - 36.0f, 4.0f};
-        r.roundRect(bar, 2.0f, Color::hex(0xFFFFFF, 0.1f));
-        r.roundRect({bar.x, bar.y, bar.w * eng::clamp01(timeLeft / v.phaseDuration), bar.h}, 2.0f, urgent ? theme::blood : theme::gold);
+        const Color tc = urgent ? palette::blood.fade(0.6f + 0.4f * std::sin(static_cast<float>(m_time) * 8.0f)) : palette::ash;
+        r.textCentered(m_fonts.uiBold, {c.x - 60.0f, c.y + 6.0f, 120.0f, 20.0f}, clockText(timeLeft), tc);
     }
     int alive = 0;
     for (const PlayerView& p : v.players)
         if (p.alive) ++alive;
-    r.text(m_fonts.small, {box.x + 16.0f, box.y + 16.0f}, std::format("{} leben", alive), theme::muted);
+    m_kit.label({c.x + R + 10.0f, c.y - 2.0f}, std::format("{} leben", alive), palette::ash);
+    if (v.day > 0 && v.phase != Phase::Day && v.phase != Phase::Night) {
+        const std::string day = std::format("Tag {}", v.day);
+        m_kit.label({c.x - R - 10.0f - m_kit.labelWidth(day), c.y - 2.0f}, day, palette::ash);
+    }
 }
 
 void App::drawRoleCard(Rect area, const GameView& v) {
     eng::Renderer2D& r = m_renderer;
+    using namespace palette;
     const Role role = v.yourRole;
-    const Color rc = theme::roleColor(role);
-    const bool alive = imAlive();
-
-    std::vector<std::pair<std::string, Color>> lines;
-    if (!alive) lines.push_back({"Du bist tot – als Geist siehst du alles.", theme::ghost});
-    if (role == Role::Werewolf) {
-        std::string pack;
-        for (const PlayerView& p : v.players)
-            if (p.role == Role::Werewolf && p.id != v.you) pack += (pack.empty() ? "" : ", ") + p.name;
-        lines.push_back({pack.empty() ? "Du jagst allein." : "Rudel: " + pack, theme::blood});
-        if (v.phase == Phase::Night) lines.push_back({v.packKillsLeft ? "Das Rudel hungert noch." : "Das Rudel ist satt.", theme::muted});
-        lines.push_back({m_chatWolves ? "Chat: Rudel (Tab wechselt)" : "Chat: Nähe (Tab: Rudel)", theme::faint});
-    }
-    if (v.loverPartner != kNoPlayer) {
-        const PlayerView* p = v.player(v.loverPartner);
-        lines.push_back({std::string("♥ Verliebt in ") + (p ? p->name : "?"), theme::roleColor(Role::Cupid)});
-    }
-    if (role == Role::Witch) {
-        lines.push_back({std::string("Heiltrank: ") + (v.healAvailable ? "bereit" : "verbraucht"), v.healAvailable ? rc : theme::faint});
-        lines.push_back({std::string("Gifttrank: ") + (v.poisonAvailable ? "bereit" : "verbraucht"), v.poisonAvailable ? rc : theme::faint});
-    }
-    if (role == Role::Seer)
-        for (const SeerResult& s : v.seerResults) {
-            const PlayerView* p = v.player(s.player);
-            lines.push_back({(p ? p->name : "?") + " – " + roleName(s.role), theme::roleColor(s.role)});
-        }
-    if (role == Role::Protector && v.protectedTarget != kNoPlayer) {
-        const PlayerView* p = v.player(v.protectedTarget);
-        lines.push_back({"Beschützt: " + (p ? p->name : std::string("?")), rc});
-    }
-
-    const float h = 74.0f + static_cast<float>(lines.size()) * 19.0f;
-    const Rect card{area.x, area.bottom() - h, 300.0f, h};
-    r.roundRect(card, 14.0f, Color::hex(0x0A0D1A, 0.66f));
-    r.roundRectOutline(card, 14.0f, 1.0f, theme::panelBorder);
-    const eng::Vec2 icon{card.x + 36.0f, card.y + 36.0f};
-    r.circle(icon, 24.0f, Color::hex(0x0B0F1F));
-    r.circleOutline(icon, 24.0f, 2.0f, rc);
-    r.textCentered(m_fonts.iconLarge, {icon.x - 24.0f, icon.y - 24.0f, 48.0f, 48.0f}, roleIcon(role), rc);
-    r.text(m_fonts.large, {card.x + 70.0f, card.y + 12.0f}, roleName(role), rc);
-    const Team team = roleTeam(role);
-    r.text(m_fonts.small, {card.x + 71.0f, card.y + 42.0f}, std::string("Lager: ") + teamName(team), theme::teamColor(team));
-    float y = card.y + 68.0f;
+    std::vector<std::pair<std::string, Color>> lines = roleStatusLines(v);
+    if (lines.size() > 4) lines.resize(4);
+    const float h = 92.0f + static_cast<float>(lines.size()) * m_fonts.hand.lineHeight();
+    const Rect card{area.x, area.bottom() - h - 30.0f, 300.0f, h};
+    m_kit.light({card.right() + 120.0f, card.y - 160.0f}, 0.9f);
+    m_kit.beginTilt(card, -0.018f);
+    m_kit.paper(card, 13000u + static_cast<uint32_t>(role), 0.97f);
+    const Vec2 icon{card.x + 44.0f, card.y + 44.0f};
+    r.circleOutline(icon, 26.0f, 1.3f, inkSoft);
+    r.circleOutline(icon, 30.0f, 0.7f, inkFaded.withAlpha(0.7f));
+    r.textCentered(m_fonts.iconLarge, {icon.x - 24.0f, icon.y - 24.0f, 48.0f, 48.0f}, roleIcon(role),
+                   eng::lerp(theme::roleColor(role), inkDark, 0.6f));
+    r.text(m_fonts.scriptBold, {card.x + 84.0f, card.y + 16.0f}, roleName(role), inkDark);
+    r.text(m_fonts.paperItalic, {card.x + 86.0f, card.y + 50.0f}, teamName(roleTeam(role)), inkFaded);
+    float y = card.y + 84.0f;
     for (const auto& [text, color] : lines) {
-        r.text(m_fonts.small, {card.x + 16.0f, y}, m_fonts.small.ellipsize(text, card.w - 28.0f), color);
-        y += 19.0f;
+        r.text(m_fonts.hand, {card.x + 22.0f, y}, m_fonts.hand.ellipsize(text, card.w - 40.0f), eng::lerp(color, inkDark, 0.82f));
+        y += m_fonts.hand.lineHeight();
     }
+    m_kit.endTilt();
+    m_kit.hint({card.x + 8.0f, card.bottom() + 6.0f}, "J", "Tagebuch", 0.85f);
 }
-
 void App::drawPrompts(const GameView&) {
     eng::Renderer2D& r = m_renderer;
+    using namespace palette;
     if (m_prompts.empty()) return;
-    float y = r.height() - 30.0f - static_cast<float>(m_prompts.size()) * 34.0f;
+    float y = r.height() - 40.0f - static_cast<float>(m_prompts.size()) * 44.0f;
+    int index = 0;
     for (const Prompt& p : m_prompts) {
-        const float tw = m_fonts.ui.measure(p.label);
-        const float kw = std::max(28.0f, m_fonts.smallBold.measure(p.key) + 14.0f);
-        const float w = kw + tw + 30.0f;
-        const Rect row{r.width() * 0.5f - w * 0.5f, y, w, 30.0f};
-        const Color c = promptColor(p.kind);
-        r.roundRect(row, 10.0f, Color::hex(0x0A0D1A, p.ready ? 0.72f : 0.45f));
-        const Rect key{row.x + 6.0f, row.y + 4.0f, kw, 22.0f};
-        r.roundRect(key, 6.0f, p.ready ? c : Color::hex(0x3A3F4E));
-        r.textCentered(m_fonts.smallBold, key, p.key, p.ready ? Color::hex(0x10131C) : theme::muted);
-        r.textCentered(m_fonts.ui, {key.right() + 10.0f, row.y, tw, row.h}, p.label, p.ready ? theme::text : theme::muted);
-        y += 34.0f;
+        const float tw = m_fonts.paper.measure(p.label);
+        const float kw = m_kit.keycapWidth(p.key);
+        const float w = kw + tw + 52.0f;
+        const Rect strip{std::round(r.width() * 0.5f - w * 0.5f), y, w, 38.0f};
+        const float a = m_kit.animFrom(std::format("prompt/{}", p.label), 0.0f, 1.0f, 8.0f);
+        const float alpha = (p.ready ? 1.0f : 0.7f) * a;
+        m_kit.beginTilt(strip, (index % 2 == 0 ? -0.01f : 0.012f));
+        m_kit.paper(strip.offset(0, (1.0f - a) * 14.0f), 14000u + static_cast<uint32_t>(index), alpha);
+        m_kit.keycap({strip.x + 14.0f, strip.y + 8.0f + (1.0f - a) * 14.0f, kw, 22.0f}, p.key, p.ready ? promptColor(p.kind) : smoke, alpha);
+        r.text(m_fonts.paper, {strip.x + kw + 26.0f, strip.center().y - m_fonts.paper.lineHeight() * 0.5f + (1.0f - a) * 14.0f}, p.label,
+               (p.ready ? inkDark : inkFaded).withAlpha(alpha));
+        m_kit.endTilt();
+        y += 44.0f;
+        ++index;
     }
 }
-
 void App::drawVotePanel(const GameView& v) {
     if (v.phase != Phase::Vote && v.phase != Phase::Execution) return;
     eng::Renderer2D& r = m_renderer;
+    using namespace palette;
     std::map<uint8_t, int> votes;
     for (const PlayerView& p : v.players)
         if (p.vote != kNoPlayer) ++votes[p.vote];
@@ -566,152 +772,301 @@ void App::drawVotePanel(const GameView& v) {
     for (const PlayerView& p : v.players)
         if (p.alive) alive.push_back(&p);
     const float rowH = 30.0f;
-    const Rect panel{16.0f, 110.0f, 240.0f, 48.0f + rowH * static_cast<float>(alive.size())};
+    const Rect panel{28.0f, 150.0f, 260.0f, 70.0f + rowH * static_cast<float>(alive.size())};
     m_hudBlockers.push_back(panel);
-    r.roundRect(panel, 14.0f, Color::hex(0x0A0D1A, 0.7f));
-    r.text(m_fonts.uiBold, {panel.x + 14.0f, panel.y + 10.0f}, "Stimmen", theme::text);
-    float y = panel.y + 40.0f;
+    m_kit.beginTilt(panel, 0.012f);
+    m_kit.paper(panel, 15000u);
+    m_kit.nail({panel.center().x, panel.y + 12.0f});
+    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.election ? "Hauptmannwahl" : "Wer soll hängen?", inkRed);
+    float y = panel.y + 58.0f;
     const bool canVote = v.can(AbilityVote);
     for (const PlayerView* p : alive) {
-        const Rect row{panel.x + 8.0f, y, panel.w - 16.0f, rowH - 4.0f};
+        const Rect row{panel.x + 14.0f, y, panel.w - 28.0f, rowH - 2.0f};
         const bool mine = v.vote == p->id;
-        if (mine) r.roundRect(row, 8.0f, theme::gold.withAlpha(0.18f));
         const bool clickable = canVote && p->id != v.you && !m_window.isMouseCaptured();
-        if (m_ui.clickArea(std::format("vote/{}", p->id), row, clickable))
-            m_net.sendInteract(Interaction::Vote, mine ? kNoPlayer : p->id);
-        if (clickable && m_ui.hovered(row)) r.roundRectOutline(row, 8.0f, 1.0f, theme::gold.withAlpha(0.5f));
-        r.circle({row.x + 14.0f, row.center().y}, 6.0f, theme::playerColor(p->id));
-        r.textCentered(m_fonts.ui, {row.x + 28.0f, row.y, m_fonts.ui.measure(p->name), row.h}, p->name, p->id == v.you ? theme::goldLight : theme::text);
-        if (votes.count(p->id)) {
-            const std::string n = std::to_string(votes[p->id]);
-            r.textCentered(m_fonts.uiBold, {row.right() - 30.0f, row.y, 24.0f, row.h}, n, theme::blood);
+        if (m_ui.clickArea(std::format("vote/{}", p->id), row, clickable)) m_net.sendInteract(Interaction::Vote, mine ? kNoPlayer : p->id);
+        const bool hover = clickable && m_ui.hovered(row);
+        if (hover) m_ui.setCursor(eng::Cursor::Hand);
+        std::string name = p->name;
+        if (p->captain) name = "♛ " + name;
+        r.text(m_fonts.hand, {row.x + 8.0f, row.center().y - m_fonts.hand.lineHeight() * 0.5f}, name,
+               (hover ? inkRed : eng::lerp(theme::playerColor(p->id), inkDark, 0.72f)));
+        if (mine) m_kit.swash({row.x + 8.0f, row.center().y + 9.0f}, m_fonts.hand.measure(name), inkRed.withAlpha(0.8f), 1.0f, p->id);
+        // Striche wie auf einer Kerbholz-Liste
+        const int n = votes.count(p->id) ? votes[p->id] : 0;
+        for (int k = 0; k < n && k < 12; ++k) {
+            const float x = row.right() - 70.0f + static_cast<float>(k % 5) * 7.0f + static_cast<float>(k / 5) * 40.0f;
+            if (k % 5 == 4) m_kit.inkLine({x - 30.0f, row.y + 18.0f}, {x + 2.0f, row.y + 8.0f}, 1.6f, inkRed, 1.0f, static_cast<uint32_t>(k));
+            else m_kit.inkLine({x, row.y + 6.0f}, {x - 1.0f, row.y + 21.0f}, 1.6f, v.election ? inkDark : inkRed, 1.0f, static_cast<uint32_t>(k + 9));
         }
         y += rowH;
     }
+    m_kit.endTilt();
 }
-
 void App::drawMinimap(Rect area, const GameView& v) {
     eng::Renderer2D& r = m_renderer;
-    const float size = 150.0f;
-    const eng::Vec2 c{area.right() - size * 0.5f - 16.0f, 16.0f + size * 0.5f};
+    using namespace palette;
+    const float size = 168.0f;
+    const eng::Vec2 c{area.right() - size * 0.5f - 34.0f, 34.0f + size * 0.5f};
     const float R = size * 0.5f;
-    const float scale = R / 70.0f; // 70 m Radius
-    auto toMap = [&](float x, float z) {
-        // Norden (−z) oben, Osten (+x) rechts
-        return eng::Vec2{c.x + x * scale, c.y + z * scale};
-    };
-    r.circle(c, R + 3.0f, Color::hex(0x0A0D1A, 0.75f));
-    r.circle(c, R, Color::hex(0x24331F, 0.85f));
-    r.circle(toMap(0, 0), World::kSquareRadius * scale, Color::hex(0x7E786C, 0.9f));
-    r.circle(toMap(0, 0), 1.6f, Color::hex(0xFF9A3A));
-    r.rect({toMap(48, -15).x, toMap(48, -15).y, 26.0f * scale, 30.0f * scale}, Color::hex(0xB89A4A, 0.7f));
-    for (const House& h : m_world.houses()) {
-        const eng::Vec2 p = toMap(h.position.x, h.position.z);
-        r.roundRect({p.x - 3.0f, p.y - 3.0f, 6.0f, 6.0f}, 1.5f, Color::hex(0xC9B48C));
-    }
-    const eng::Vec2 chapel = toMap(m_world.chapel().x, m_world.chapel().z);
-    r.roundRect({chapel.x - 4.0f, chapel.y - 6.0f, 8.0f, 12.0f}, 1.5f, Color::hex(0xE2DCCD));
-    const eng::Vec2 bell = toMap(m_world.bell().x, m_world.bell().z);
-    r.circle(bell, 3.0f, theme::gold);
-    r.circleOutline(c, R, 1.5f, theme::gold.withAlpha(0.6f));
+    const float scale = (R - 8.0f) / 70.0f; // 70 m Radius
+    auto toMap = [&](float x, float z) { return eng::Vec2{c.x + x * scale, c.y + z * scale}; };
+    auto inside = [&](eng::Vec2 p) { return (p - c).length() < R - 6.0f; };
 
+    // Handgezeichnete Karte auf Pergament, in Messing gefasst
+    m_kit.light({c.x - 120.0f, c.y - 140.0f}, 0.9f);
+    m_kit.paperDisc(c, R, 777u);
+    r.circleOutline(c, R + 1.0f, 3.0f, brassDark);
+    r.circleOutline(c, R + 2.5f, 1.2f, brass.withAlpha(0.9f));
+    // Wege
+    const std::vector<Vec2>& path = m_world.pathPoints();
+    for (size_t i = 0; i + 1 < path.size(); i += 2) {
+        const eng::Vec2 a = toMap(path[i].x, path[i].y), b = toMap(path[i + 1].x, path[i + 1].y);
+        if (inside(a) && inside(b)) r.line(a, b, 1.2f, inkFaded.withAlpha(0.7f));
+    }
+    r.circleOutline(toMap(0, 0), World::kSquareRadius * scale, 1.0f, inkSoft.withAlpha(0.8f));
+    r.circle(toMap(0, 0), 2.2f, ember);
+    const PlayerView* self = v.me();
+    const std::vector<DoorState>& doors = m_net.doors();
+    for (size_t i = 0; i < m_world.houses().size(); ++i) {
+        const House& h = m_world.houses()[i];
+        const eng::Vec2 p = toMap(h.position.x, h.position.z);
+        const uint8_t flags = i < doors.size() ? doors[i].flags : 0;
+        const bool mine = self && self->house == i;
+        r.pushTransform(eng::Affine2::around(p, -h.yaw));
+        const eng::Rect hr{p.x - 4.0f, p.y - 3.5f, 8.0f, 7.0f};
+        if (flags & DoorBurnt) r.rect(hr, inkDark.withAlpha(0.85f));
+        else if (flags & DoorBurning) r.rect(hr, ember.fade(0.6f + 0.4f * std::sin(static_cast<float>(m_time) * 9.0f)));
+        else if (v.doused & (1u << i)) r.rect(hr, theme::roleColor(Role::Arsonist).withAlpha(0.8f));
+        else if (mine) r.rect(hr, inkRed.withAlpha(0.85f));
+        r.roundRectOutline(hr, 0.0f, 1.0f, inkDark.withAlpha(0.85f));
+        r.popTransform();
+    }
+    // Kapelle als Kreuz, Glocke als kleiner Kreis
+    const eng::Vec2 chapel = toMap(m_world.chapel().x, m_world.chapel().z);
+    if (inside(chapel)) {
+        r.line(chapel + eng::Vec2{0, -6}, chapel + eng::Vec2{0, 6}, 1.4f, inkDark);
+        r.line(chapel + eng::Vec2{-4, -2}, chapel + eng::Vec2{4, -2}, 1.4f, inkDark);
+    }
+    r.circleOutline(toMap(m_world.bell().x, m_world.bell().z), 2.5f, 1.0f, inkDark);
+    // Fährtenleser sieht die Spur auf der Karte
+    for (const EntityState& e : m_entities) {
+        if (e.id != v.tracked || e.kind != EntityLiving) continue;
+        eng::Vec2 p = toMap(e.x, e.z);
+        const eng::Vec2 delta = p - c;
+        if (delta.length() > R - 6.0f) p = c + delta.normalized() * (R - 6.0f);
+        r.circle(p, 3.5f, inkRed);
+    }
+    // Windrose
+    const char* dirs[] = {"N", "O", "S", "W"};
+    const eng::Vec2 offs[] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    for (int i = 0; i < 4; ++i) {
+        const eng::Vec2 p = c + offs[i] * (R + 14.0f);
+        r.textCentered(m_fonts.scriptBold, {p.x - 12.0f, p.y - 12.0f, 24.0f, 24.0f}, dirs[i], i == 0 ? Color::hex(0xD8644E) : parchment.withAlpha(0.7f));
+    }
     // eigene Position mit Blickrichtung
     eng::Vec2 me = toMap(m_player.position.x, m_player.position.z);
     const eng::Vec2 delta = me - c;
-    if (delta.length() > R - 6.0f) me = c + delta.normalized() * (R - 6.0f);
+    if (delta.length() > R - 8.0f) me = c + delta.normalized() * (R - 8.0f);
     const eng::Vec2 dir{std::sin(m_camera.yaw), std::cos(m_camera.yaw)};
     const eng::Vec2 side{-dir.y, dir.x};
-    r.triangle(me + dir * 8.0f, me - dir * 5.0f + side * 5.0f, me - dir * 5.0f - side * 5.0f,
-               imAlive() ? theme::goldLight : theme::ghost);
-    (void)v;
+    r.triangle(me + dir * 9.0f, me - dir * 5.0f + side * 5.0f, me - dir * 5.0f - side * 5.0f, imAlive() ? inkRed : inkFaded);
 }
-
 void App::drawBanner() {
     const double age = m_time - m_bannerTime;
-    constexpr double kDuration = 3.4;
-    if (age < 0.0 || age > kDuration) return;
+    constexpr double kDuration = 3.6;
+    if (age < 0.0 || age > kDuration || !m_revealDone) return;
     eng::Renderer2D& r = m_renderer;
-    const float fadeIn = eng::smoothstep(0.0f, 0.4f, static_cast<float>(age));
-    const float fadeOut = 1.0f - eng::smoothstep(static_cast<float>(kDuration) - 0.8f, static_cast<float>(kDuration), static_cast<float>(age));
+    const float fadeIn = eng::smoothstep(0.0f, 0.5f, static_cast<float>(age));
+    const float fadeOut = 1.0f - eng::smoothstep(static_cast<float>(kDuration) - 0.9f, static_cast<float>(kDuration), static_cast<float>(age));
     const float a = fadeIn * fadeOut;
-    const float w = 520.0f;
-    const Rect band{r.width() * 0.5f - w * 0.5f, r.height() * 0.3f - 50.0f + (1.0f - fadeIn) * 16.0f, w, 100.0f};
-    r.roundRect(band, 18.0f, Color::hex(0x05070F, 0.6f * a));
-    r.textCentered(m_fonts.title, {band.x, band.y + 4.0f, band.w, 64.0f}, m_bannerTitle, theme::goldLight.fade(a));
-    r.textCentered(m_fonts.narration, {band.x, band.y + 70.0f, band.w, 22.0f}, m_bannerSubtitle, theme::text.fade(a));
+    const float W = r.width();
+    const float y = r.height() * 0.26f + (1.0f - fadeIn) * 12.0f;
+    r.gradientV({0, y - 30.0f, W, 70.0f}, palette::ink.withAlpha(0.0f), palette::ink.withAlpha(0.55f * a));
+    r.gradientV({0, y + 40.0f, W, 90.0f}, palette::ink.withAlpha(0.55f * a), palette::ink.withAlpha(0.0f));
+    m_kit.spacedCentered(m_fonts.display, {0, y, W, 56.0f}, upper(m_bannerTitle), 8.0f, palette::brassLight.fade(a));
+    m_kit.divider({W * 0.5f, y + 66.0f}, 360.0f * eng::smoothstep(0.1f, 0.9f, static_cast<float>(age)), palette::brass.fade(a));
+    r.textCentered(m_fonts.narration, {0, y + 76.0f, W, 22.0f}, m_bannerSubtitle, palette::parchment.fade(a));
 }
 
 void App::drawPauseMenu(const GameView& v) {
     eng::Renderer2D& r = m_renderer;
-    r.rect({0, 0, r.width(), r.height()}, Color::hex(0x000000, 0.35f));
-    const Rect panel{r.width() * 0.5f - 160.0f, r.height() * 0.5f - 120.0f, 320.0f, m_net.isHost() ? 240.0f : 194.0f};
-    m_hudBlockers.push_back(panel);
-    drawPanel(panel);
-    r.textCentered(m_fonts.large, {panel.x, panel.y + 18.0f, panel.w, 30.0f}, "Pause", theme::text);
-    Rect b{panel.x + 24.0f, panel.y + 64.0f, panel.w - 48.0f, 40.0f};
-    if (m_ui.button("pause/resume", b, "Weiterspielen", eng::ui::ButtonKind::Primary)) {
-        m_pauseOpen = false;
-        m_window.setMouseCaptured(true);
-    }
-    b = b.offset(0, 48.0f);
+    using namespace palette;
+    const float W = r.width(), H = r.height();
+    const float a = m_kit.anim("pause/fade", 1.0f, 6.0f);
+    m_kit.fade(0.4f * a);
+    m_hudBlockers.push_back({0, 0, W, H});
+
+    // Dieselbe Dorftafel wie im Hauptmenü
+    const Rect board{std::round(std::max(32.0f, W * 0.045f)) - (1.0f - a) * 60.0f, 36.0f, 430.0f, H - 96.0f};
+    m_kit.light({board.right() - 10.0f, board.y + 60.0f}, a);
+    m_kit.candleLight({board.right() + 10.0f, board.y + 40.0f}, 520.0f, a);
+    m_kit.board(board, a);
+    const Rect head{board.x + 26.0f, board.y + 30.0f, board.w - 52.0f, 120.0f};
+    m_kit.beginTilt(head, 0.02f);
+    m_kit.paper(head, 1777u, a);
+    m_kit.nail({head.center().x, head.y + 14.0f}, a);
+    const float tw = m_fonts.calligraphyMid.measure("Atempause");
+    r.text(m_fonts.calligraphyMid, {head.center().x - tw * 0.5f, head.y + 64.0f - m_fonts.calligraphyMid.ascent()}, "Atempause", inkDark.withAlpha(a));
+    const std::string when = phaseWithDay(v);
+    r.text(m_fonts.script, {head.center().x - m_fonts.script.measure(when) * 0.5f, head.y + 76.0f}, when, inkSoft.withAlpha(a));
+    m_kit.endTilt();
+
+    struct Item {
+        const char* label;
+        int action;
+        float angle;
+    };
+    std::vector<Item> items = {{"Weiterspielen", 0, -0.025f}, {"Tagebuch", 1, 0.02f}, {"Einstellungen", 2, -0.015f}};
     const bool leaveArmed = m_time - m_leaveArmedTime < 3.0;
-    if (m_ui.button("pause/leave", b, leaveArmed ? "Wirklich verlassen?" : "Spiel verlassen",
-                    leaveArmed ? eng::ui::ButtonKind::Danger : eng::ui::ButtonKind::Normal)) {
+    const bool abortArmed = m_time - m_abortArmedTime < 3.0;
+    if (m_net.isHost() && v.phase != Phase::GameOver) items.push_back({abortArmed ? "Wirklich abbrechen?" : "Runde abbrechen", 3, 0.03f});
+    items.push_back({leaveArmed ? "Wirklich gehen?" : "Das Dorf verlassen", 4, -0.02f});
+
+    eng::Input& in = m_window.input();
+    const int count = static_cast<int>(items.size());
+    if (!m_pauseSettings) {
+        if (in.pressed(eng::Key::Down)) m_pauseFocus = (m_pauseFocus + 1) % count;
+        if (in.pressed(eng::Key::Up)) m_pauseFocus = (m_pauseFocus + count - 1) % count;
+    }
+    m_pauseFocus = std::clamp(m_pauseFocus, 0, count - 1);
+    int activated = -1;
+    for (int i = 0; i < count; ++i) {
+        const Item& it = items[static_cast<size_t>(i)];
+        const Rect rc{board.x + 34.0f + (i % 2 == 0 ? 0.0f : 14.0f), head.bottom() + 34.0f + static_cast<float>(i) * 70.0f, board.w - 82.0f, 56.0f};
+        const bool selected = m_pauseFocus == i || (m_pauseSettings && it.action == 2);
+        if (m_kit.slip(std::string("pause/slip/") + std::to_string(it.action), rc, it.label, it.angle, selected, 2300u + static_cast<uint32_t>(i) * 13u, a))
+            activated = it.action;
+        if (m_ui.hovered(rc)) m_pauseFocus = i;
+    }
+    if (!m_pauseSettings && in.pressed(eng::Key::Enter)) activated = items[static_cast<size_t>(m_pauseFocus)].action;
+    switch (activated) {
+    case 0:
+        m_pauseOpen = false;
+        m_pauseSettings = false;
+        m_window.setMouseCaptured(true);
+        break;
+    case 1:
+        m_pauseOpen = false;
+        m_pauseSettings = false;
+        m_journalOpen = true;
+        break;
+    case 2:
+        m_pauseSettings = !m_pauseSettings;
+        m_kit.anim("pause/settings/open", 0.0f, 1000.0f);
+        break;
+    case 3:
+        if (abortArmed) m_net.sendReturnToLobby();
+        else m_abortArmedTime = m_time;
+        break;
+    case 4:
         if (leaveArmed) leaveSession();
         else m_leaveArmedTime = m_time;
+        break;
+    default: break;
     }
-    if (m_net.isHost() && v.phase != Phase::GameOver) {
-        b = b.offset(0, 48.0f);
-        const bool abortArmed = m_time - m_abortArmedTime < 3.0;
-        if (m_ui.button("pause/abort", b, abortArmed ? "Wirklich abbrechen?" : "Runde abbrechen",
-                        abortArmed ? eng::ui::ButtonKind::Danger : eng::ui::ButtonKind::Ghost)) {
-            if (abortArmed) m_net.sendReturnToLobby();
-            else m_abortArmedTime = m_time;
-        }
-    }
-}
 
+    if (m_pauseSettings) {
+        const float px = board.right() + std::max(36.0f, W * 0.04f);
+        const Rect area{px, 36.0f, std::min(680.0f, W - px - 36.0f), std::min(H - 96.0f, 680.0f)};
+        const float open = eng::smoothstep(0.0f, 1.0f, m_kit.anim("pause/settings/open", 1.0f, 3.2f));
+        const float sy = 0.04f + 0.96f * open;
+        r.pushTransform({1.0f, 0.0f, 0.0f, sy, 0.0f, area.y * (1.0f - sy)});
+        if (drawSettings(area)) m_pauseSettings = false;
+        r.popTransform();
+    }
+    drawFooterHints(true);
+    m_kit.grain(m_config.filmGrain ? 0.04f * a : 0.0f);
+}
 void App::drawGameOver(const GameView& v) {
     eng::Renderer2D& r = m_renderer;
-    const size_t rows = (v.players.size() + 1) / 2;
-    const float w = std::min(r.width() - 420.0f, 620.0f);
-    const float h = 168.0f + static_cast<float>(rows) * 28.0f + 64.0f;
-    const Rect panel{r.width() * 0.5f - w * 0.5f - 100.0f, r.height() * 0.5f - h * 0.5f, w, h};
-    m_hudBlockers.push_back(panel);
-    drawPanel(panel, 18.0f);
-    const Color tc = theme::teamColor(v.winner);
+    using namespace palette;
+    const float W = r.width(), H = r.height();
+    const float a = m_kit.anim("over/fade", 1.0f, 1.5f);
+    m_kit.fade(0.55f * a);
+    m_kit.vignette(1.0f);
+    m_kit.embers({0, H * 0.3f, W, H * 0.7f}, 24, 0.6f * a);
+    m_hudBlockers.push_back({0, 0, W, H});
+    m_kit.light({W * 0.5f, -40.0f}, 1.1f);
+    m_kit.candleLight({W * 0.5f, 0.0f}, 800.0f, a);
+
     std::string title;
     switch (v.winner) {
-    case Team::Village: title = "Das Dorf gewinnt!"; break;
-    case Team::Wolves: title = "Die Werwölfe gewinnen!"; break;
-    case Team::Lovers: title = "Die Verliebten gewinnen!"; break;
-    default: title = "Niemand gewinnt …"; break;
+    case Team::Village: title = "Das Dorf hat gesiegt"; break;
+    case Team::Wolves: title = "Die Werwölfe haben gesiegt"; break;
+    case Team::Lovers: title = "Die Liebe hat gesiegt"; break;
+    case Team::Jester: title = "Der Narr hat gesiegt"; break;
+    case Team::Killer: title = "Der Serienmörder hat gesiegt"; break;
+    case Team::Arsonist: title = "Der Brandstifter hat gesiegt"; break;
+    case Team::Piper: title = "Der Flötenspieler hat gesiegt"; break;
+    case Team::Angel: title = "Der Engel hat gesiegt"; break;
+    case Team::WhiteWolf: title = "Der weiße Werwolf hat gesiegt"; break;
+    case Team::Sectarian: title = "Der Sektierer hat gesiegt"; break;
+    default: title = "Niemand hat überlebt"; break;
     }
-    r.textCentered(m_fonts.heading, {panel.x, panel.y + 22.0f, panel.w, 44.0f}, title, tc);
+    // Kopfblatt
+    const Rect head{W * 0.5f - 300.0f, 30.0f - (1.0f - a) * 40.0f, 600.0f, 150.0f};
+    m_kit.beginTilt(head, -0.012f);
+    m_kit.paper(head, 19000u, a);
+    m_kit.nail({head.x + 22.0f, head.y + 16.0f}, a);
+    m_kit.nail({head.right() - 22.0f, head.y + 16.0f}, a);
+    const float ew = m_fonts.calligraphyMid.measure("Epilog");
+    r.text(m_fonts.calligraphyMid, {head.center().x - ew * 0.5f, head.y + 62.0f - m_fonts.calligraphyMid.ascent()}, "Epilog", inkDark.withAlpha(a));
+    const float tw = m_fonts.scriptLarge.measure(title);
+    m_kit.writeText(m_fonts.scriptLarge, {head.center().x - tw * 0.5f, head.y + 70.0f}, title, inkRed.withAlpha(a), eng::smoothstep(0.3f, 1.0f, a));
     const PlayerView* me = v.me();
     const bool won = me && me->winner;
-    r.textCentered(m_fonts.ui, {panel.x, panel.y + 70.0f, panel.w, 24.0f}, won ? "★ Du hast gewonnen!" : "Du hast verloren.",
-                   won ? theme::goldLight : theme::muted);
-    const float colW = (panel.w - 56.0f) * 0.5f;
-    for (size_t i = 0; i < v.players.size(); ++i) {
-        const PlayerView& p = v.players[i];
-        const float x = panel.x + 28.0f + (i < rows ? 0.0f : colW);
-        const float y = panel.y + 112.0f + static_cast<float>(i % rows) * 28.0f;
-        r.text(m_fonts.smallBold, {x, y}, p.winner ? "★" : (p.alive ? "" : "†"), p.winner ? theme::goldLight : theme::faint);
-        r.text(m_fonts.ui, {x + 18.0f, y - 2.0f}, m_fonts.ui.ellipsize(p.name, colW * 0.5f), p.alive ? theme::text : theme::muted);
-        r.text(m_fonts.small, {x + 22.0f + colW * 0.5f, y}, std::string(roleIcon(p.role)) + " " + roleName(p.role), theme::roleColor(p.role));
+    const char* mine = won ? "Du hast gewonnen." : "Du hast verloren.";
+    r.text(m_fonts.paperItalic, {head.center().x - m_fonts.paperItalic.measure(mine) * 0.5f, head.y + 116.0f}, mine, inkSoft.withAlpha(a));
+    m_kit.endTilt();
+
+    // Steckbriefe aller Bewohner
+    const int n = static_cast<int>(v.players.size());
+    const int cols = std::min(n, W > 1150.0f ? 8 : 6);
+    const float cw = 118.0f, ch = 160.0f, gap = 16.0f;
+    const int rows = (n + cols - 1) / std::max(1, cols);
+    const float gy = head.bottom() + 30.0f;
+    for (int i = 0; i < n; ++i) {
+        const PlayerView& p = v.players[static_cast<size_t>(i)];
+        const int row = i / cols, col = i % cols;
+        const int inRow = std::min(cols, n - row * cols);
+        const float rowW = static_cast<float>(inRow) * cw + static_cast<float>(inRow - 1) * gap;
+        const float delay = 0.15f + static_cast<float>(i) * 0.05f;
+        const float ca = eng::smoothstep(delay, delay + 0.35f, a);
+        if (ca <= 0.01f) continue;
+        const Rect card{W * 0.5f - rowW * 0.5f + static_cast<float>(col) * (cw + gap), gy + static_cast<float>(row) * (ch + gap) - (1.0f - ca) * 20.0f, cw, ch};
+        const float angle = (static_cast<float>((i * 37) % 7) - 3.0f) * 0.012f;
+        m_kit.beginTilt(card, angle);
+        m_kit.paper(card, 20000u + static_cast<uint32_t>(i) * 7u, ca);
+        m_kit.nail({card.center().x, card.y + 10.0f}, ca);
+        const Color rc = eng::lerp(theme::roleColor(p.role), inkDark, 0.6f);
+        r.textCentered(m_fonts.iconLarge, {card.x, card.y + 24.0f, card.w, 50.0f}, roleIcon(p.role), rc.withAlpha(ca));
+        r.textCentered(m_fonts.hand, {card.x + 4.0f, card.y + 82.0f, card.w - 8.0f, 24.0f}, m_fonts.hand.ellipsize(p.name, card.w - 12.0f),
+                       inkDark.withAlpha(ca));
+        r.textCentered(m_fonts.paperItalic, {card.x + 4.0f, card.y + 108.0f, card.w - 8.0f, 20.0f}, m_fonts.paperItalic.ellipsize(roleName(p.role), card.w - 10.0f),
+                       inkSoft.withAlpha(ca));
+        if (!p.alive) {
+            // durchgekreuzt
+            m_kit.inkLine({card.x + 14.0f, card.y + 26.0f}, {card.right() - 14.0f, card.bottom() - 20.0f}, 2.2f, inkRed.withAlpha(0.75f * ca), 1.0f, 3u + static_cast<uint32_t>(i));
+            m_kit.inkLine({card.right() - 14.0f, card.y + 26.0f}, {card.x + 14.0f, card.bottom() - 20.0f}, 2.2f, inkRed.withAlpha(0.75f * ca), 1.0f, 9u + static_cast<uint32_t>(i));
+        }
+        if (p.winner) m_kit.seal({card.right() - 18.0f, card.bottom() - 18.0f}, 14.0f, wax, "★", ca, static_cast<uint32_t>(i));
+        m_kit.endTilt();
     }
-    const Rect bottom{panel.x + 28.0f, panel.bottom() - 58.0f, panel.w - 56.0f, 42.0f};
+
+    const float by = std::min(H - 74.0f, gy + static_cast<float>(rows) * (ch + gap) + 16.0f);
+    const Rect slip{W * 0.5f - 260.0f, by, 520.0f, 58.0f};
+    m_kit.beginTilt(slip, 0.01f);
+    m_kit.paper(slip, 21000u, a);
     if (m_net.isHost()) {
-        if (m_ui.button("over/lobby", {bottom.center().x - 120.0f, bottom.y, 240.0f, bottom.h}, "Zurück in die Lobby",
-                        eng::ui::ButtonKind::Primary))
-            m_net.sendReturnToLobby();
-    } else if (m_ui.button("over/leave", {bottom.center().x - 90.0f, bottom.y, 180.0f, bottom.h}, "Spiel verlassen",
-                           eng::ui::ButtonKind::Ghost)) {
+        if (m_kit.inkButton("over/lobby", {slip.x + 16.0f, slip.y + 7.0f, 270.0f, 44.0f}, "Neue Nacht im Dorf", true)) m_net.sendReturnToLobby();
+        if (m_kit.inkButton("over/leave", {slip.right() - 196.0f, slip.y + 10.0f, 180.0f, 38.0f}, "Dorf verlassen")) leaveSession();
+    } else if (m_kit.inkButton("over/leave", {slip.center().x - 90.0f, slip.y + 10.0f, 180.0f, 38.0f}, "Dorf verlassen")) {
         leaveSession();
     }
+    m_kit.endTilt();
+    m_kit.grain(m_config.filmGrain ? 0.04f : 0.0f);
 }
-
 void App::drawMatchHud() {
     const GameView& v = m_net.view();
     eng::Renderer2D& r = m_renderer;
@@ -719,37 +1074,64 @@ void App::drawMatchHud() {
     const float W = r.width(), H = r.height();
     const bool over = v.phase == Phase::GameOver;
 
-    drawNameTags(v);
-    if (m_window.isMouseCaptured()) {
-        r.circle({W * 0.5f, H * 0.5f}, 2.5f, Color::hex(0xFFFFFF, 0.8f));
-        r.circleOutline({W * 0.5f, H * 0.5f}, 9.0f, 1.2f, Color::hex(0xFFFFFF, 0.25f));
-    }
-    drawPhaseBox(v);
-    drawMinimap({0, 0, W, H}, v);
-    drawBanner();
-    if (!over) {
-        drawRoleCard({16.0f, 0, 300.0f, H - 16.0f}, v);
-        drawPrompts(v);
-        drawVotePanel(v);
+    // Sterben färbt das Bild kurz rot
+    if (m_time - m_deathTime < 5.0 && !over) {
+        const float a = eng::clamp01(static_cast<float>(5.0 - (m_time - m_deathTime)) / 1.5f);
+        m_kit.vignette(1.2f * a);
+        r.gradientV({0, H * 0.7f, W, H * 0.3f}, palette::blood.withAlpha(0.0f), palette::blood.withAlpha(0.18f * a));
+    } else {
+        m_kit.vignette(0.35f);
     }
 
-    const Rect chat{W - 396.0f, H - 286.0f, 380.0f, 270.0f};
+    drawNameTags(v);
+    if (m_window.isMouseCaptured()) {
+        r.circle({W * 0.5f, H * 0.5f}, 2.2f, palette::parchment.withAlpha(0.85f));
+        r.circleOutline({W * 0.5f, H * 0.5f}, 8.0f, 1.0f, palette::parchment.withAlpha(0.2f));
+    }
+    if (!over) {
+        drawPhaseBox(v);
+        drawMinimap({0, 0, W, H}, v);
+    }
+    drawBanner();
+    if (!over) {
+        drawRoleCard({24.0f, 0, 320.0f, H - 24.0f}, v);
+        drawPrompts(v);
+        drawVotePanel(v);
+        drawSubtitles();
+    }
+
+    // Chat tritt in den Hintergrund, wenn nichts passiert
+    const Rect chat{W - 404.0f, H - 294.0f, 380.0f, 270.0f};
     m_hudBlockers.push_back(chat);
-    drawChat(chat, true);
+    const bool chatActive = m_ui.isFocused("chat") || !m_config.fadeChat || m_time - m_lastChatActivity < 10.0 ||
+                            !m_window.isMouseCaptured() || over;
+    const float chatA = m_kit.anim("hud/chat", chatActive ? 1.0f : 0.25f, 2.5f);
+    if (chatA > 0.3f) drawChat(chat, true);
+    else m_kit.hint({chat.right() - 140.0f, chat.bottom() - 24.0f}, "Enter", "Sprechen", 0.6f);
 
     if (m_time - m_deathTime < 5.0 && !over) {
         const float a = eng::clamp01(static_cast<float>(5.0 - (m_time - m_deathTime)) / 1.5f);
-        r.textCentered(m_fonts.title, {0, H * 0.42f, W, 80.0f}, "Du bist gestorben", Color::hex(0xD64B3F, a));
-        r.textCentered(m_fonts.narration, {0, H * 0.42f + 84.0f, W, 24.0f}, "Als Geist wanderst du ungesehen durchs Dorf.", theme::text.fade(a));
+        m_kit.spacedCentered(m_fonts.display, {0, H * 0.4f, W, 60.0f}, "DU BIST GESTORBEN", 8.0f, palette::blood.withAlpha(a));
+        r.textCentered(m_fonts.subtitle, {0, H * 0.4f + 70.0f, W, 26.0f}, "Als Geist wanderst du ungesehen durchs Dorf.",
+                       palette::parchment.withAlpha(a));
     }
+    if (m_config.showFps)
+        r.text(m_fonts.small, {12.0f, 10.0f}, std::format("{:.0f} FPS", 1.0f / std::max(m_dt, 0.001f)), palette::ash);
 
-    if (over) drawGameOver(v);
+    if (!m_revealDone) drawRoleReveal(v);
+    else if (over) drawGameOver(v);
+    else if (m_journalOpen) drawJournal(v);
     else if (m_pauseOpen) drawPauseMenu(v);
     else if (!m_window.isMouseCaptured() && !m_ui.isFocused("chat")) {
-        const Rect hint{W * 0.5f - 170.0f, H * 0.5f + 40.0f, 340.0f, 34.0f};
-        r.roundRect(hint, 10.0f, Color::hex(0x0A0D1A, 0.7f));
-        r.textCentered(m_fonts.small, hint, "Klicke ins Bild, um weiterzuspielen (Esc: Pause)", theme::text);
+        const float hw = 380.0f;
+        const Rect hint{W * 0.5f - hw * 0.5f, H * 0.5f + 40.0f, hw, 34.0f};
+        r.gradientH({hint.x, hint.y, hint.w * 0.5f, hint.h}, palette::ink.withAlpha(0.0f), palette::ink.withAlpha(0.75f));
+        r.gradientH({hint.center().x, hint.y, hint.w * 0.5f, hint.h}, palette::ink.withAlpha(0.75f), palette::ink.withAlpha(0.0f));
+        r.textCentered(m_fonts.small, hint, "Klicke ins Bild, um weiterzuspielen  ·  Esc: Pause", palette::parchment);
     }
+    if (!m_pauseOpen && !over) m_kit.anim("pause/fade", 0.0f, 100.0f);
+    if (!m_journalOpen) m_kit.anim("journal/open", 0.0f, 100.0f);
+    if (!over) m_kit.anim("over/fade", 0.0f, 100.0f);
 }
 
 } // namespace ww

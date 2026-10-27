@@ -15,6 +15,9 @@ float hash01(int x, int y, uint32_t seed);
 float valueNoise(float x, float y, uint32_t seed);
 float fbm(float x, float y, uint32_t seed, int octaves);
 
+// Bitmaske geschlossener Türen (Bit i = Tür von Haus i ist zu)
+using DoorMask = uint32_t;
+
 struct Collider {
     enum class Shape : uint8_t { Circle, Box };
     Shape shape = Shape::Circle;
@@ -23,6 +26,7 @@ struct Collider {
     Vec2 half;            // Box: halbe Ausdehnung (lokal x/z)
     float yaw = 0.0f;     // Box: Drehung um Y
     float bound = 0.5f;   // Umkreis für schnelle Vorabprüfung
+    bool opaque = false;  // verdeckt die Sicht (Wände)
 };
 
 struct House {
@@ -37,7 +41,14 @@ struct House {
     uint32_t timberColor = 0x4A3426;
     bool chimney = true;
     int variant = 0;
-    Vec3 door; // Weltposition vor der Tür
+    Vec3 door;         // Weltposition vor der Tür (draußen)
+    Vec3 doorInside;   // direkt hinter der Tür (drinnen)
+    Vec3 hearth;       // Kaminfeuer (Lichtquelle)
+    float floorY = 0;  // Höhe des Fußbodens innen
+
+    static constexpr float kWall = 0.24f;      // Wandstärke
+    static constexpr float kDoorWidth = 1.15f;
+    static constexpr float kFloorOffset = 0.35f;
 };
 
 enum class TreeKind : uint8_t { Pine, Broadleaf, Dead };
@@ -88,8 +99,10 @@ public:
     void generate(uint32_t seed);
     uint32_t seed() const { return m_seed; }
 
-    // Höhe exakt auf den Dreiecken des Geländegitters
+    // Höhe des Bodens: Gelände bzw. Fußboden in Häusern (mit Rampe an der Tür)
     float height(float x, float z) const;
+    // Nur das Gelände (Dreiecke des Höhengitters)
+    float terrainHeight(float x, float z) const;
     float gridHeight(int i, int j) const;
     Vec3 ground(float x, float z) const { return {x, height(x, z), z}; }
 
@@ -98,13 +111,22 @@ public:
     float squareFactor(float x, float z) const;
     float fieldFactor(float x, float z) const;
 
-    // Schiebt einen Kreis aus allen Hindernissen heraus.
-    Vec2 resolveCollision(Vec2 pos, float radius) const;
-    bool blocked(Vec2 pos, float radius) const;
-    // Prüft, ob die Sichtlinie zwischen zwei Punkten von Gebäuden verdeckt wird.
-    bool lineBlockedByBuildings(Vec2 a, Vec2 b) const;
-    // Liegt der Punkt in einem Gebäude (große Box-Hindernisse)?
+    // Schiebt einen Kreis aus allen Hindernissen (inkl. geschlossener Türen) heraus.
+    Vec2 resolveCollision(Vec2 pos, float radius, DoorMask closedDoors = 0) const;
+    bool blocked(Vec2 pos, float radius, DoorMask closedDoors = 0) const;
+    // Sichtlinie durch Wände oder geschlossene Türen verdeckt?
+    bool lineBlocked(Vec2 a, Vec2 b, DoorMask closedDoors = 0) const;
+    // Kreuzt die Bewegung von a nach b eine geschlossene Tür?
+    bool crossesClosedDoor(Vec2 a, Vec2 b, DoorMask closedDoors) const;
+    // Liegt der Punkt in einer Wand oder einem geschlossenen Gebäude (für die Kamera)?
     bool insideBuilding(Vec2 p, float margin = 0.2f) const;
+    // Index des Hauses, in dessen Innenraum der Punkt liegt, sonst -1
+    int houseAt(Vec2 p, float margin = 0.0f) const;
+    // Mittelpunkt der Türöffnung eines Hauses
+    Vec2 doorCenter(int house) const;
+    // Lokale Hauskoordinaten (x quer, z zur Tür hin) in Weltkoordinaten
+    Vec2 houseToWorld(int house, Vec2 local) const;
+    Vec2 worldToHouse(int house, Vec2 world) const;
 
     Vec3 spawnPoint(int index, int count) const;
     Vec3 bonfire() const { return ground(0.0f, 0.0f); }
@@ -125,9 +147,12 @@ private:
     void placeVillage();
     void placeNature();
     void addCircle(Vec2 c, float r);
-    void addBox(Vec2 c, Vec2 half, float yaw);
+    void addBox(Vec2 c, Vec2 half, float yaw, bool opaque = false);
+    void addHouseColliders(const House& h);
+    Collider doorCollider(int house) const;
     void buildGrid();
     bool freeSpot(Vec2 p, float r) const;
+    bool pushOut(const Collider& c, Vec2& pos, float radius) const;
 
     uint32_t m_seed = 0;
     std::vector<float> m_heights;

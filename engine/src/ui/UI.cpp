@@ -30,7 +30,7 @@ void Context::endFrame() {
     // Klick ins Leere entfernt den Tastaturfokus
     if (m_input->mousePressed() && !m_focusClaimed) m_focus = 0;
     if (!m_input->mouseDown()) m_active = 0;
-    m_window->setCursor(m_cursor);
+    m_window->setCursor(m_customCursor ? Cursor::None : m_cursor);
 }
 
 bool Context::hovered(const Rect& r) const { return r.contains(m_input->mouse); }

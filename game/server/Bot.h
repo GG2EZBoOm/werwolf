@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 
 namespace ww {
@@ -24,14 +25,25 @@ public:
     void hear(const Match& match, uint8_t speaker, const std::string& text);
 
 private:
+    enum class Nav { Moving, Arrived, Blocked };
+
     void onPhaseChange(const Match& match, const GameView& view);
     void chooseWanderTarget(const Match& match);
     void act(float dt, Match& match, const GameView& view, const SayFn& say, Vec2& wish, float& speed);
+    bool dayRole(Match& match, const GameView& view, const Match::Player& me, Vec2& wish);
     void nightRole(float dt, Match& match, const GameView& view, const Match::Player& me, const SayFn& say, Vec2& wish,
                    float& speed);
+    // Jagd der Werwölfe und des Serienmörders; true, solange gejagt wird
+    bool hunt(Match& match, const GameView& view, const Match::Player& me, Vec2& wish, float& speed);
+    void goHome(Match& match, const GameView& view, const Match::Player& me, Vec2& wish);
+    // Läuft zum Ziel und kümmert sich um Türen auf dem Weg
+    Nav navigate(Match& match, const GameView& view, Vec2 target, float stopDist, Vec2& wish, bool breakDoors);
     uint8_t nearestPlayer(const Match& match, Vec3 from, bool (*filter)(const Match::Player&), float maxDist) const;
+    uint8_t strongestSuspect(const Match& match, float threshold) const;
     uint8_t chooseVote(const Match& match, const GameView& view);
+    uint8_t chooseCaptain(const Match& match, const GameView& view);
     Vec2 steerTo(Vec2 target) const;
+    Vec2 position() const { return {m_mover.position.x, m_mover.position.z}; }
 
     eng::Rng m_rng;
     uint8_t m_id;
@@ -46,11 +58,17 @@ private:
     float m_think = 0.0f;
     float m_chatTimer = -1.0f;
     float m_transformDelay = 0.0f;
+    float m_phaseTime = 0.0f;
     uint8_t m_quarry = kNoPlayer;
+    std::set<uint8_t> m_spared;           // heute Nacht nicht angreifbar (beschützt, wehrhaft)
+    int m_douseHouse = -1;
     bool m_voted = false;
     bool m_shot = false;
     float m_shotDelay = 0.0f;
-    bool m_staysOut = false; // traut sich nachts aus dem Licht
+    bool m_staysOut = false;              // traut sich nachts aus dem Licht
+    bool m_goHome = false;                // schließt sich nachts im eigenen Haus ein
+    bool m_reported = false;              // Fährtenleser hat seine Spur verraten
+    bool m_wantsSteal = false;            // Dieb will in dieser Nacht stehlen
     std::map<uint8_t, float> m_suspicion; // wen der Bot für einen Werwolf hält
     std::map<uint8_t, int> m_seenAsWolf;  // als Bestie beobachtet (Nacht-Nummer)
 };

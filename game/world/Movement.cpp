@@ -11,7 +11,7 @@ float wrapAngle(float a) {
     return a;
 }
 
-void Mover::move(Vec2 wish, float maxSpeed, float dt, const World& world, bool collide) {
+void Mover::move(Vec2 wish, float maxSpeed, float dt, const World& world, bool collide, DoorMask closedDoors) {
     const Vec2 target = wish * maxSpeed;
     const float accel = (wish.length() > 0.01f ? 22.0f : 28.0f) * dt;
     const Vec2 dv = target - velocity;
@@ -21,7 +21,9 @@ void Mover::move(Vec2 wish, float maxSpeed, float dt, const World& world, bool c
     const Vec2 old{position.x, position.z};
     Vec2 next = old + velocity * dt;
     if (collide) {
-        next = world.resolveCollision(next, kPlayerRadius);
+        next = world.resolveCollision(next, kPlayerRadius, closedDoors);
+        // nie durch Wände oder Türen tunneln (außer man steckt schon fest, z. B. in einer gerade geschlossenen Tür)
+        if (world.lineBlocked(old, next, closedDoors) && !world.blocked(old, kPlayerRadius * 0.5f, closedDoors)) next = old;
     } else if (next.length() > World::kBoundary) {
         next = next * (World::kBoundary / next.length());
     }

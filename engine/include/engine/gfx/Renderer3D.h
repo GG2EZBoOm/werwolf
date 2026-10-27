@@ -49,6 +49,10 @@ struct Environment {
     float time = 0.0f;
     Vec3 shadowFocus{0, 0, 0};
     float shadowRadius = 45.0f;
+    // Tiefenunschärfe: außerhalb des Fokuskreises (Bildkoordinaten 0..1) wird das Bild weich
+    float focusBlur = 0.0f;
+    Vec2 focusCenter{0.5f, 0.5f};
+    float focusRadius = 0.25f;
 };
 
 struct PointLight {
@@ -69,6 +73,10 @@ public:
 
     bool init();
     void shutdown();
+    // Kantenglättung (1 = aus) und Auflösung der Schattenkarte
+    void setQuality(int samples, int shadowSize);
+    int samples() const { return m_samples; }
+    int maxSamples() const { return m_maxSamples; }
 
     void beginFrame(int framebufferWidth, int framebufferHeight, const Camera& camera, const Environment& env);
     void draw(const Mesh& mesh, const Mat4& model, Color tint = {1, 1, 1, 1}, float glow = 0.0f,
@@ -109,6 +117,7 @@ private:
     };
 
     void ensureTargets(int width, int height);
+    void createShadowMap(int size);
     void destroyTarget(Target& t);
     bool createColorTarget(Target& t, int width, int height, bool withDepth);
     bool createMsaaTarget(Target& t, int width, int height, int samples);
@@ -131,7 +140,11 @@ private:
     Target m_scene;
     Target m_bloomA[2];
     Target m_bloomB[2];
+    Target m_dofA[2];
+    Target m_dofB[2];
     int m_samples = 4;
+    int m_maxSamples = 4;
+    int m_shadowSize = 2048;
     unsigned m_emptyVao = 0;
     unsigned m_particleVao = 0;
     unsigned m_particleVbo = 0;

@@ -31,6 +31,7 @@ enum class Key : uint8_t {
     E,
     F,
     G,
+    J,
     M,
     Q,
     R,

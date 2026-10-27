@@ -16,7 +16,7 @@ Vec2 randomVillageSpot(const World& world, eng::Rng& rng) {
         const float a = rng.uniform(0.0f, 2.0f * eng::kPi);
         const float r = rng.uniform(6.0f, 40.0f);
         const Vec2 p{std::cos(a) * r, std::sin(a) * r};
-        if (!world.blocked(p, 0.6f)) return p;
+        if (!world.blocked(p, 0.6f) && world.houseAt(p, 0.6f) < 0) return p;
     }
     return {0, 8};
 }
@@ -31,6 +31,17 @@ void App::enterSandbox() {
     m_player.position = spawn;
     m_player.yaw = std::atan2(-spawn.x, -spawn.z);
     m_camera.yaw = m_player.yaw;
+    m_sandboxDoors.assign(m_world.houses().size(), DoorState{0, 100});
+    if (m_dev.indoors && !m_world.houses().empty()) {
+        // im ersten Haus neben dem Tisch, Blick zum Kamin
+        const House& h = m_world.houses()[0];
+        const Vec2 spot = m_world.houseToWorld(0, {-h.width * 0.12f, h.depth * 0.28f});
+        m_player.position = m_world.ground(spot.x, spot.y);
+        const Vec2 toFire = Vec2{h.hearth.x, h.hearth.z} - spot;
+        m_player.yaw = std::atan2(toFire.x, toFire.y);
+        m_camera.yaw = m_player.yaw;
+        m_sandboxDoors[0].flags = DoorOpen;
+    }
     m_npcs.clear();
     for (int i = 1; i < 9; ++i) {
         SandboxNpc npc;
@@ -48,7 +59,7 @@ void App::updateSandbox() {
     eng::Input& in = m_window.input();
     const float dt = m_dt;
 
-    const Rect menuButton{m_window.width() * 0.5f - 90.0f, m_window.height() * 0.5f + 36.0f, 180.0f, 38.0f};
+    const Rect menuButton{m_renderer.width() * 0.5f - 90.0f, m_renderer.height() * 0.5f + 36.0f, 180.0f, 38.0f};
     if (in.pressed(eng::Key::Escape)) m_window.setMouseCaptured(false);
     else if (in.mousePressed() && !m_window.isMouseCaptured() && !menuButton.contains(in.mouse))
         m_window.setMouseCaptured(true);
@@ -78,13 +89,31 @@ void App::updateSandbox() {
     }
     const bool sprint = in.down(eng::Key::Shift);
     const float maxSpeed = m_playerWolf > 0.5f ? kWolfSpeed : (sprint ? kSprintSpeed : kWalkSpeed);
-    m_player.move(wish, maxSpeed, dt, m_world);
+    const DoorMask closed = closedDoorMask(m_sandboxDoors);
+    m_player.move(wish, maxSpeed, dt, m_world, true, closed);
+
+    // Q: nächste Tür öffnen oder schließen
+    if (in.pressed(eng::Key::Q) && m_window.isMouseCaptured()) {
+        const Vec2 me{m_player.position.x, m_player.position.z};
+        int door = -1;
+        float best = kDoorRange;
+        for (size_t i = 0; i < m_sandboxDoors.size(); ++i) {
+            const float d = (m_world.doorCenter(static_cast<int>(i)) - me).length();
+            if (d < best && d > 0.75f) {
+                best = d;
+                door = static_cast<int>(i);
+            }
+        }
+        if (door >= 0) m_sandboxDoors[static_cast<size_t>(door)].flags ^= DoorOpen;
+    }
+    m_worldRenderer.updateHouses(m_sandboxDoors, dt);
+    m_worldRenderer.setHiddenRoof(m_world.houseAt({m_player.position.x, m_player.position.z}, 0.25f));
 
     for (SandboxNpc& npc : m_npcs) {
         const Vec2 pos{npc.mover.position.x, npc.mover.position.z};
         if (npc.idle > 0.0f) {
             npc.idle -= dt;
-            npc.mover.move({0, 0}, kWalkSpeed, dt, m_world);
+            npc.mover.move({0, 0}, kWalkSpeed, dt, m_world, true, closed);
             continue;
         }
         const Vec2 toTarget = npc.target - pos;
@@ -93,7 +122,7 @@ void App::updateSandbox() {
             npc.target = randomVillageSpot(m_world, m_devRng);
             continue;
         }
-        npc.mover.move(toTarget.normalized(), kWalkSpeed * 0.75f, dt, m_world);
+        npc.mover.move(toTarget.normalized(), kWalkSpeed * 0.75f, dt, m_world, true, closed);
         npc.stuck += dt;
         if (npc.stuck > 2.0f) {
             if ((pos - npc.lastPos).length() < 0.6f) npc.target = randomVillageSpot(m_world, m_devRng);
@@ -134,7 +163,8 @@ void App::drawCharacters3D(float night) {
 void App::renderSandbox3D() {
     const float t = static_cast<float>(m_time - m_startTime);
     m_lastCamera = m_camera.camera(m_player.position, m_world);
-    const eng::Environment env = m_worldRenderer.environment(m_previewTimeOfDay, m_player.position, t);
+    eng::Environment env = m_worldRenderer.environment(m_previewTimeOfDay, m_player.position, t);
+    applyGraphics(env);
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), m_lastCamera, env);
     m_worldRenderer.draw(m_renderer3d, env, t);
     drawCharacters3D(env.emissive);
@@ -143,7 +173,7 @@ void App::renderSandbox3D() {
 
 void App::drawSandboxOverlay() {
     eng::Renderer2D& r = m_renderer;
-    const float scale = m_window.dpiScale();
+    const float scale = m_renderer.dpiScale();
 
     // Namensschilder über den Köpfen
     auto nameTag = [&](uint8_t id, const Mover& m, float wolf) {
@@ -168,7 +198,7 @@ void App::drawSandboxOverlay() {
     const int hours = static_cast<int>(m_previewTimeOfDay * 24.0f);
     const int minutes = static_cast<int>(std::fmod(m_previewTimeOfDay * 24.0f * 60.0f, 60.0f));
     r.text(m_fonts.small, {14.0f, 12.0f},
-           std::format("{:02}:{:02} Uhr · {:.0f} FPS · WASD laufen, Shift rennen, Maus umsehen, R verwandeln, T Zeit vorspulen, "
+           std::format("{:02}:{:02} Uhr · {:.0f} FPS · WASD laufen, Shift rennen, Maus umsehen, R verwandeln, Q Tür, T Zeit vorspulen, "
                        "Esc Maus freigeben",
                        hours, minutes, 1.0f / std::max(m_dt, 0.001f)),
            Color::hex(0xFFFFFF, 0.75f));

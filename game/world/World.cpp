@@ -149,6 +149,21 @@ float World::gridHeight(int i, int j) const {
 }
 
 float World::height(float x, float z) const {
+    const float terrain = terrainHeight(x, z);
+    for (const House& h : m_houses) {
+        const float dx = x - h.position.x, dz = z - h.position.z;
+        if (dx * dx + dz * dz > 49.0f) continue;
+        const Vec2 local = unrotate({dx, dz}, h.yaw);
+        const float hw = h.width * 0.5f, hd = h.depth * 0.5f;
+        if (std::fabs(local.x) <= hw && std::fabs(local.y) <= hd) return h.floorY;
+        // flache Rampe vor der Tür
+        if (std::fabs(local.x) <= House::kDoorWidth * 0.5f + 0.5f && local.y > hd && local.y < hd + 1.3f)
+            return eng::lerp(h.floorY, terrain, smooth(0.0f, 1.0f, (local.y - hd) / 1.3f));
+    }
+    return terrain;
+}
+
+float World::terrainHeight(float x, float z) const {
     if (m_heights.empty()) return 0.0f;
     const float gx = (x + kSize * 0.5f) / kCell;
     const float gz = (z + kSize * 0.5f) / kCell;
@@ -193,14 +208,67 @@ void World::addCircle(Vec2 c, float r) {
     m_colliders.push_back(col);
 }
 
-void World::addBox(Vec2 c, Vec2 half, float yaw) {
+void World::addBox(Vec2 c, Vec2 half, float yaw, bool opaque) {
     Collider col;
     col.shape = Collider::Shape::Box;
     col.center = c;
     col.half = half;
     col.yaw = yaw;
     col.bound = half.length();
+    col.opaque = opaque;
     m_colliders.push_back(col);
+}
+
+void World::addHouseColliders(const House& h) {
+    const float t = House::kWall, hw = h.width * 0.5f, hd = h.depth * 0.5f, gap = House::kDoorWidth * 0.5f;
+    const Vec2 c{h.position.x, h.position.z};
+    auto box = [&](Vec2 localCenter, Vec2 half, bool opaque) { addBox(c + rotate(localCenter, h.yaw), half, h.yaw, opaque); };
+    box({0, -hd + t * 0.5f}, {hw, t * 0.5f}, true);       // Rückwand
+    box({-hw + t * 0.5f, 0}, {t * 0.5f, hd}, true);       // linke Wand
+    box({hw - t * 0.5f, 0}, {t * 0.5f, hd}, true);        // rechte Wand
+    const float segment = (hw - gap) * 0.5f;
+    box({-(gap + segment), hd - t * 0.5f}, {segment, t * 0.5f}, true); // Front links der Tür
+    box({gap + segment, hd - t * 0.5f}, {segment, t * 0.5f}, true);    // Front rechts der Tür
+    // Möbel
+    box({-hw + t + 0.5f, -hd + t + 1.0f}, {0.48f, 0.98f}, false);    // Bett
+    box({hw * 0.25f, 0.15f}, {0.55f, 0.4f}, false);                   // Tisch
+    box({hw - t - 0.32f, -hd * 0.25f}, {0.32f, 0.6f}, false);         // Kamin
+    box({hw - t - 0.45f, -hd + t + 0.3f}, {0.45f, 0.28f}, false);     // Truhe
+}
+
+Collider World::doorCollider(int house) const {
+    const House& h = m_houses[static_cast<size_t>(house)];
+    Collider c;
+    c.shape = Collider::Shape::Box;
+    c.center = Vec2{h.position.x, h.position.z} + rotate({0, h.depth * 0.5f - House::kWall * 0.5f}, h.yaw);
+    c.half = {House::kDoorWidth * 0.5f, House::kWall * 0.5f};
+    c.yaw = h.yaw;
+    c.bound = c.half.length();
+    c.opaque = true;
+    return c;
+}
+
+Vec2 World::doorCenter(int house) const { return doorCollider(house).center; }
+
+Vec2 World::houseToWorld(int house, Vec2 local) const {
+    const House& h = m_houses[static_cast<size_t>(house)];
+    return Vec2{h.position.x, h.position.z} + rotate(local, h.yaw);
+}
+
+Vec2 World::worldToHouse(int house, Vec2 world) const {
+    const House& h = m_houses[static_cast<size_t>(house)];
+    return unrotate(world - Vec2{h.position.x, h.position.z}, h.yaw);
+}
+
+int World::houseAt(Vec2 p, float margin) const {
+    for (size_t i = 0; i < m_houses.size(); ++i) {
+        const House& h = m_houses[i];
+        const Vec2 local = unrotate(p - Vec2{h.position.x, h.position.z}, h.yaw);
+        if (std::fabs(local.x) < h.width * 0.5f - House::kWall + margin &&
+            std::fabs(local.y) < h.depth * 0.5f - House::kWall + margin)
+            return static_cast<int>(i);
+    }
+    return -1;
 }
 
 bool World::freeSpot(Vec2 p, float r) const {
@@ -283,18 +351,25 @@ void World::placeVillage() {
         h.timberColor = timbers[rng.next() % 3];
         h.chimney = rng.chance(0.75f);
         h.variant = static_cast<int>(rng.next() % 4);
-        // Fundament auf der tiefsten Ecke, damit nichts schwebt
-        float lowest = 1e9f;
-        for (int cx = -1; cx <= 1; cx += 2)
-            for (int cz = -1; cz <= 1; cz += 2) {
+        // Fundament auf der tiefsten Ecke, damit nichts schwebt; der Fußboden liegt über dem höchsten Punkt
+        float lowest = 1e9f, highest = -1e9f;
+        for (int cx = -1; cx <= 1; ++cx)
+            for (int cz = -1; cz <= 1; ++cz) {
                 const Vec2 corner = p + rotate({h.width * 0.5f * static_cast<float>(cx), h.depth * 0.5f * static_cast<float>(cz)}, h.yaw);
-                lowest = std::min(lowest, height(corner.x, corner.y));
+                lowest = std::min(lowest, terrainHeight(corner.x, corner.y));
+                highest = std::max(highest, terrainHeight(corner.x, corner.y));
             }
         h.position = {p.x, lowest, p.y};
+        h.floorY = std::max(lowest + House::kFloorOffset, highest + 0.06f);
         const Vec2 door = p + toCenter * (h.depth * 0.5f + 1.2f);
-        h.door = ground(door.x, door.y);
+        const Vec2 inside = p + toCenter * (h.depth * 0.5f - 0.9f);
+        const Vec2 hearth = p + rotate({h.width * 0.5f - House::kWall - 0.3f, -h.depth * 0.25f}, h.yaw);
+        h.doorInside = {inside.x, h.floorY, inside.y};
+        h.hearth = {hearth.x, h.floorY + 0.55f, hearth.y};
         m_houses.push_back(h);
-        addBox(p, {h.width * 0.5f + 0.1f, h.depth * 0.5f + 0.1f}, h.yaw);
+        h.door = ground(door.x, door.y);
+        m_houses.back().door = h.door;
+        addHouseColliders(h);
 
         // Kleinkram neben dem Haus
         const Vec2 side = p + rotate({h.width * 0.5f + 0.9f, h.depth * 0.25f}, h.yaw);
@@ -313,8 +388,8 @@ void World::placeVillage() {
     // Kapelle mit Friedhof im Norden
     m_chapel = ground(0.0f, -55.0f);
     m_chapelYaw = 0.0f; // Tür zeigt nach Süden zum Dorf
-    addBox({0.0f, -55.0f}, {4.2f, 7.2f}, 0.0f);
-    addBox({0.0f, -63.0f}, {2.0f, 2.0f}, 0.0f); // Turm
+    addBox({0.0f, -55.0f}, {4.2f, 7.2f}, 0.0f, true);
+    addBox({0.0f, -63.0f}, {2.0f, 2.0f}, 0.0f, true); // Turm
     for (int gx = 0; gx < 4; ++gx) {
         for (int gz = 0; gz < 4; ++gz) {
             const Vec2 p{9.0f + static_cast<float>(gx) * 2.6f + rng.range(-0.3f, 0.3f),
@@ -458,46 +533,47 @@ void World::buildGrid() {
 
 // --- Kollision -------------------------------------------------------------------
 
-Vec2 World::resolveCollision(Vec2 pos, float radius) const {
-    for (int iter = 0; iter < 3; ++iter) {
+bool World::pushOut(const Collider& c, Vec2& pos, float radius) const {
+    const Vec2 d = pos - c.center;
+    if (d.length() > c.bound + radius) return false;
+    if (c.shape == Collider::Shape::Circle) {
+        const float dist = d.length();
+        const float minDist = c.radius + radius;
+        if (dist >= minDist) return false;
+        pos = dist > 1e-4f ? c.center + d / dist * minDist : c.center + Vec2{minDist, 0};
+        return true;
+    }
+    Vec2 local = unrotate(d, c.yaw);
+    const Vec2 clamped{std::clamp(local.x, -c.half.x, c.half.x), std::clamp(local.y, -c.half.y, c.half.y)};
+    const Vec2 diff = local - clamped;
+    const float dist = diff.length();
+    if (dist >= radius) return false;
+    if (dist > 1e-4f) {
+        local = clamped + diff / dist * radius;
+    } else {
+        // Mittelpunkt in der Box: entlang der geringsten Eindringtiefe hinausschieben
+        const float px = c.half.x - std::fabs(local.x);
+        const float pz = c.half.y - std::fabs(local.y);
+        if (px < pz) local.x = (local.x < 0 ? -1.0f : 1.0f) * (c.half.x + radius);
+        else local.y = (local.y < 0 ? -1.0f : 1.0f) * (c.half.y + radius);
+    }
+    pos = c.center + rotate(local, c.yaw);
+    return true;
+}
+
+Vec2 World::resolveCollision(Vec2 pos, float radius, DoorMask closedDoors) const {
+    for (int iter = 0; iter < 4; ++iter) {
         const int cx = static_cast<int>(std::floor((pos.x + kSize * 0.5f) / kGridCell));
         const int cz = static_cast<int>(std::floor((pos.y + kSize * 0.5f) / kGridCell));
         bool moved = false;
         for (int z = cz - 1; z <= cz + 1; ++z) {
             for (int x = cx - 1; x <= cx + 1; ++x) {
                 if (x < 0 || z < 0 || x >= kGridSize || z >= kGridSize) continue;
-                for (uint32_t idx : m_grid[static_cast<size_t>(z * kGridSize + x)]) {
-                    const Collider& c = m_colliders[idx];
-                    const Vec2 d = pos - c.center;
-                    if (d.length() > c.bound + radius) continue;
-                    if (c.shape == Collider::Shape::Circle) {
-                        const float dist = d.length();
-                        const float minDist = c.radius + radius;
-                        if (dist < minDist) {
-                            pos = dist > 1e-4f ? c.center + d / dist * minDist : c.center + Vec2{minDist, 0};
-                            moved = true;
-                        }
-                    } else {
-                        Vec2 local = unrotate(d, c.yaw);
-                        const Vec2 clamped{std::clamp(local.x, -c.half.x, c.half.x), std::clamp(local.y, -c.half.y, c.half.y)};
-                        const Vec2 diff = local - clamped;
-                        const float dist = diff.length();
-                        if (dist >= radius) continue;
-                        if (dist > 1e-4f) {
-                            local = clamped + diff / dist * radius;
-                        } else {
-                            // Mittelpunkt in der Box: entlang der geringsten Eindringtiefe hinausschieben
-                            const float px = c.half.x - std::fabs(local.x);
-                            const float pz = c.half.y - std::fabs(local.y);
-                            if (px < pz) local.x = (local.x < 0 ? -1.0f : 1.0f) * (c.half.x + radius);
-                            else local.y = (local.y < 0 ? -1.0f : 1.0f) * (c.half.y + radius);
-                        }
-                        pos = c.center + rotate(local, c.yaw);
-                        moved = true;
-                    }
-                }
+                for (uint32_t idx : m_grid[static_cast<size_t>(z * kGridSize + x)]) moved |= pushOut(m_colliders[idx], pos, radius);
             }
         }
+        for (size_t i = 0; i < m_houses.size() && closedDoors; ++i)
+            if (closedDoors & (1u << i)) moved |= pushOut(doorCollider(static_cast<int>(i)), pos, radius);
         if (!moved) break;
     }
     const float r = pos.length();
@@ -505,41 +581,56 @@ Vec2 World::resolveCollision(Vec2 pos, float radius) const {
     return pos;
 }
 
-bool World::blocked(Vec2 pos, float radius) const {
-    const Vec2 resolved = resolveCollision(pos, radius);
+bool World::blocked(Vec2 pos, float radius, DoorMask closedDoors) const {
+    const Vec2 resolved = resolveCollision(pos, radius, closedDoors);
     return (resolved - pos).length() > 0.01f;
 }
 
-bool World::lineBlockedByBuildings(Vec2 a, Vec2 b) const {
-    for (const Collider& c : m_colliders) {
-        if (c.shape != Collider::Shape::Box || c.half.x < 1.5f || c.half.y < 1.5f) continue;
-        if (distToSegment(c.center, a, b) > c.bound) continue;
-        // Segment im lokalen Raum gegen die Box (Slab-Test)
-        const Vec2 la = unrotate(a - c.center, c.yaw);
-        const Vec2 lb = unrotate(b - c.center, c.yaw);
-        const Vec2 d = lb - la;
-        float t0 = 0.0f, t1 = 1.0f;
-        bool hit = true;
-        const float pa[2] = {la.x, la.y}, pd[2] = {d.x, d.y}, ph[2] = {c.half.x, c.half.y};
-        for (int k = 0; k < 2 && hit; ++k) {
-            if (std::fabs(pd[k]) < 1e-6f) {
-                if (pa[k] < -ph[k] || pa[k] > ph[k]) hit = false;
-            } else {
-                float e0 = (-ph[k] - pa[k]) / pd[k], e1 = (ph[k] - pa[k]) / pd[k];
-                if (e0 > e1) std::swap(e0, e1);
-                t0 = std::max(t0, e0);
-                t1 = std::min(t1, e1);
-                if (t0 > t1) hit = false;
-            }
+namespace {
+// Schneidet die Strecke a-b eine (gedrehte) Box?
+bool segmentHitsBox(Vec2 a, Vec2 b, const Collider& c, float grow) {
+    const Vec2 la = unrotate(a - c.center, c.yaw);
+    const Vec2 lb = unrotate(b - c.center, c.yaw);
+    const Vec2 d = lb - la;
+    float t0 = 0.0f, t1 = 1.0f;
+    const float pa[2] = {la.x, la.y}, pd[2] = {d.x, d.y}, ph[2] = {c.half.x + grow, c.half.y + grow};
+    for (int k = 0; k < 2; ++k) {
+        if (std::fabs(pd[k]) < 1e-6f) {
+            if (pa[k] < -ph[k] || pa[k] > ph[k]) return false;
+        } else {
+            float e0 = (-ph[k] - pa[k]) / pd[k], e1 = (ph[k] - pa[k]) / pd[k];
+            if (e0 > e1) std::swap(e0, e1);
+            t0 = std::max(t0, e0);
+            t1 = std::min(t1, e1);
+            if (t0 > t1) return false;
         }
-        if (hit) return true;
+    }
+    return true;
+}
+} // namespace
+
+bool World::lineBlocked(Vec2 a, Vec2 b, DoorMask closedDoors) const {
+    for (const Collider& c : m_colliders) {
+        if (!c.opaque || c.shape != Collider::Shape::Box) continue;
+        if (distToSegment(c.center, a, b) > c.bound) continue;
+        if (segmentHitsBox(a, b, c, 0.0f)) return true;
+    }
+    return closedDoors && crossesClosedDoor(a, b, closedDoors);
+}
+
+bool World::crossesClosedDoor(Vec2 a, Vec2 b, DoorMask closedDoors) const {
+    for (size_t i = 0; i < m_houses.size(); ++i) {
+        if (!(closedDoors & (1u << i))) continue;
+        const Collider door = doorCollider(static_cast<int>(i));
+        if (distToSegment(door.center, a, b) > door.bound + 0.2f) continue;
+        if (segmentHitsBox(a, b, door, -0.05f)) return true;
     }
     return false;
 }
 
 bool World::insideBuilding(Vec2 p, float margin) const {
     for (const Collider& c : m_colliders) {
-        if (c.shape != Collider::Shape::Box || c.half.x < 1.5f || c.half.y < 1.5f) continue;
+        if (!c.opaque || c.shape != Collider::Shape::Box) continue;
         if ((p - c.center).length() > c.bound + margin) continue;
         const Vec2 local = unrotate(p - c.center, c.yaw);
         if (std::fabs(local.x) < c.half.x + margin && std::fabs(local.y) < c.half.y + margin) return true;

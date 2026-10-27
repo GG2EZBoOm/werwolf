@@ -14,6 +14,8 @@ struct ThirdPersonCamera {
     float pitch = 0.32f;  // positiv = von oben
     float distance = 5.0f;
     float sensitivity = 0.0024f;
+    bool invertY = false;
+    float fieldOfView = 62.0f; // Grad
 
     void update(const eng::Input& input, bool mouseCaptured);
     eng::Camera camera(Vec3 focus, const World& world) const;

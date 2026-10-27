@@ -10,7 +10,7 @@ using eng::kPi;
 void ThirdPersonCamera::update(const eng::Input& input, bool mouseCaptured) {
     if (mouseCaptured) {
         yaw -= input.mouseDelta.x * sensitivity;
-        pitch += input.mouseDelta.y * sensitivity;
+        pitch += input.mouseDelta.y * sensitivity * (invertY ? -1.0f : 1.0f);
     }
     pitch = std::clamp(pitch, -0.45f, 1.25f);
     distance = std::clamp(distance - input.wheel * 0.6f, 2.2f, 10.0f);
@@ -23,6 +23,25 @@ Vec3 ThirdPersonCamera::forward() const {
 eng::Camera ThirdPersonCamera::camera(Vec3 focus, const World& world) const {
     const Vec3 right{-std::cos(yaw), 0.0f, std::sin(yaw)};
     const Vec3 target = focus + Vec3{0, 1.55f, 0} + right * 0.35f;
+
+    // Drinnen: das Dach wird ausgeblendet, die Kamera bleibt über dem Raum und schaut eher von oben
+    if (const int house = world.houseAt({focus.x, focus.z}, 0.25f); house >= 0) {
+        const House& h = world.houses()[static_cast<size_t>(house)];
+        const float p = std::max(pitch, 0.6f);
+        const Vec3 dir{std::sin(yaw) * std::cos(p), -std::sin(p), std::cos(yaw) * std::cos(p)};
+        Vec3 pos = target - dir * std::min(distance + 1.0f, 6.0f);
+        const float mx = h.width * 0.5f - House::kWall - 0.2f, mz = h.depth * 0.5f - House::kWall - 0.2f;
+        Vec2 local = world.worldToHouse(house, {pos.x, pos.z});
+        local = {std::clamp(local.x, -mx, mx), std::clamp(local.y, -mz, mz)};
+        const Vec2 clamped = world.houseToWorld(house, local);
+        pos = {clamped.x, std::clamp(pos.y, h.floorY + 1.2f, h.floorY + h.wallHeight + 3.2f), clamped.y};
+        eng::Camera cam;
+        cam.target = target;
+        cam.position = pos;
+        cam.fovY = (fieldOfView + 4.0f) * kPi / 180.0f;
+        return cam;
+    }
+
     const Vec3 dir = forward();
     float dist = distance;
     // Kamera nicht in Häuser schieben
@@ -39,7 +58,7 @@ eng::Camera ThirdPersonCamera::camera(Vec3 focus, const World& world) const {
     cam.position = target - dir * dist;
     const float ground = world.height(cam.position.x, cam.position.z) + 0.35f;
     if (cam.position.y < ground) cam.position.y = ground;
-    cam.fovY = 62.0f * kPi / 180.0f;
+    cam.fovY = fieldOfView * kPi / 180.0f;
     return cam;
 }
 

@@ -10,7 +10,7 @@ namespace eng {
 
 namespace {
 
-constexpr int kShadowSize = 2048;
+constexpr int kDefaultShadowSize = 2048;
 constexpr int kMaxLights = 16;
 
 // --- Shader ------------------------------------------------------------------
@@ -94,7 +94,8 @@ void main() {
             lighting += uLightColor2[i].rgb * uLightColor2[i].w * att * diff;
         }
     }
-    vec3 color = albedo * lighting + albedo * uGlow * 3.0 + uEmissiveColor * vGlow * uEmissive;
+    // Alpha der Tönung dämpft das Eigenleuchten (z. B. dunkle Fenster einer Ruine)
+    vec3 color = albedo * lighting + albedo * uGlow * 3.0 + uEmissiveColor * vGlow * uEmissive * uTint.a;
     float dist = length(vWorldPos - uCameraPos);
     float fog = 1.0 - exp(-dist * uFogDensity);
     fog *= clamp(exp(-max(vWorldPos.y, 0.0) * uFogHeight), 0.3, 1.0);
@@ -241,6 +242,12 @@ in vec2 vUV;
 uniform sampler2D uScene;
 uniform sampler2D uBloom1;
 uniform sampler2D uBloom2;
+uniform sampler2D uDof1;
+uniform sampler2D uDof2;
+uniform float uFocusBlur;
+uniform vec2 uFocusCenter;
+uniform float uFocusRadius;
+uniform float uAspect;
 uniform float uExposure;
 uniform float uBloomStrength;
 uniform float uVignette;
@@ -255,6 +262,12 @@ vec3 aces(vec3 x) {
 }
 void main() {
     vec3 c = texture(uScene, vUV).rgb;
+    if (uFocusBlur > 0.0) {
+        vec2 d = (vUV - uFocusCenter) * vec2(uAspect, 1.0);
+        float k = smoothstep(uFocusRadius, uFocusRadius + 0.45, length(d)) * uFocusBlur;
+        vec3 soft = mix(texture(uDof1, vUV).rgb, texture(uDof2, vUV).rgb, clamp(k * 1.4 - 0.2, 0.0, 1.0));
+        c = mix(c, soft, clamp(k * 1.6, 0.0, 1.0));
+    }
     vec3 bloom = texture(uBloom1, vUV).rgb * 0.55 + texture(uBloom2, vUV).rgb * 0.75;
     c += bloom * uBloomStrength;
     float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -311,11 +324,33 @@ bool Renderer3D::init() {
     glEnableVertexAttribArray(2);
     glBindVertexArray(0);
 
+    createShadowMap(kDefaultShadowSize);
+
+    GLint maxSamples = 0;
+    glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+    m_maxSamples = std::max(1, static_cast<int>(maxSamples));
+    m_samples = std::min(4, m_maxSamples);
+    return true;
+}
+
+void Renderer3D::setQuality(int samples, int shadowSize) {
+    samples = std::clamp(samples, 1, m_maxSamples);
+    if (samples != m_samples) {
+        m_samples = samples;
+        destroyTarget(m_scene); // erzwingt neue Render-Targets im nächsten Frame
+        destroyTarget(m_sceneMs);
+    }
+    shadowSize = std::clamp(shadowSize, 512, 8192);
+    if (shadowSize != m_shadowSize) createShadowMap(shadowSize);
+}
+
+void Renderer3D::createShadowMap(int size) {
+    destroyTarget(m_shadow);
+    m_shadowSize = size;
     // Schattenkarte (Tiefentextur mit Hardware-Vergleich)
     glGenTextures(1, &m_shadow.depthTex);
     glBindTexture(GL_TEXTURE_2D, m_shadow.depthTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, kShadowSize, kShadowSize, 0, GL_DEPTH_COMPONENT, GL_FLOAT,
-                 nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, size, size, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -329,12 +364,7 @@ bool Renderer3D::init() {
     glReadBuffer(GL_NONE);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) log::warn("Schatten-Framebuffer unvollständig");
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    m_shadow.width = m_shadow.height = kShadowSize;
-
-    GLint maxSamples = 0;
-    glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
-    m_samples = std::min(4, static_cast<int>(maxSamples));
-    return true;
+    m_shadow.width = m_shadow.height = size;
 }
 
 void Renderer3D::shutdown() {
@@ -344,6 +374,8 @@ void Renderer3D::shutdown() {
     for (int i = 0; i < 2; ++i) {
         destroyTarget(m_bloomA[i]);
         destroyTarget(m_bloomB[i]);
+        destroyTarget(m_dofA[i]);
+        destroyTarget(m_dofB[i]);
     }
     if (m_particleVbo) glDeleteBuffers(1, &m_particleVbo);
     if (m_particleVao) glDeleteVertexArrays(1, &m_particleVao);
@@ -427,6 +459,10 @@ void Renderer3D::ensureTargets(int width, int height) {
     createColorTarget(m_bloomB[0], w2, h2, false);
     createColorTarget(m_bloomA[1], w4, h4, false);
     createColorTarget(m_bloomB[1], w4, h4, false);
+    createColorTarget(m_dofA[0], w2, h2, false);
+    createColorTarget(m_dofB[0], w2, h2, false);
+    createColorTarget(m_dofA[1], w4, h4, false);
+    createColorTarget(m_dofB[1], w4, h4, false);
 }
 
 // --- Frame -------------------------------------------------------------------
@@ -501,13 +537,13 @@ void Renderer3D::renderShadows() {
     Mat4 proj = Mat4::orthographic(-R, R, -R, R, 1.0f, 320.0f);
     // An Texel-Raster ausrichten, damit Schatten beim Bewegen nicht flimmern
     const Vec4 origin = (proj * view) * Vec4(0, 0, 0, 1);
-    const float half = static_cast<float>(kShadowSize) * 0.5f;
+    const float half = static_cast<float>(m_shadowSize) * 0.5f;
     const float tx = origin.x * half, ty = origin.y * half;
     proj = Mat4::translation({(std::round(tx) - tx) / half, (std::round(ty) - ty) / half, 0}) * proj;
     m_lightViewProj = proj * view;
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_shadow.fbo);
-    glViewport(0, 0, kShadowSize, kShadowSize);
+    glViewport(0, 0, m_shadowSize, m_shadowSize);
     glClear(GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
@@ -585,7 +621,7 @@ void Renderer3D::renderScene() {
     m_lit.set("uFogHeight", m_env.fogHeightFalloff);
     m_lit.set("uEmissive", m_env.emissive);
     m_lit.set("uEmissiveColor", m_env.emissiveColor);
-    m_lit.set("uShadowTexel", 1.0f / static_cast<float>(kShadowSize));
+    m_lit.set("uShadowTexel", 1.0f / static_cast<float>(m_shadowSize));
     m_lit.set("uShadowMap", 1);
     m_lit.set("uLightCount", lightCount);
     m_lit.setArray("uLightPos", lightPos, lightCount);
@@ -680,6 +716,26 @@ void Renderer3D::postProcess() {
     blurPass(m_bloomA[1], m_bloomB[1]);
     blurPass(m_bloomA[1], m_bloomB[1]);
 
+    // Unscharfe Fassungen des ganzen Bildes für die Tiefenunschärfe
+    if (m_env.focusBlur > 0.0f) {
+        m_bright.bind();
+        m_bright.set("uThreshold", 0.0f);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_dofA[0].fbo);
+        glViewport(0, 0, m_dofA[0].width, m_dofA[0].height);
+        glBindTexture(GL_TEXTURE_2D, m_scene.color);
+        m_bright.set("uTexel", Vec2{0.5f / static_cast<float>(m_width), 0.5f / static_cast<float>(m_height)});
+        fullscreen();
+        blurPass(m_dofA[0], m_dofB[0]);
+        blurPass(m_dofA[0], m_dofB[0]);
+        m_bright.bind();
+        glBindFramebuffer(GL_FRAMEBUFFER, m_dofA[1].fbo);
+        glViewport(0, 0, m_dofA[1].width, m_dofA[1].height);
+        glBindTexture(GL_TEXTURE_2D, m_dofA[0].color);
+        m_bright.set("uTexel", Vec2{0.5f / static_cast<float>(m_dofA[0].width), 0.5f / static_cast<float>(m_dofA[0].height)});
+        fullscreen();
+        for (int i = 0; i < 3; ++i) blurPass(m_dofA[1], m_dofB[1]);
+    }
+
     // Zusammensetzen ins Fenster
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, m_width, m_height);
@@ -694,6 +750,16 @@ void Renderer3D::postProcess() {
     m_composite.set("uTime", m_env.time);
     m_composite.set("uSaturation", m_env.saturation);
     m_composite.set("uGradeTint", m_env.gradeTint);
+    m_composite.set("uDof1", 3);
+    m_composite.set("uDof2", 4);
+    m_composite.set("uFocusBlur", m_env.focusBlur);
+    m_composite.set("uFocusCenter", m_env.focusCenter);
+    m_composite.set("uFocusRadius", m_env.focusRadius);
+    m_composite.set("uAspect", static_cast<float>(m_width) / static_cast<float>(std::max(1, m_height)));
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_dofA[0].color);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, m_dofA[1].color);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_scene.color);
     glActiveTexture(GL_TEXTURE1);
@@ -701,6 +767,10 @@ void Renderer3D::postProcess() {
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_bloomA[1].color);
     fullscreen();
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1);

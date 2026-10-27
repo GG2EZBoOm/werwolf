@@ -4,6 +4,7 @@
 #include "client/Config.h"
 #include "client/Controller.h"
 #include "client/NetClient.h"
+#include "client/Style.h"
 #include "client/Updater.h"
 #include "client/WorldRenderer.h"
 #include "server/GameServer.h"
@@ -21,19 +22,6 @@
 
 namespace ww {
 
-struct Fonts {
-    eng::Font ui;
-    eng::Font uiBold;
-    eng::Font small;
-    eng::Font smallBold;
-    eng::Font large;
-    eng::Font title;
-    eng::Font heading;
-    eng::Font narration;
-    eng::Font icon;
-    eng::Font iconLarge;
-};
-
 // Der grafische Client: Hauptmenü, Lobby und die 3D-Spielwelt.
 class App {
 public:
@@ -41,6 +29,7 @@ public:
 
 private:
     enum class Screen { Updating, Menu, Connecting, Session, Lost, Preview, Sandbox };
+    enum class MenuPage { None, Host, Join, Settings };
 
     // Offline-Testumgebung: selbst durchs Dorf laufen, Dorfbewohner wandern umher
     struct SandboxNpc {
@@ -86,6 +75,9 @@ private:
         bool autoPlay = false;
         bool preview = false;
         bool sandbox = false;
+        bool indoors = false; // Sandbox im ersten Haus beginnen (für Screenshots)
+        bool journal = false; // Tagebuch nach Spielbeginn öffnen (für Screenshots)
+        bool pause = false;   // Pausenmenü nach Spielbeginn öffnen (für Screenshots)
         int previewCamera = 0;
         float timeOfDay = -1.0f;
         float timeScale = 1.0f;
@@ -110,6 +102,7 @@ private:
     void ensureWorld(uint32_t seed);
     void takeScreenshot(const std::filesystem::path& path);
     void loadFonts(float scale);
+    float uiScale() const;
     void updateSession();
     void onPhaseChanged(const GameView& v);
 
@@ -131,6 +124,12 @@ private:
     void drawLobby();
     void drawChat(const eng::Rect& r, bool compact);
     void drawPanel(const eng::Rect& r, float radius = 14.0f);
+    void drawMenuPage(const eng::Rect& area);
+    void drawFooterHints(bool back);
+    // Einstellungen (Hauptmenü und Pause); liefert true, wenn "Zurück" gewählt wurde
+    bool drawSettings(const eng::Rect& area);
+    void applySettings();
+    void applyGraphics(eng::Environment& env) const;
 
     // Echtzeit-Runde
     void enterMatch();
@@ -147,7 +146,14 @@ private:
     void drawPauseMenu(const GameView& v);
     void drawGameOver(const GameView& v);
     void drawBanner();
+    void drawRoleReveal(const GameView& v);
+    void drawJournal(const GameView& v);
+    void drawSubtitles();
+    void drawRoleCardFace(const eng::Rect& r, Role role, float alpha);
+    std::vector<std::pair<std::string, eng::Color>> roleStatusLines(const GameView& v);
     std::string headerTitle(const GameView& v) const;
+    // Phase mit Tageszahl, ohne sie doppelt zu nennen ("Tag 2", "Versammlung · Tag 2")
+    std::string phaseWithDay(const GameView& v) const;
     Vec3 myPosition() const { return m_player.position; }
     bool imAlive() const;
     bool canMoveFreely() const;
@@ -172,8 +178,10 @@ private:
     bool m_playerWolfTarget = false;
     float m_playerAttack = 0.0f;
     std::vector<SandboxNpc> m_npcs;
+    std::vector<DoorState> m_sandboxDoors;
     eng::Camera m_lastCamera;
     eng::ui::Context m_ui;
+    UiKit m_kit;
     Fonts m_fonts;
     float m_fontScale = 0.0f;
 
@@ -195,6 +203,27 @@ private:
     std::string m_chatInput;
     float m_chatScroll = 0.0f;
     bool m_chatWolves = false;
+    double m_lastChatActivity = 0.0;
+
+    // Menüs
+    MenuPage m_menuPage = MenuPage::None;
+    Screen m_transitionScreen = Screen::Updating;
+    bool m_transitionMatch = false;
+    double m_transitionStart = -100.0;
+    // Filmische Kamera im Menü (folgt weich den Einstellungen je Untermenü)
+    eng::Vec3 m_menuCamPos{38.0f, 9.5f, 0.0f};
+    eng::Vec3 m_menuCamTarget{0.0f, 2.5f, 0.0f};
+    int m_menuFocus = 0;
+    double m_menuEnteredAt = 0.0;
+    int m_settingsTab = 0;
+    const char* m_settingsHint = nullptr;
+    bool m_pauseSettings = false;
+    int m_pauseFocus = 0;
+    bool m_journalOpen = false;
+    double m_revealStart = -100.0;
+    bool m_revealDone = true;
+    std::string m_subtitle;
+    double m_subtitleTime = -100.0;
 
     double m_time = 0.0;
     double m_lastFrame = 0.0;

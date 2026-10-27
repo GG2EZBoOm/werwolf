@@ -55,6 +55,7 @@ using GLintptr = std::ptrdiff_t;
 #define GL_TEXTURE1 0x84C1
 #define GL_TEXTURE2 0x84C2
 #define GL_TEXTURE3 0x84C3
+#define GL_TEXTURE4 0x84C4
 
 #define ENG_GL_FUNCTIONS(X)                                                                                        \
     X(GLuint, glCreateShader, GLenum type)                                                                         \

@@ -109,7 +109,10 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
     case proto::ServerMsg::State: {
         GameView v;
         if (v.read(r)) {
-            if (v.phase == Phase::Lobby) m_snapshots.clear();
+            if (v.phase == Phase::Lobby) {
+                m_snapshots.clear();
+                m_doors.clear();
+            }
             m_view = std::move(v);
             m_hasView = true;
             m_viewTime = now;
@@ -121,7 +124,7 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
     case proto::ServerMsg::Chat: {
         LogEntry e;
         e.isChat = true;
-        e.channel = static_cast<ChatChannel>(std::min<uint8_t>(r.u8(), 3));
+        e.channel = static_cast<ChatChannel>(std::min<uint8_t>(r.u8(), static_cast<uint8_t>(ChatChannel::Family)));
         e.from = r.u8();
         e.name = r.str();
         e.text = r.str();
@@ -141,6 +144,8 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
         Snapshot s;
         s.time = now;
         if (readEntities(r, s.entities)) {
+            std::vector<DoorState> doors;
+            if (readDoors(r, doors)) m_doors = std::move(doors);
             m_snapshots.push_back(std::move(s));
             while (m_snapshots.size() > 30) m_snapshots.pop_front();
         }

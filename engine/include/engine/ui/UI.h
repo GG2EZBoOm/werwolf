@@ -66,6 +66,10 @@ public:
 
     bool hovered(const Rect& r) const;
     void setCursor(Cursor c) { m_cursor = c; }
+    // Gewünschter Zeiger dieses Frames (für selbst gezeichnete Zeiger)
+    Cursor cursor() const { return m_cursor; }
+    // Systemzeiger ausblenden, weil das Spiel einen eigenen zeichnet
+    void setCustomCursor(bool custom) { m_customCursor = custom; }
 
     void focus(std::string_view id);
     void clearFocus() { m_focus = 0; }
@@ -93,6 +97,7 @@ private:
     uint64_t m_focus = 0;
     bool m_focusClaimed = false;
     Cursor m_cursor = Cursor::Arrow;
+    bool m_customCursor = false;
     std::unordered_map<uint64_t, TextState> m_textStates;
 };
 

@@ -13,9 +13,57 @@ constexpr uint8_t kNoPlayer = 255;
 constexpr int kMinPlayers = 4;
 constexpr int kMaxPlayers = 16;
 
-enum class Role : uint8_t { Unknown = 0, Villager, Werewolf, Seer, Witch, Hunter, Cupid, Protector, Count };
+enum class Role : uint8_t {
+    Unknown = 0,
+    Villager,
+    Werewolf,
+    // Dorf (Reihenfolge = Vorrang, wenn mehr Sonderrollen gewählt sind als Plätze frei)
+    Seer,
+    Witch,
+    Hunter,
+    Cupid,
+    LittleGirl,     // Kleines Mädchen: belauscht nachts den Rudel-Chat
+    Thief,          // Dieb: stiehlt in der ersten Nacht eine Rolle
+    Protector,
+    Elder,          // Dorfältester: übersteht den ersten Wolfsangriff
+    Scapegoat,      // Sündenbock: stirbt bei Gleichstand
+    Idiot,          // Dorfdepp: überlebt die erste Hinrichtung
+    Fox,            // Fuchs: wittert Werwölfe in einer Gruppe
+    BearTamer,      // Bärenführer: sein Bär brummt neben Werwölfen
+    Knight,         // Ritter mit der rostigen Klinge: vergiftet seinen Mörder
+    Servant,        // Ergebene Magd: übernimmt die Rolle eines Hingerichteten
+    Judge,          // Stotternder Richter: verlangt einmal eine zweite Abstimmung
+    Actor,          // Schauspieler: spielt jede Nacht eine andere Rolle
+    WildChild,      // Wildes Kind: wird zum Werwolf, wenn sein Vorbild stirbt
+    WolfHound,      // Wolfshund: entscheidet sich für Dorf oder Rudel
+    Sister,         // Zwei Schwestern: kennen sich
+    Brother,        // Drei Brüder: kennen sich
+    HonestVillager, // Dorfbewohner-Dorfbewohner: allen als ehrlich bekannt
+    Raven,          // Rabe: belastet nachts einen Spieler mit zwei Stimmen
+    Medium,         // spricht nachts mit den Toten
+    Tracker,        // Fährtenleser: verfolgt nachts einen Spieler
+    Blacksmith,     // Schmied: verstärkt und repariert Türen
+    Priest,         // Pfarrer: Weihwasser vernichtet einen Werwolf
+    Mayor,          // Bürgermeister: öffentlich bekannt, doppelte Stimme
+    Cursed,         // Verfluchter: wird zum Werwolf, wenn er angegriffen wird
+    // Werwölfe
+    AlphaWolf,      // Urwolf: kann einmal ein Opfer infizieren statt töten
+    WolfCub,        // Wolfsjunges: sein Tod macht das Rudel rasend
+    BigBadWolf,     // Großer böser Wolf: zusätzliches Opfer, solange kein Wolf starb
+    WhiteWolf,      // Weißer Werwolf: im Rudel, gewinnt aber allein
+    // Neutral
+    Piper,          // Flötenspieler: verzaubert alle
+    Angel,          // Engel: gewinnt, wenn er in der ersten Runde stirbt
+    Sectarian,      // Sektierer: seine Dorfhälfte soll übrig bleiben
+    Jester,         // Narr: gewinnt, wenn er hingerichtet wird
+    SerialKiller,   // Serienmörder: tötet nachts mit dem Messer, gewinnt allein
+    Arsonist,       // Brandstifter: tränkt Häuser mit Öl und zündet sie an
+    Count
+};
 
-enum class Team : uint8_t { None = 0, Village, Wolves, Lovers, Nobody };
+enum class Faction : uint8_t { Village, Wolves, Neutral };
+
+enum class Team : uint8_t { None = 0, Village, Wolves, Lovers, Nobody, Jester, Killer, Arsonist, Piper, Angel, WhiteWolf, Sectarian };
 
 enum class Phase : uint8_t {
     Lobby = 0,
@@ -23,18 +71,18 @@ enum class Phase : uint8_t {
     Assembly,  // Versammlung am Feuer: Diskussion
     Vote,      // Abstimmung
     Execution, // Urteil
-    Night,     // Jagd der Werwölfe, nächtliche Fähigkeiten
+    Night,     // Jagd, nächtliche Fähigkeiten
     Morning,   // Verkündung der Toten
     GameOver
 };
 
-enum class ChatChannel : uint8_t { Global = 0, Nearby, Wolves, Dead };
+enum class ChatChannel : uint8_t { Global = 0, Nearby, Wolves, Dead, Family };
 
 enum class NoticeKind : uint8_t { Info = 0, Narration, Death, Private, Warning, Victory };
 
-enum class DeathCause : uint8_t { Wolves, Poison, Grief, Vote, Hunter, Left };
+enum class DeathCause : uint8_t { Wolves, Poison, Grief, Vote, Hunter, Left, Fire, Knife, HolyWater, Rust, Scapegoat };
 
-// Was ein Spieler tun möchte (E, Linksklick, R ...)
+// Was ein Spieler tun möchte (E, F, Q, Linksklick, R ...)
 enum class Interaction : uint8_t {
     Attack = 1, // Werwolf reißt ein Opfer
     Inspect,    // Seherin sieht die Rolle
@@ -46,19 +94,55 @@ enum class Interaction : uint8_t {
     Vote,       // Stimme in der Abstimmung (Ziel 255 = zurückziehen)
     RingBell,   // Versammlung einberufen
     Transform,  // Werwolf verwandelt sich (Ziel 1) / zurück (Ziel 0)
+    DoorToggle, // Tür öffnen/schließen (Ziel = Haus); von innen geschlossen = verriegelt
+    DoorBreak,  // Tür einschlagen (Ziel = Haus)
+    Reinforce,  // Schmied verstärkt/repariert eine Tür (Ziel = Haus)
+    Douse,      // Brandstifter tränkt ein Haus mit Öl (Ziel = Haus)
+    Ignite,     // Brandstifter zündet alle getränkten Häuser an
+    Track,      // Fährtenleser verfolgt einen Spieler
+    HolyWater,  // Pfarrer
+    Infect,     // Urwolf
+    Stab,       // Serienmörder
+    Steal,      // Dieb
+    Enchant,    // Flötenspieler
+    Sniff,      // Fuchs
+    TakeRole,   // Ergebene Magd (Ziel = Hingerichteter)
+    SecondVote, // Stotternder Richter
+    ChooseModel,// Wildes Kind
+    ChooseSide, // Wolfshund (Ziel 0 = Dorf, 1 = Rudel)
+    Mark,       // Rabe
+    NameSuccessor, // sterbender Hauptmann
 };
 
-enum AbilityBits : uint16_t {
-    AbilityTransform = 1 << 0,
-    AbilityAttack = 1 << 1,
-    AbilityInspect = 1 << 2,
-    AbilityProtect = 1 << 3,
-    AbilityHeal = 1 << 4,
-    AbilityPoison = 1 << 5,
-    AbilityCupid = 1 << 6,
-    AbilityHunterShot = 1 << 7,
-    AbilityVote = 1 << 8,
-    AbilityRingBell = 1 << 9,
+enum AbilityBits : uint32_t {
+    AbilityTransform = 1u << 0,
+    AbilityAttack = 1u << 1,
+    AbilityInspect = 1u << 2,
+    AbilityProtect = 1u << 3,
+    AbilityHeal = 1u << 4,
+    AbilityPoison = 1u << 5,
+    AbilityCupid = 1u << 6,
+    AbilityHunterShot = 1u << 7,
+    AbilityVote = 1u << 8,
+    AbilityRingBell = 1u << 9,
+    AbilityBreakDoor = 1u << 10,
+    AbilityReinforce = 1u << 11,
+    AbilityDouse = 1u << 12,
+    AbilityIgnite = 1u << 13,
+    AbilityTrack = 1u << 14,
+    AbilityHolyWater = 1u << 15,
+    AbilityInfect = 1u << 16,
+    AbilityStab = 1u << 17,
+    AbilitySteal = 1u << 18,
+    AbilityEnchant = 1u << 19,
+    AbilitySniff = 1u << 20,
+    AbilityTakeRole = 1u << 21,
+    AbilitySecondVote = 1u << 22,
+    AbilityChooseModel = 1u << 23,
+    AbilityChooseSide = 1u << 24,
+    AbilityMark = 1u << 25,
+    AbilityNameSuccessor = 1u << 26,
+    AbilityBetray = 1u << 27, // Weißer Werwolf darf einen Werwolf reißen
 };
 
 // Reichweiten in Metern
@@ -70,31 +154,48 @@ constexpr float kPoisonRange = 2.8f;
 constexpr float kCupidRange = 6.0f;
 constexpr float kHunterRange = 35.0f;
 constexpr float kBellRange = 3.4f;
+constexpr float kDoorRange = 2.4f;
+constexpr float kTrackRange = 14.0f;
+constexpr float kHolyWaterRange = 3.0f;
+constexpr float kStealRange = 3.0f;
+constexpr float kEnchantRange = 4.0f;
+constexpr float kSniffRange = 10.0f;
+constexpr float kModelRange = 6.0f;
+constexpr float kMarkRange = 14.0f;
 constexpr float kNearbyChatRange = 24.0f;
 constexpr float kTransformSeconds = 1.6f;
 constexpr float kHunterShotSeconds = 15.0f;
+constexpr float kSuccessorSeconds = 15.0f;
 
 const char* roleName(Role role);
 const char* roleDescription(Role role);
 const char* roleIcon(Role role);
+Faction roleFaction(Role role);
 Team roleTeam(Role role);
+bool isWolfRole(Role role);
+// Rollen, die in der Lobby einzeln zugeschaltet werden können
+bool isOptionalRole(Role role);
+// Rollen, die allen Mitspielern bekannt sind
+bool isPublicRole(Role role);
+// Zwei Schwestern bzw. drei Brüder: Anzahl Karten der Rolle
+int roleCardCount(Role role);
 const char* teamName(Team team);
 const char* phaseTitle(Phase phase);
 const char* channelName(ChatChannel channel);
 
 struct Settings {
-    uint8_t wolves = 0; // 0 = automatisch nach Spielerzahl
-    bool seer = true;
-    bool witch = true;
-    bool hunter = true;
-    bool cupid = false;
-    bool protector = false;
+    uint8_t wolves = 0;       // 0 = automatisch nach Spielerzahl
+    uint64_t roles = 0;       // Bitmaske der zugeschalteten Sonderrollen (Bit = Role)
     bool revealRoles = true;
+    bool captain = true;      // Hauptmannwahl am ersten Abend
     uint16_t daySeconds = 150;
     uint16_t discussionSeconds = 90;
     uint16_t voteSeconds = 40;
     uint16_t nightSeconds = 100;
 
+    Settings();
+    bool has(Role role) const { return (roles >> static_cast<uint64_t>(role)) & 1u; }
+    void set(Role role, bool enabled);
     void sanitize();
     void write(eng::ByteWriter& w) const;
     bool read(eng::ByteReader& r);
@@ -118,6 +219,10 @@ struct PlayerView {
     bool lover = false;
     uint8_t vote = kNoPlayer;  // öffentliche Stimme in der Abstimmung
     bool winner = false;
+    uint8_t house = kNoPlayer; // eigenes Haus
+    bool captain = false;      // Hauptmann (öffentlich)
+    bool enchanted = false;    // vom Flötenspieler verzaubert (sehen Flötenspieler und Verzauberte)
+    bool marked = false;       // vom Raben belastet (öffentlich)
 };
 
 // Personalisierte Momentaufnahme (Regeln, Wissen). Positionen kommen getrennt per Snapshot.
@@ -133,7 +238,7 @@ struct GameView {
     Settings settings;
     std::vector<PlayerView> players;
 
-    uint16_t abilities = 0;
+    uint32_t abilities = 0;
     uint8_t vote = kNoPlayer;
     uint8_t loverPartner = kNoPlayer;
     std::vector<SeerResult> seerResults;
@@ -144,6 +249,14 @@ struct GameView {
     bool poisonAvailable = false;
     uint8_t packKillsLeft = 0;
     float hunterTimeLeft = 0.0f;
+    uint8_t tracked = kNoPlayer;     // Fährtenleser: verfolgte Person
+    uint32_t doused = 0;             // Brandstifter: getränkte Häuser
+    bool shieldLeft = false;         // Dorfältester: Schutz noch vorhanden
+    bool election = false;           // die Abstimmung ist die Hauptmannwahl
+    Role acting = Role::Unknown;     // Schauspieler: Rolle dieser Nacht
+    uint8_t model = kNoPlayer;       // Wildes Kind: Vorbild
+    uint8_t condemned = kNoPlayer;   // Ergebene Magd: Rolle dieses Hingerichteten übernehmen
+    float successorTimeLeft = 0.0f;  // sterbender Hauptmann
     Team winner = Team::None;
 
     const PlayerView* player(uint8_t id) const;
@@ -155,7 +268,7 @@ struct GameView {
     bool read(eng::ByteReader& r);
 };
 
-// --- Positionen (hochfrequent) -------------------------------------------------
+// --- Positionen und Türen (hochfrequent) -------------------------------------------
 
 enum EntityKind : uint8_t { EntityLiving = 0, EntityCorpse = 1, EntityGhost = 2 };
 enum EntityFlags : uint8_t {
@@ -175,15 +288,34 @@ struct EntityState {
     float transform = 0.0f; // 0 = Mensch, 1 = Werwolf
 };
 
+enum DoorFlags : uint8_t {
+    DoorOpen = 1,
+    DoorLocked = 2,
+    DoorBroken = 4,     // eingeschlagen (steht offen)
+    DoorReinforced = 8,
+    DoorBurning = 16,
+    DoorBurnt = 32,     // Haus ist abgebrannt
+};
+
+struct DoorState {
+    uint8_t flags = 0;
+    uint8_t health = 100; // Prozent der Haltbarkeit
+};
+
 void writeEntities(eng::ByteWriter& w, const std::vector<EntityState>& entities);
 bool readEntities(eng::ByteReader& r, std::vector<EntityState>& entities);
+void writeDoors(eng::ByteWriter& w, const std::vector<DoorState>& doors);
+bool readDoors(eng::ByteReader& r, std::vector<DoorState>& doors);
+// Bitmaske der Türen, die den Weg versperren
+uint32_t closedDoorMask(const std::vector<DoorState>& doors);
 
 struct Notice {
-    enum class Audience : uint8_t { All, Player, Wolves, Dead };
+    enum class Audience : uint8_t { All, Player, Wolves, Dead, Area };
     Audience audience = Audience::All;
     uint8_t player = kNoPlayer;
     NoticeKind kind = NoticeKind::Info;
     std::string text;
+    float x = 0.0f, z = 0.0f, radius = 0.0f; // für Area
 };
 
 // Phasen, in denen alle sich gegenseitig hören (Versammlung)

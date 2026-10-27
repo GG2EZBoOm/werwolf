@@ -56,6 +56,9 @@ public:
     // Positionen aller Figuren, leicht verzögert und weich interpoliert
     std::vector<EntityState> entities(double now) const;
     bool hasSnapshot() const { return !m_snapshots.empty(); }
+    // Zustand der Haustüren aus dem letzten Snapshot (Index = Haus)
+    const std::vector<DoorState>& doors() const { return m_doors; }
+    uint32_t closedDoors() const { return closedDoorMask(m_doors); }
     std::optional<Correction> takeCorrection();
 
     std::deque<LogEntry>& log() { return m_log; }
@@ -94,6 +97,7 @@ private:
     double m_viewTime = 0.0;
     double m_lastPing = 0.0;
     std::deque<Snapshot> m_snapshots;
+    std::vector<DoorState> m_doors;
     std::optional<Correction> m_correction;
     std::deque<LogEntry> m_log;
     std::vector<LogEntry> m_newEntries;

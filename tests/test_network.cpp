@@ -99,14 +99,14 @@ TEST(KomplettePartieUeberNetzwerk) {
 
     for (int i = 0; i < 5; ++i) host.sendAddBot();
     Settings s;
-    s.cupid = true;
-    s.protector = true;
+    s.set(Role::Cupid, true);
+    s.set(Role::Protector, true);
     s.daySeconds = 40;
     s.discussionSeconds = 20;
     s.voteSeconds = 15;
     s.nightSeconds = 40;
     host.sendSettings(s);
-    CHECK(pump(host, [&] { return host.view().players.size() == 7 && host.view().settings.cupid; }, 5.0));
+    CHECK(pump(host, [&] { return host.view().players.size() == 7 && host.view().settings.has(Role::Cupid); }, 5.0));
 
     host.sendStartGame();
     CHECK(pump(host, [&] { return host.view().phase == Phase::Day && host.hasSnapshot(); }, 5.0));
@@ -116,6 +116,7 @@ TEST(KomplettePartieUeberNetzwerk) {
     CHECK(start.has_value());
     const size_t entityCount = host.entities(eng::nowSeconds()).size();
     CHECK_EQ(entityCount, 7u);
+    CHECK_EQ(host.doors().size(), 12u); // Türzustände kommen mit dem Snapshot
 
     // Gast "stürzt ab" und verbindet sich mit seinem Token neu
     guest.conn.close();

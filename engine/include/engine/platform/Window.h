@@ -8,7 +8,7 @@
 
 namespace eng {
 
-enum class Cursor { Arrow, Hand, IBeam };
+enum class Cursor { Arrow, Hand, IBeam, None }; // None: das Spiel zeichnet einen eigenen Zeiger
 
 // Ein Fenster mit OpenGL-3.3-Core-Kontext.
 // Alle Größen ohne "framebuffer" im Namen sind logische Pixel (physisch / dpiScale).
@@ -41,6 +41,7 @@ public:
     void setMouseCaptured(bool captured);
     bool isMouseCaptured() const;
     void toggleFullscreen();
+    bool isFullscreen() const;
     void setTitle(const std::string& title);
     void requestClose();
 

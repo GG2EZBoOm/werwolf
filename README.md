@@ -43,10 +43,11 @@ den Port im Router weiterleiten oder ein VPN (Tailscale, Radmin) nutzen. 4 bis 1
 | WASD             | laufen, **Shift** rennen                                        |
 | Maus / Mausrad   | umsehen / Kamera-Abstand                                        |
 | **E**            | Hauptaktion auf die angeschaute Person (abstimmen, Vision, …)   |
-| **F**            | Gifttrank (Hexe)                                                |
+| **F**            | Zweitaktion (Gifttrank, Infizieren, Häuser anzünden)            |
+| **Q**            | Tür öffnen/schließen – von innen geschlossen ist sie verriegelt |
 | **R**            | verwandeln (Werwolf, nur nachts)                                |
-| Linksklick       | reißen (Werwolf in Bestiengestalt)                              |
-| Enter            | Chat schreiben – **Tab** wechselt für Werwölfe in den Rudel-Chat |
+| Linksklick       | reißen, erstechen oder eine verriegelte Tür einschlagen          |
+| Enter            | Chat schreiben – **Tab** wechselt in den Rudel-, Geister- bzw. Geschwister-Chat |
 | Esc              | Pause / Maus freigeben                                          |
 | F11, F12         | Vollbild, Screenshot                                            |
 
@@ -56,8 +57,9 @@ den Port im Router weiterleiten oder ein VPN (Tailscale, Radmin) nutzen. 4 bis 1
   Ab Tag 2 kann jeder an der **Glocke** auf dem Dorfplatz eine Versammlung einberufen.
 * **Versammlung** – alle sitzen am Feuer und hören sich gegenseitig. Danach folgt die
   **Abstimmung**: Person anschauen und **E** drücken (oder in der Stimmenliste klicken).
-* **Nacht** – dunkel; wer lebt, trägt eine Laterne. Werwölfe verwandeln sich (R), reißen ein Opfer
-  pro Nacht und müssen aufpassen, dabei nicht gesehen zu werden. Sonderrollen handeln nachts.
+* **Nacht** – dunkel; wer lebt, trägt eine Laterne. Jeder hat ein eigenes **Haus** (auf der Karte
+  markiert) und kann sich darin einschließen. Werwölfe verwandeln sich (R), reißen ein Opfer pro Nacht
+  und brechen dafür auch Türen auf – das Krachen hört man in der Nachbarschaft. Sonderrollen handeln nachts.
 * **Morgen** – die Toten der Nacht werden verkündet; Leichen liegen, wo sie gefallen sind.
 
 Tote werden zu **Geistern**: sie schweben unsichtbar umher, sehen alle Rollen, lesen den Rudel-Chat
@@ -74,9 +76,49 @@ mit und sprechen im Geisterchat.
 | Jäger        | nach dem Tod 15 Sekunden für einen letzten Schuss (E)                          |
 | Amor         | in der ersten Nacht zwei Spieler verlieben (E) – stirbt einer, stirbt auch der andere |
 | Beschützer   | jede Nacht eine Person in der Nähe schützen (E), nie zweimal hintereinander     |
+| Dorfältester | übersteht den ersten Wolfsangriff                                              |
+| Kleines Mädchen | liest nachts den Rudel-Chat mit – ohne Namen                               |
+| Medium       | spricht nachts mit den Toten (Tab)                                             |
+| Fährtenleser | folgt nachts einer Person (E), sieht sie durch Wände und erfährt morgens ihre Spur |
+| Schmied      | beschlägt oder repariert tagsüber eine Tür (E) – sie hält doppelt so lange      |
+| Pfarrer      | einmal im Spiel Weihwasser (E): ein Werwolf verbrennt                           |
+| Bürgermeister | allen bekannt, Stimme zählt doppelt                                           |
+| Dorfdepp     | überlebt die erste Hinrichtung, darf danach nicht mehr abstimmen                |
+| Verfluchter  | wird zum Werwolf, wenn ihn ein Werwolf angreift                                 |
+| Urwolf       | Werwolf, der einmal ein Opfer infizieren kann (F) statt es zu töten             |
+| Wolfsjunges  | Werwolf; stirbt es, reißt das Rudel in der nächsten Nacht zwei Opfer            |
+| Narr         | gewinnt allein, wenn das Dorf ihn hinrichtet                                    |
+| Serienmörder | tötet jede Nacht mit dem Messer (Linksklick), Werwölfe können ihm nichts anhaben |
+| Brandstifter | tränkt Häuser mit Öl (E an der Tür) und zündet alle auf einmal an (F)           |
+| Dieb         | stiehlt in der ersten Nacht die Rolle eines Spielers in der Nähe (E)             |
+| Sündenbock   | stirbt bei Gleichstand in der Abstimmung                                        |
+| Fuchs        | wittert nachts, ob bei einer Person oder in ihrer Nähe ein Werwolf ist (E); ohne Fund verliert er die Gabe |
+| Bärenführer  | allen bekannt; sein Bär brummt, wenn ein Werwolf neben ihm sitzt oder ihm nahe kommt |
+| Ritter       | tötet ihn ein Werwolf, stirbt dieser in der folgenden Nacht an der rostigen Klinge |
+| Ergebene Magd | übernimmt beim Urteil die Rolle des Hingerichteten (E), die dann geheim bleibt |
+| Stotternder Richter | verlangt einmal heimlich eine zweite Abstimmung am selben Abend (F)      |
+| Schauspieler | spielt drei Nächte lang je eine andere Sonderrolle                               |
+| Wildes Kind  | wählt ein Vorbild (E); stirbt es, wird das Kind zum Werwolf                       |
+| Wolfshund    | entscheidet sich in der ersten Nacht für Dorf (E) oder Rudel (F)                  |
+| Zwei Schwestern / Drei Brüder | kennen sich und haben einen geheimen Chat (Tab)                  |
+| Dorfbewohner-Dorfbewohner | allen als ehrlicher Dorfbewohner bekannt                             |
+| Rabe         | belastet nachts jemanden (E) mit zwei Stimmen bei der nächsten Abstimmung        |
+| Großer böser Wolf | Werwolf; solange kein Wolf gestorben ist, ein zusätzliches Opfer pro Nacht   |
+| Weißer Werwolf | jagt mit dem Rudel, reißt jede zweite Nacht einen Werwolf und gewinnt allein   |
+| Flötenspieler | verzaubert nachts bis zu zwei Spieler (E); gewinnt, wenn alle verzaubert sind  |
+| Engel        | gewinnt, wenn er in der ersten Nacht oder bei der ersten Hinrichtung stirbt       |
+| Sektierer    | gewinnt, wenn nur noch Bewohner seiner Dorfhälfte (Ost/West) leben               |
 
-**Sieg:** Das Dorf gewinnt, wenn kein Werwolf mehr lebt; die Werwölfe, sobald sie mindestens so
-viele sind wie alle anderen; ein gemischtes Liebespaar, wenn nur noch die beiden leben.
+**Hauptmann:** Ist die Hauptmannwahl eingeschaltet, wählt das Dorf am ersten Abend einen Hauptmann.
+Seine Stimme zählt doppelt; stirbt er, bestimmt er in 15 Sekunden einen Nachfolger (E).
+
+In der Lobby werden Sonderrollen einzeln zugeschaltet; gibt es mehr als Plätze, werden nur so viele
+vergeben, wie Spieler da sind.
+
+**Sieg:** Das Dorf gewinnt, wenn kein Werwolf und kein mordender Einzelgänger mehr lebt; die Werwölfe,
+sobald sie mindestens so viele sind wie alle anderen; ein gemischtes Liebespaar, wenn nur noch die
+beiden leben; Serienmörder, Brandstifter und weißer Werwolf, wenn höchstens noch eine weitere Person
+lebt; Narr, Engel, Flötenspieler und Sektierer nach ihren eigenen Bedingungen.
 
 ## Auto-Updater
 

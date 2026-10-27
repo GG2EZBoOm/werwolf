@@ -48,6 +48,7 @@ Key mapKey(WPARAM vk) {
     case 'E': return Key::E;
     case 'F': return Key::F;
     case 'G': return Key::G;
+    case 'J': return Key::J;
     case 'M': return Key::M;
     case 'Q': return Key::Q;
     case 'R': return Key::R;
@@ -87,7 +88,7 @@ struct Window::Impl {
     WINDOWPLACEMENT previousPlacement{sizeof(WINDOWPLACEMENT)};
     Input input;
     Cursor cursor = Cursor::Arrow;
-    HCURSOR cursors[3] = {};
+    HCURSOR cursors[4] = {}; // Pfeil, Hand, Textcursor, keiner
     wchar_t pendingHighSurrogate = 0;
     PFN_wglSwapIntervalEXT swapInterval = nullptr;
     bool mouseCaptured = false;
@@ -426,6 +427,8 @@ void Window::setMouseCaptured(bool captured) {
 }
 
 bool Window::isMouseCaptured() const { return m->mouseCaptured; }
+
+bool Window::isFullscreen() const { return m && m->fullscreen; }
 
 void Window::toggleFullscreen() {
     // Randloses Vollbild nach dem bewährten Muster aus "The Old New Thing".

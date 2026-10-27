@@ -14,6 +14,7 @@ std::string chatPrefix(const LogEntry& e) {
     switch (e.channel) {
     case ChatChannel::Wolves: return "[Rudel] " + e.name + ": ";
     case ChatChannel::Dead: return "[Geist] " + e.name + ": ";
+    case ChatChannel::Family: return "[Geschwister] " + e.name + ": ";
     default: return e.name + ": ";
     }
 }
@@ -28,30 +29,29 @@ void App::drawChat(const Rect& area, bool compact) {
     const bool alive = me ? me->alive : true;
     const bool focused = m_ui.isFocused("chat");
 
-    if (compact) {
-        r.roundRect(area, 14.0f, Color::hex(0x0A0D1A, focused ? 0.78f : 0.5f));
-        r.roundRectOutline(area, 14.0f, 1.0f, theme::panelBorder);
-    } else {
-        drawPanel(area);
-    }
-    Rect inner = area.shrink(14.0f, 12.0f);
+    // Schiefertafel mit Kreide – im Spiel etwas durchscheinend
+    m_kit.slate(area, compact ? (focused ? 0.95f : 0.82f) : 1.0f);
+    Rect inner = area.shrink(compact ? 14.0f : 22.0f, compact ? 12.0f : 20.0f);
 
     // Kanal bestimmen (gleiche Regeln wie auf dem Server)
     ChatChannel channel = ChatChannel::Global;
     if (v.inGame()) {
         if (v.phase == Phase::GameOver) channel = ChatChannel::Global;
         else if (!alive) channel = ChatChannel::Dead;
-        else if (m_chatWolves && v.yourRole == Role::Werewolf) channel = ChatChannel::Wolves;
+        else if (m_chatWolves && isWolfRole(v.yourRole)) channel = ChatChannel::Wolves;
+        else if (m_chatWolves && (v.acting == Role::Medium || v.yourRole == Role::Medium) && v.phase == Phase::Night)
+            channel = ChatChannel::Dead;
+        else if (m_chatWolves && (v.yourRole == Role::Sister || v.yourRole == Role::Brother)) channel = ChatChannel::Family;
         else if (isGatheringPhase(v.phase)) channel = ChatChannel::Global;
         else channel = ChatChannel::Nearby;
     }
 
     if (!compact) {
-        Rect header = inner.takeTop(28.0f);
-        r.text(m_fonts.uiBold, {header.x, header.y + 2.0f}, "Chat", theme::text);
-        inner.takeTop(6.0f);
-        r.rect({inner.x, inner.y, inner.w, 1.0f}, theme::panelBorder);
-        inner.takeTop(8.0f);
+        Rect header = inner.takeTop(34.0f);
+        r.text(m_fonts.handLarge, {header.x, header.y - 4.0f}, "Dorfgeflüster", palette::chalk);
+        inner.takeTop(4.0f);
+        m_kit.inkLine({inner.x, inner.y}, {inner.right(), inner.y + 1.0f}, 1.2f, palette::chalk.withAlpha(0.35f), 1.0f, 9);
+        inner.takeTop(10.0f);
     }
 
     const Rect input = inner.takeBottom(compact ? 36.0f : 42.0f);
@@ -67,7 +67,7 @@ void App::drawChat(const Rect& area, bool compact) {
         LogEntry& e = *it;
         const bool narration = !e.isChat && e.kind == NoticeKind::Narration;
         const bool victory = !e.isChat && e.kind == NoticeKind::Victory;
-        eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : (compact ? m_fonts.small : m_fonts.ui);
+        eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : (compact ? m_fonts.handSmall : m_fonts.hand);
         if (e.wrapWidth != width) {
             e.lines = font.wrap(e.isChat ? chatPrefix(e) + e.text : e.text, width);
             e.wrapWidth = width;
@@ -93,6 +93,9 @@ void App::drawChat(const Rect& area, bool compact) {
             } else if (e.channel == ChatChannel::Dead) {
                 nameColor = theme::ghost;
                 textColor = Color::hex(0xB8C3D8);
+            } else if (e.channel == ChatChannel::Family) {
+                nameColor = theme::roleColor(Role::Sister);
+                textColor = Color::hex(0xF2DCE9);
             }
             const std::string prefix = chatPrefix(e);
             for (size_t i = 0; i < e.lines.size(); ++i) {
@@ -130,12 +133,14 @@ void App::drawChat(const Rect& area, bool compact) {
     case ChatChannel::Nearby: placeholder = "Sprechen (Hörweite 24 m) …"; break;
     case ChatChannel::Wolves: placeholder = "Flüstere deinem Rudel zu …"; break;
     case ChatChannel::Dead: placeholder = "Nur die Toten hören dich …"; break;
+    case ChatChannel::Family: placeholder = "Nur deine Geschwister hören dich …"; break;
     }
     if (compact && !focused) placeholder = "Enter: " + placeholder;
     const bool submitted = m_ui.textInput("chat", input, m_chatInput, placeholder, proto::kMaxChatLength, true);
     if (submitted && m_time != m_chatFocusTime) {
         if (!m_chatInput.empty()) {
-            m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves);
+            m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves || channel == ChatChannel::Family ||
+                                            (alive && channel == ChatChannel::Dead));
             m_chatInput.clear();
             m_chatScroll = 0.0f;
         }
