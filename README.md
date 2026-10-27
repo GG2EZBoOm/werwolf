@@ -36,6 +36,10 @@ den Port im Router weiterleiten oder ein VPN (Tailscale, Radmin) nutzen. 4 bis 1
 
 **Dorf erkunden** im Hauptmenü startet eine Offline-Runde zum Umsehen (ohne Spielregeln).
 
+Alle Gebäude sind begehbar. Jedes Wohnhaus gehört einem oder mehreren Spielern. Die Kapelle im Norden gehört
+niemandem: Durch das Doppelportal geht es zwischen den Kirchenbänken hindurch bis zum Altar. Wer sich nachts
+dorthin flüchtet, kann sie wie ein Haus von innen verriegeln.
+
 ### Ton
 
 Wind, Vögel und Grillen begleiten den Tag-Nacht-Wechsel; Lagerfeuer und Kamine knistern in der

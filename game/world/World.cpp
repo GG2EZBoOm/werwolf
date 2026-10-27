@@ -72,6 +72,12 @@ float distToSegment(Vec2 p, Vec2 a, Vec2 b) {
 constexpr float kFieldX0 = 48.0f, kFieldX1 = 74.0f, kFieldZ0 = -15.0f, kFieldZ1 = 15.0f;
 // Holzfällerlager im Westen
 const Vec2 kCamp{-52.0f, 8.0f};
+// Kapelle im Norden und Mitte der Kirchhof-Terrasse (Kapelle und Friedhof)
+const Vec2 kChapelAt{0.0f, -55.0f};
+const Vec2 kYard{7.75f, -56.0f};
+// Abstand zu Hindernissen für Wegknoten bzw. Wegstrecken in Gebäuden (etwas mehr als bzw. knapp unter dem Spielerradius)
+constexpr float kPlayerClearance = 0.36f;
+constexpr float kRouteClearance = 0.3f;
 
 } // namespace
 
@@ -106,7 +112,7 @@ float fbm(float x, float y, uint32_t seed, int octaves) {
 
 // --- Gelände -------------------------------------------------------------------
 
-float World::rawHeight(float x, float z) const {
+float World::naturalHeight(float x, float z) const {
     const float r = std::sqrt(x * x + z * z);
     const float n = fbm(x * 0.018f, z * 0.018f, m_seed, 4) * 2.0f - 1.0f;
     const float detail = fbm(x * 0.07f, z * 0.07f, m_seed + 17u, 2) * 2.0f - 1.0f;
@@ -117,10 +123,20 @@ float World::rawHeight(float x, float z) const {
     h += edge * edge * 34.0f * (0.75f + 0.5f * fbm(x * 0.03f, z * 0.03f, m_seed + 3u, 2));
     // Kapellenhügel im Norden
     h += 2.6f * std::exp(-((x * x) + (z + 54.0f) * (z + 54.0f)) / (2.0f * 15.0f * 15.0f));
+    return h;
+}
+
+float World::rawHeight(float x, float z) const {
+    const float r = std::sqrt(x * x + z * z);
+    float h = naturalHeight(x, z);
+    // Kapelle und Friedhof stehen auf einer ebenen Terrasse
+    const float yard = std::min(1.0f - smooth(13.5f, 19.0f, std::fabs(x - kYard.x)), 1.0f - smooth(11.5f, 17.0f, std::fabs(z - kYard.y)));
+    h = eng::lerp(h, m_yardHeight, yard);
     // ebener Dorfplatz
     h *= smooth(kSquareRadius - 2.0f, kSquareRadius + 12.0f, r);
     // ebene Felder
     if (x > kFieldX0 - 6.0f && x < kFieldX1 + 6.0f && z > kFieldZ0 - 6.0f && z < kFieldZ1 + 6.0f) {
+        const float n = fbm(x * 0.018f, z * 0.018f, m_seed, 4) * 2.0f - 1.0f;
         const float fx = std::min(smooth(kFieldX0 - 6.0f, kFieldX0, x), 1.0f - smooth(kFieldX1, kFieldX1 + 6.0f, x));
         const float fz = std::min(smooth(kFieldZ0 - 6.0f, kFieldZ0, z), 1.0f - smooth(kFieldZ1, kFieldZ1 + 6.0f, z));
         const float flat = std::min(fx, fz);
@@ -130,6 +146,7 @@ float World::rawHeight(float x, float z) const {
 }
 
 void World::buildHeights() {
+    m_yardHeight = naturalHeight(kChapelAt.x, kChapelAt.y);
     const int n = kCells + 1;
     m_heights.assign(static_cast<size_t>(n * n), 0.0f);
     for (int j = 0; j < n; ++j) {
@@ -152,13 +169,18 @@ float World::height(float x, float z) const {
     const float terrain = terrainHeight(x, z);
     for (const House& h : m_houses) {
         const float dx = x - h.position.x, dz = z - h.position.z;
-        if (dx * dx + dz * dz > 49.0f) continue;
+        const float reach = 0.5f * (h.width + h.depth) + h.ramp;
+        if (dx * dx + dz * dz > reach * reach) continue;
         const Vec2 local = unrotate({dx, dz}, h.yaw);
         const float hw = h.width * 0.5f, hd = h.depth * 0.5f;
-        if (std::fabs(local.x) <= hw && std::fabs(local.y) <= hd) return h.floorY;
+        if (std::fabs(local.x) <= hw && std::fabs(local.y) <= hd) {
+            // der Altarraum der Kapelle liegt eine Stufe höher
+            if (h.chapel) return h.floorY + chapel::kChancelStep * smooth(0.12f, -0.12f, local.y - chapel::kChancelZ);
+            return h.floorY;
+        }
         // flache Rampe vor der Tür
-        if (std::fabs(local.x) <= House::kDoorWidth * 0.5f + 0.5f && local.y > hd && local.y < hd + 1.3f)
-            return eng::lerp(h.floorY, terrain, smooth(0.0f, 1.0f, (local.y - hd) / 1.3f));
+        if (std::fabs(local.x) <= h.doorWidth * 0.5f + 0.5f && local.y > hd && local.y < hd + h.ramp)
+            return eng::lerp(h.floorY, terrain, smooth(0.0f, 1.0f, (local.y - hd) / h.ramp));
     }
     return terrain;
 }
@@ -220,7 +242,7 @@ void World::addBox(Vec2 c, Vec2 half, float yaw, bool opaque) {
 }
 
 void World::addHouseColliders(const House& h) {
-    const float t = House::kWall, hw = h.width * 0.5f, hd = h.depth * 0.5f, gap = House::kDoorWidth * 0.5f;
+    const float t = House::kWall, hw = h.width * 0.5f, hd = h.depth * 0.5f, gap = h.doorWidth * 0.5f;
     const Vec2 c{h.position.x, h.position.z};
     auto box = [&](Vec2 localCenter, Vec2 half, bool opaque) { addBox(c + rotate(localCenter, h.yaw), half, h.yaw, opaque); };
     box({0, -hd + t * 0.5f}, {hw, t * 0.5f}, true);       // Rückwand
@@ -229,6 +251,23 @@ void World::addHouseColliders(const House& h) {
     const float segment = (hw - gap) * 0.5f;
     box({-(gap + segment), hd - t * 0.5f}, {segment, t * 0.5f}, true); // Front links der Tür
     box({gap + segment, hd - t * 0.5f}, {segment, t * 0.5f}, true);    // Front rechts der Tür
+    if (h.chapel) {
+        using namespace chapel;
+        auto circle = [&](Vec2 localCenter, float r) { addCircle(c + rotate(localCenter, h.yaw), r); };
+        box({0, -hd - kTowerSize * 0.5f}, {kTowerSize * 0.5f, kTowerSize * 0.5f}, true); // Turm
+        // Strebepfeiler an den Langseiten
+        for (float z : {-hd + 0.3f, -2.3f, 2.3f, hd - 0.3f})
+            for (float s : {-1.0f, 1.0f}) box({s * (hw + 0.22f), z}, {0.22f, 0.3f}, false);
+        // Bankreihen links und rechts vom Mittelgang
+        for (int row = 0; row < kPewRows; ++row)
+            for (float s : {-1.0f, 1.0f})
+                box({s * (kPewInner + kPewOuter) * 0.5f, pewZ(row)}, {(kPewOuter - kPewInner) * 0.5f, kPewHalfDepth}, false);
+        box(kAltar, kAltarHalf, false);
+        box(kLectern, {0.3f, 0.3f}, false);
+        for (float s : {-1.0f, 1.0f}) circle({s * kCandleStand.x, kCandleStand.y}, 0.18f);
+        circle(kFont, 0.45f);
+        return;
+    }
     // Möbel
     box({-hw + t + 0.5f, -hd + t + 1.0f}, {0.48f, 0.98f}, false);    // Bett
     box({hw * 0.25f, 0.15f}, {0.55f, 0.4f}, false);                   // Tisch
@@ -241,7 +280,7 @@ Collider World::doorCollider(int house) const {
     Collider c;
     c.shape = Collider::Shape::Box;
     c.center = Vec2{h.position.x, h.position.z} + rotate({0, h.depth * 0.5f - House::kWall * 0.5f}, h.yaw);
-    c.half = {House::kDoorWidth * 0.5f, House::kWall * 0.5f};
+    c.half = {h.doorWidth * 0.5f, House::kWall * 0.5f};
     c.yaw = h.yaw;
     c.bound = c.half.length();
     c.opaque = true;
@@ -284,6 +323,9 @@ void World::generate(uint32_t seed) {
     m_props.clear();
     m_colliders.clear();
     m_pathPoints.clear();
+    m_chapelIndex = -1;
+    m_routeNodes.clear();
+    m_routeDist.clear();
 
     // Wege: Speichen vom Platz nach außen und ein Ring vor den Häusern
     auto path = [&](std::initializer_list<Vec2> pts) {
@@ -385,11 +427,8 @@ void World::placeVillage() {
         }
     }
 
-    // Kapelle mit Friedhof im Norden
-    m_chapel = ground(0.0f, -55.0f);
-    m_chapelYaw = 0.0f; // Tür zeigt nach Süden zum Dorf
-    addBox({0.0f, -55.0f}, {4.2f, 7.2f}, 0.0f, true);
-    addBox({0.0f, -63.0f}, {2.0f, 2.0f}, 0.0f, true); // Turm
+    // Kapelle mit Friedhof im Norden, die Tür zeigt nach Süden zum Dorf
+    placeChapel(kChapelAt, 0.0f);
     for (int gx = 0; gx < 4; ++gx) {
         for (int gz = 0; gz < 4; ++gz) {
             const Vec2 p{9.0f + static_cast<float>(gx) * 2.6f + rng.range(-0.3f, 0.3f),
@@ -461,6 +500,103 @@ void World::placeVillage() {
         m_props.push_back({PropKind::Lantern, ground(p.x, p.y), 0.0f, 1.0f});
         addCircle(p, 0.25f);
     }
+}
+
+void World::placeChapel(Vec2 at, float yaw) {
+    House h;
+    h.chapel = true;
+    h.yaw = yaw;
+    h.width = chapel::kWidth;
+    h.depth = chapel::kDepth;
+    h.wallHeight = chapel::kWallHeight;
+    h.roofHeight = chapel::kRoofHeight;
+    h.wallColor = 0xE2DCCD;
+    h.roofColor = 0x3C3F47;
+    h.timberColor = 0x4A2E1C;
+    h.chimney = false;
+    h.doorWidth = chapel::kDoorWidth;
+    h.ramp = 1.6f;
+    float lowest = 1e9f, highest = -1e9f;
+    for (int cx = -2; cx <= 2; ++cx)
+        for (int cz = -2; cz <= 2; ++cz) {
+            const Vec2 p = at + rotate({h.width * 0.25f * static_cast<float>(cx), h.depth * 0.25f * static_cast<float>(cz)}, yaw);
+            lowest = std::min(lowest, terrainHeight(p.x, p.y));
+            highest = std::max(highest, terrainHeight(p.x, p.y));
+        }
+    h.position = {at.x, lowest, at.y};
+    h.floorY = std::max(lowest + House::kFloorOffset, highest + 0.06f);
+    const Vec2 inside = at + rotate({0, h.depth * 0.5f - 0.9f}, yaw);
+    const Vec2 altar = at + rotate(chapel::kAltar, yaw);
+    h.doorInside = {inside.x, h.floorY, inside.y};
+    h.hearth = {altar.x, h.floorY + chapel::kChancelStep + 1.25f, altar.y};
+
+    m_chapelIndex = static_cast<int>(m_houses.size());
+    m_houses.push_back(h);
+    const Vec2 door = at + rotate({0, h.depth * 0.5f + h.ramp + 0.4f}, yaw);
+    m_houses.back().door = ground(door.x, door.y);
+    m_chapelColliders[0] = m_colliders.size();
+    addHouseColliders(h);
+    m_chapelColliders[1] = m_colliders.size();
+    m_chapel = h.position;
+    m_chapelYaw = yaw;
+    buildChapelRoutes();
+}
+
+void World::buildChapelRoutes() {
+    using namespace chapel;
+    // Knoten: Mittelgang, Seitengänge und die Lücken zwischen den Bänken, jeweils quer durch die Reihen
+    const float hd = kDepth * 0.5f - House::kWall;
+    const float aisle = (kPewOuter + kWidth * 0.5f - House::kWall) * 0.5f;
+    const float seat = (kPewInner + kPewOuter) * 0.5f;
+    std::vector<float> rows = {-hd + 0.42f, kAltar.y + kAltarHalf.y + 0.55f, (kChancelZ + pewZ(0) - kPewHalfDepth) * 0.5f};
+    for (int row = 0; row + 1 < kPewRows; ++row) rows.push_back(pewZ(row) + kPewSpacing * 0.5f);
+    rows.push_back((pewZ(kPewRows - 1) + kPewHalfDepth + hd) * 0.5f);
+    const size_t first = m_chapelColliders[0], last = m_chapelColliders[1];
+    for (float z : rows) {
+        for (float x : {-aisle, -seat, 0.0f, seat, aisle}) {
+            const Vec2 p = houseToWorld(m_chapelIndex, {x, z});
+            if (segmentClear(p, p, kPlayerClearance, first, last)) m_routeNodes.push_back(p);
+        }
+    }
+    const size_t n = m_routeNodes.size();
+    m_routeDist.assign(n * n, 1e9f);
+    for (size_t i = 0; i < n; ++i) {
+        m_routeDist[i * n + i] = 0.0f;
+        for (size_t j = i + 1; j < n; ++j) {
+            if (!segmentClear(m_routeNodes[i], m_routeNodes[j], kRouteClearance, first, last)) continue;
+            m_routeDist[i * n + j] = m_routeDist[j * n + i] = (m_routeNodes[i] - m_routeNodes[j]).length();
+        }
+    }
+    for (size_t k = 0; k < n; ++k)
+        for (size_t i = 0; i < n; ++i)
+            for (size_t j = 0; j < n; ++j)
+                m_routeDist[i * n + j] = std::min(m_routeDist[i * n + j], m_routeDist[i * n + k] + m_routeDist[k * n + j]);
+}
+
+Vec2 World::routeInside(int house, Vec2 from, Vec2 to) const {
+    const size_t first = m_chapelColliders[0], last = m_chapelColliders[1];
+    if (house < 0 || house != m_chapelIndex || m_routeNodes.empty() || segmentClear(from, to, kRouteClearance, first, last))
+        return to;
+    // Zum Ziel über den Knoten, der den kürzesten Gesamtweg ergibt (bereits erreichte Knoten überspringen)
+    const size_t n = m_routeNodes.size();
+    std::vector<float> toTarget(n, -1.0f);
+    for (size_t j = 0; j < n; ++j)
+        if (segmentClear(m_routeNodes[j], to, kRouteClearance, first, last)) toTarget[j] = (m_routeNodes[j] - to).length();
+    float best = 1e8f;
+    Vec2 way = to;
+    for (size_t i = 0; i < n; ++i) {
+        const float d = (m_routeNodes[i] - from).length();
+        if (d < 0.45f || !segmentClear(from, m_routeNodes[i], kRouteClearance, first, last)) continue;
+        for (size_t j = 0; j < n; ++j) {
+            if (toTarget[j] < 0.0f) continue;
+            const float cost = d + m_routeDist[i * n + j] + toTarget[j];
+            if (cost < best) {
+                best = cost;
+                way = m_routeNodes[i];
+            }
+        }
+    }
+    return way;
 }
 
 void World::placeNature() {
@@ -616,6 +752,16 @@ bool World::lineBlocked(Vec2 a, Vec2 b, DoorMask closedDoors) const {
         if (segmentHitsBox(a, b, c, 0.0f)) return true;
     }
     return closedDoors && crossesClosedDoor(a, b, closedDoors);
+}
+
+bool World::segmentClear(Vec2 a, Vec2 b, float radius, size_t first, size_t last) const {
+    for (size_t i = first; i < last && i < m_colliders.size(); ++i) {
+        const Collider& c = m_colliders[i];
+        const float d = distToSegment(c.center, a, b);
+        if (d > c.bound + radius) continue;
+        if (c.shape == Collider::Shape::Circle ? d < c.radius + radius : segmentHitsBox(a, b, c, radius)) return false;
+    }
+    return true;
 }
 
 bool World::crossesClosedDoor(Vec2 a, Vec2 b, DoorMask closedDoors) const {

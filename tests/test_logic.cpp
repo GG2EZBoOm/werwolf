@@ -4,6 +4,7 @@
 
 #include "logic/Match.h"
 #include "server/Bot.h"
+#include "world/Movement.h"
 #include "world/World.h"
 
 #include <algorithm>
@@ -129,7 +130,7 @@ TEST(WeltIstDeterministischUndBegehbar) {
     a.generate(7u);
     b.generate(7u);
     CHECK_EQ(a.trees().size(), b.trees().size());
-    CHECK_EQ(a.houses().size(), 12u);
+    CHECK_EQ(a.houses().size(), 13u); // zwölf Wohnhäuser und die Kapelle
     CHECK(a.height(10.0f, 3.0f) == b.height(10.0f, 3.0f));
     // Spawnpunkte und Sitzplätze sind frei
     for (int i = 0; i < 16; ++i) CHECK(!a.blocked({a.spawnPoint(i, 16).x, a.spawnPoint(i, 16).z}, kPlayerRadius));
@@ -149,6 +150,61 @@ TEST(WeltIstDeterministischUndBegehbar) {
     const Vec2 doorway = a.doorCenter(0);
     CHECK(!a.blocked(doorway, kPlayerRadius, 0));
     CHECK(a.blocked(doorway, kPlayerRadius, 1u));
+}
+
+TEST(KapelleIstBegehbar) {
+    const World& w = testWorld();
+    const int c = w.chapelIndex();
+    CHECK(c >= 0);
+    if (c < 0) return;
+    const House& h = w.houses()[static_cast<size_t>(c)];
+    CHECK(h.chapel);
+    // Durch das offene Portal hinein, Wände, Bänke und Altar halten auf
+    const Vec2 outside{h.door.x, h.door.z}, inside{h.doorInside.x, h.doorInside.z};
+    CHECK(!w.lineBlocked(outside, inside, 0));
+    CHECK(w.lineBlocked(outside, inside, 1u << c));
+    CHECK_EQ(w.houseAt(inside), c);
+    CHECK(!w.blocked(outside, kPlayerRadius));
+    CHECK(!w.blocked(inside, kPlayerRadius));
+    CHECK(!w.blocked(w.houseToWorld(c, {0.0f, 0.5f}), kPlayerRadius)); // Mittelgang
+    CHECK(w.blocked(w.houseToWorld(c, {1.95f, chapel::pewZ(2)}), kPlayerRadius));
+    CHECK(w.blocked(w.houseToWorld(c, chapel::kAltar), kPlayerRadius));
+    CHECK(w.lineBlocked(inside, w.houseToWorld(c, {0.0f, -h.depth}), 0)); // Rückwand und Turm
+    // Der Altarraum liegt eine Stufe höher
+    const Vec2 nave = w.houseToWorld(c, {0.0f, 2.0f}), chancel = w.houseToWorld(c, {0.0f, -4.5f});
+    CHECK(std::fabs(w.height(nave.x, nave.y) - h.floorY) < 0.001f);
+    CHECK(std::fabs(w.height(chancel.x, chancel.y) - (h.floorY + chapel::kChancelStep)) < 0.001f);
+    // Über das Wegenetz kommt man vom Eingang in eine Bankreihe, in den Seitengang und hinter den Altar
+    const Vec2 goals[] = {{-2.4f, chapel::pewZ(3) + chapel::kPewSpacing * 0.5f}, {3.45f, -1.0f}, {0.0f, -6.5f}};
+    for (const Vec2& local : goals) {
+        const Vec2 goal = w.houseToWorld(c, local);
+        Mover mover;
+        mover.position = w.ground(inside.x, inside.y);
+        bool reached = false;
+        for (int step = 0; step < 900 && !reached; ++step) {
+            const Vec2 pos{mover.position.x, mover.position.z};
+            const Vec2 d = w.routeInside(c, pos, goal) - pos;
+            mover.move(d.length() > 0.05f ? d.normalized() : Vec2{0, 0}, kWalkSpeed, 1.0f / 30.0f, w, true, 0);
+            reached = (Vec2{mover.position.x, mover.position.z} - goal).length() < 0.5f;
+        }
+        CHECK(reached);
+    }
+}
+
+TEST(KapelleGehoertNiemandem) {
+    std::vector<Role> roles(16, V);
+    roles[0] = roles[1] = roles[2] = W;
+    Match m = makeMatch(roles);
+    const int c = testWorld().chapelIndex();
+    for (const Match::Player& p : m.players()) CHECK(p.house != kNoPlayer && p.house != c);
+    CHECK_EQ(m.doors().size(), testWorld().houses().size());
+    CHECK(m.houseLabel(c) == "die Kapelle");
+    // Wer sich nachts in die Kapelle flüchtet, kann sie wie ein Haus verriegeln
+    runUntil(m, Phase::Night);
+    const House& h = testWorld().houses()[static_cast<size_t>(c)];
+    m.teleport(5, h.doorInside);
+    CHECK(m.interact(5, Interaction::DoorToggle, static_cast<uint8_t>(c)).empty());
+    CHECK(m.doors()[static_cast<size_t>(c)].flags & DoorLocked);
 }
 
 TEST(StartUndBewegung) {
@@ -774,6 +830,8 @@ TEST(BotsSpielenEchtzeitPartienZuEnde) {
     int finished = 0;
     std::map<Team, int> winners;
     double simulated = 0.0;
+    int chapelVisits = 0;
+    float longestStay = 0.0f;
     for (uint64_t seed = 1; seed <= 24; ++seed) {
         eng::Rng rng(seed);
         const int players = rng.range(5, 12);
@@ -795,11 +853,19 @@ TEST(BotsSpielenEchtzeitPartienZuEnde) {
         if (!m.start(seats, s, testWorld(), seed, error)) continue;
         const Bot::SayFn say = [](uint8_t, const std::string&, bool) {};
         float t = 0.0f;
+        std::map<uint8_t, float> inChapel;
         for (; t < 3600.0f && m.phase() != Phase::GameOver; t += 0.1f) {
             m.update(0.1f);
             for (Bot& b : bots) b.update(0.1f, m, say);
             m.takeNotices();
             m.takeCorrections();
+            for (const Match::Player& p : m.players()) {
+                const bool inside = p.alive && testWorld().houseAt({p.position.x, p.position.z}) == testWorld().chapelIndex();
+                float& stay = inChapel[p.id];
+                if (inside && stay <= 0.0f) ++chapelVisits;
+                stay = inside ? stay + 0.1f : 0.0f;
+                longestStay = std::max(longestStay, stay);
+            }
         }
         simulated += t;
         CHECK(m.phase() == Phase::GameOver);
@@ -813,7 +879,9 @@ TEST(BotsSpielenEchtzeitPartienZuEnde) {
                 winners[Team::Nobody],
                 winners[Team::Jester] + winners[Team::Killer] + winners[Team::Arsonist] + winners[Team::Piper] +
                     winners[Team::Angel] + winners[Team::WhiteWolf] + winners[Team::Sectarian]);
+    std::printf("    %d Besuche in der Kapelle, längster Aufenthalt %.0f s\n", chapelVisits, longestStay);
     CHECK(finished >= 22);
+    CHECK(chapelVisits > 0);
 }
 
 int main() {

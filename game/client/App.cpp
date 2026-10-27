@@ -215,6 +215,8 @@ void App::parseCommandLine() {
         else if (a == "--preview") m_dev.preview = true;
         else if (a == "--sandbox") m_dev.sandbox = true;
         else if (a == "--indoors") m_dev.indoors = true;
+        else if (a == "--chapel") m_dev.chapel = 1;
+        else if (a == "--chapel-outside") m_dev.chapel = 2;
         else if (a == "--journal") m_dev.journal = true;
         else if (a == "--pause") m_dev.pause = true;
         else if (a == "--page" && hasValue) {

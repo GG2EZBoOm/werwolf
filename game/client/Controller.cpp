@@ -29,7 +29,7 @@ eng::Camera ThirdPersonCamera::camera(Vec3 focus, const World& world) const {
         const House& h = world.houses()[static_cast<size_t>(house)];
         const float p = std::max(pitch, 0.6f);
         const Vec3 dir{std::sin(yaw) * std::cos(p), -std::sin(p), std::cos(yaw) * std::cos(p)};
-        Vec3 pos = target - dir * std::min(distance + 1.0f, 6.0f);
+        Vec3 pos = target - dir * std::min(distance + 1.0f, h.chapel ? 8.0f : 6.0f);
         const float mx = h.width * 0.5f - House::kWall - 0.2f, mz = h.depth * 0.5f - House::kWall - 0.2f;
         Vec2 local = world.worldToHouse(house, {pos.x, pos.z});
         local = {std::clamp(local.x, -mx, mx), std::clamp(local.y, -mz, mz)};

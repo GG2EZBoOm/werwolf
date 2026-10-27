@@ -77,6 +77,7 @@ private:
         bool preview = false;
         bool sandbox = false;
         bool indoors = false; // Sandbox im ersten Haus beginnen (für Screenshots)
+        int chapel = 0;       // Sandbox an der Kapelle beginnen: 1 = drinnen, 2 = davor (für Screenshots)
         bool journal = false; // Tagebuch nach Spielbeginn öffnen (für Screenshots)
         bool pause = false;   // Pausenmenü nach Spielbeginn öffnen (für Screenshots)
         int previewCamera = 0;

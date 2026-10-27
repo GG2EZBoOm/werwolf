@@ -116,7 +116,7 @@ TEST(KomplettePartieUeberNetzwerk) {
     CHECK(start.has_value());
     const size_t entityCount = host.entities(eng::nowSeconds()).size();
     CHECK_EQ(entityCount, 7u);
-    CHECK_EQ(host.doors().size(), 12u); // Türzustände kommen mit dem Snapshot
+    CHECK_EQ(host.doors().size(), 13u); // Türzustände (zwölf Häuser und die Kapelle) kommen mit dem Snapshot
 
     // Gast "stürzt ab" und verbindet sich mit seinem Token neu
     guest.conn.close();

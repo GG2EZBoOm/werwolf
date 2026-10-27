@@ -292,7 +292,11 @@ void App::buildPrompts(const GameView& v) {
         }
         if (v.can(AbilityDouse) && !(d.flags & (DoorBurnt | DoorBurning))) {
             const bool doused = v.doused & (1u << door);
-            add(Interaction::Douse, "E", doused ? "Dieses Haus ist schon getränkt" : "Haus mit Öl tränken", house, !doused);
+            const bool chapel = door == m_world.chapelIndex();
+            add(Interaction::Douse, "E",
+                doused ? (chapel ? "Die Kapelle ist schon getränkt" : "Dieses Haus ist schon getränkt")
+                       : (chapel ? "Kapelle mit Öl tränken" : "Haus mit Öl tränken"),
+                house, !doused);
         }
     }
     if (v.can(AbilityInspect)) {
@@ -833,25 +837,32 @@ void App::drawMinimap(Rect area, const GameView& v) {
     r.circle(toMap(0, 0), 2.2f, ember);
     const PlayerView* self = v.me();
     const std::vector<DoorState>& doors = m_net.doors();
+    eng::Color chapelInk = inkDark;
     for (size_t i = 0; i < m_world.houses().size(); ++i) {
         const House& h = m_world.houses()[i];
         const eng::Vec2 p = toMap(h.position.x, h.position.z);
         const uint8_t flags = i < doors.size() ? doors[i].flags : 0;
         const bool mine = self && self->house == i;
+        eng::Color fill{0, 0, 0, 0};
+        if (flags & DoorBurnt) fill = inkDark.withAlpha(0.85f);
+        else if (flags & DoorBurning) fill = ember.fade(0.6f + 0.4f * std::sin(static_cast<float>(m_time) * 9.0f));
+        else if (v.doused & (1u << i)) fill = theme::roleColor(Role::Arsonist).withAlpha(0.8f);
+        else if (mine) fill = inkRed.withAlpha(0.85f);
+        if (h.chapel) {
+            if (fill.a > 0.0f) chapelInk = fill.withAlpha(1.0f);
+            continue;
+        }
         r.pushTransform(eng::Affine2::around(p, -h.yaw));
         const eng::Rect hr{p.x - 4.0f, p.y - 3.5f, 8.0f, 7.0f};
-        if (flags & DoorBurnt) r.rect(hr, inkDark.withAlpha(0.85f));
-        else if (flags & DoorBurning) r.rect(hr, ember.fade(0.6f + 0.4f * std::sin(static_cast<float>(m_time) * 9.0f)));
-        else if (v.doused & (1u << i)) r.rect(hr, theme::roleColor(Role::Arsonist).withAlpha(0.8f));
-        else if (mine) r.rect(hr, inkRed.withAlpha(0.85f));
+        if (fill.a > 0.0f) r.rect(hr, fill);
         r.roundRectOutline(hr, 0.0f, 1.0f, inkDark.withAlpha(0.85f));
         r.popTransform();
     }
     // Kapelle als Kreuz, Glocke als kleiner Kreis
     const eng::Vec2 chapel = toMap(m_world.chapel().x, m_world.chapel().z);
     if (inside(chapel)) {
-        r.line(chapel + eng::Vec2{0, -6}, chapel + eng::Vec2{0, 6}, 1.4f, inkDark);
-        r.line(chapel + eng::Vec2{-4, -2}, chapel + eng::Vec2{4, -2}, 1.4f, inkDark);
+        r.line(chapel + eng::Vec2{0, -6}, chapel + eng::Vec2{0, 6}, 1.4f, chapelInk);
+        r.line(chapel + eng::Vec2{-4, -2}, chapel + eng::Vec2{4, -2}, 1.4f, chapelInk);
     }
     r.circleOutline(toMap(m_world.bell().x, m_world.bell().z), 2.5f, 1.0f, inkDark);
     // Fährtenleser sieht die Spur auf der Karte

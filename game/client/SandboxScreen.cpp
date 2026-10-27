@@ -42,6 +42,18 @@ void App::enterSandbox() {
         m_camera.yaw = m_player.yaw;
         m_sandboxDoors[0].flags = DoorOpen;
     }
+    // Die Kapelle steht offen wie im Spiel
+    if (const int chapelHouse = m_world.chapelIndex(); chapelHouse >= 0) {
+        m_sandboxDoors[static_cast<size_t>(chapelHouse)].flags = DoorOpen;
+        if (m_dev.chapel) {
+            // drinnen im Mittelgang mit Blick zum Altar, oder davor mit Blick auf das Portal
+            const Vec2 spot = m_world.houseToWorld(chapelHouse, m_dev.chapel == 1 ? Vec2{0.0f, 1.2f} : Vec2{1.2f, chapel::kDepth * 0.5f + 7.0f});
+            const Vec2 look = m_world.houseToWorld(chapelHouse, m_dev.chapel == 1 ? chapel::kAltar : Vec2{0.0f, 0.0f});
+            m_player.position = m_world.ground(spot.x, spot.y);
+            m_player.yaw = std::atan2(look.x - spot.x, look.y - spot.y);
+            m_camera.yaw = m_player.yaw;
+        }
+    }
     m_npcs.clear();
     for (int i = 1; i < 9; ++i) {
         SandboxNpc npc;

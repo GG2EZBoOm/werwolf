@@ -119,8 +119,8 @@ public:
     DoorMask closedDoors() const { return closedDoorMask(m_doors); }
     uint32_t dousedHouses() const { return m_doused; }
     bool hasLineOfSight(Vec3 a, Vec3 b) const;
-    // Name für Meldungen: "das Haus von Anna"
-    std::string houseLabel(int house) const;
+    // Name für Meldungen: "das Haus von Anna", "die Kapelle" (im Dativ: "dem Haus von Anna")
+    std::string houseLabel(int house, bool dative = false) const;
     // Dorfhälfte für den Sektierer: 0 = Osten, 1 = Westen
     int sectOf(const Player& p) const;
 

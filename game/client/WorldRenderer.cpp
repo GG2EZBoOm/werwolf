@@ -390,21 +390,20 @@ void buildHouseRoof(MeshBuilder& b, const House& h) {
 }
 
 // Türblatt, Ursprung an der Angel (links), öffnet sich um die Y-Achse nach innen.
-void buildDoorLeaf(MeshBuilder& b, bool reinforced) {
-    const float wd = House::kDoorWidth - 0.1f;
+void buildDoorLeaf(MeshBuilder& b, bool reinforced, float wd, float height) {
     b.setColorJitter(0.05f);
     b.setColor(0x5A3A22);
-    b.box({wd * 0.5f, 0.98f, 0}, {wd, 1.96f, 0.08f});
+    b.box({wd * 0.5f, height * 0.5f, 0}, {wd, height, 0.08f});
     b.setColor(0x4A2E1A);
-    for (float y : {0.35f, 1.6f})
+    for (float y : {0.35f, height - 0.36f})
         for (float z : {0.05f, -0.05f}) b.box({wd * 0.5f, y, z}, {wd - 0.08f, 0.12f, 0.03f});
     b.setColor(0x3A2618);
-    b.box({wd - 0.15f, 0.95f, 0.08f}, {0.08f, 0.08f, 0.06f});
-    b.box({wd - 0.15f, 0.95f, -0.08f}, {0.08f, 0.08f, 0.06f});
+    b.box({wd - 0.15f, height * 0.485f, 0.08f}, {0.08f, 0.08f, 0.06f});
+    b.box({wd - 0.15f, height * 0.485f, -0.08f}, {0.08f, 0.08f, 0.06f});
     if (!reinforced) return;
     b.setColorJitter(0.03f);
     b.setColor(0x4A4E55);
-    for (float y : {0.3f, 0.98f, 1.66f}) {
+    for (float y : {0.3f, height * 0.5f, height - 0.3f}) {
         for (float z : {0.056f, -0.056f}) b.box({wd * 0.5f, y, z}, {wd + 0.02f, 0.11f, 0.03f});
         b.setColor(0x6A6E75);
         for (float x : {0.12f, wd * 0.5f, wd - 0.12f}) b.box({x, y, 0.075f}, {0.05f, 0.05f, 0.03f});
@@ -412,51 +411,406 @@ void buildDoorLeaf(MeshBuilder& b, bool reinforced) {
     }
 }
 
-void buildChapel(MeshBuilder& b, Vec3 pos, float yaw) {
-    b.setTransform(eng::trs(pos, yaw));
-    const float w = 8.4f, d = 14.4f, wh = 5.6f, fy = 0.4f;
-    b.setColorJitter(0.08f);
-    b.setColor(0x6E6A62);
-    b.box({0, -0.8f, 0}, {w + 0.5f, 2.4f, d + 0.5f});
-    b.setColorJitter(0.02f);
-    b.setColor(0xE2DCCD);
-    b.box({0, fy + wh * 0.5f, 0}, {w, wh, d});
-    b.gableWalls({0, fy + wh, 0}, w, d, 4.6f, 0.5f);
-    b.setColorJitter(0.07f);
-    b.setColor(0x3C3F47);
-    b.gableRoof({0, fy + wh, 0}, w, d, 4.6f, 0.5f, false);
-    // Tür und Fenster
-    b.setColor(0x4A2E1C);
-    b.box({0, fy + 1.4f, d * 0.5f + 0.06f}, {1.7f, 2.8f, 0.12f});
-    b.setColor(0x8A847A);
-    b.box({0, fy + 2.95f, d * 0.5f + 0.08f}, {2.2f, 0.3f, 0.15f});
-    b.setGlow(1.0f);
-    b.setColor(0x2A3048);
-    b.box({0, fy + wh + 1.4f, d * 0.5f + 0.06f}, {1.1f, 1.1f, 0.1f});
-    for (int i = 0; i < 3; ++i) {
-        const float z = -d * 0.3f + static_cast<float>(i) * d * 0.3f;
-        b.box({w * 0.5f + 0.05f, fy + 3.0f, z}, {0.1f, 2.2f, 0.8f});
-        b.box({-w * 0.5f - 0.05f, fy + 3.0f, z}, {0.1f, 2.2f, 0.8f});
+// --- Kapelle -------------------------------------------------------------------
+
+constexpr uint32_t kStone = 0xB8B0A0;
+
+// Spitzbogenfenster in einer Seitenwand (Wandmitte x, Außenseite s): Laibung und Bleiruten in der Hülle,
+// das bunte Glas in einem eigenen Mesh, das von selbst leicht leuchtet.
+void buildChapelWindow(MeshBuilder& b, MeshBuilder& glass, float x, float s, float z, float y0, float height, int seed) {
+    const float t = House::kWall, wide = 0.9f;
+    b.setColorJitter(0.05f);
+    b.setColor(kStone);
+    for (float face : {1.0f, -1.0f}) {
+        const float fx = x + s * face * (t * 0.5f + 0.03f);
+        b.box({fx, y0 - 0.08f, z}, {0.1f, 0.16f, wide + 0.4f});
+        for (float e : {-1.0f, 1.0f}) {
+            b.box({fx, y0 + height * 0.5f, z + e * (wide * 0.5f + 0.09f)}, {0.08f, height, 0.18f});
+            b.beam({fx, y0 + height - 0.05f, z + e * (wide * 0.5f + 0.09f)}, {fx, y0 + height + 0.62f, z}, 0.17f);
+        }
     }
+    // Bleiruten hinter dem Glas (dunkel, etwas weniger dick als das Glas)
+    b.setColorJitter(0.0f);
+    b.setColor(0x24201C);
+    b.box({x, y0 + height * 0.5f, z}, {t + 0.03f, height, wide});
+    b.box({x, y0 + height + 0.16f, z}, {t + 0.03f, 0.32f, wide * 0.62f});
+    b.box({x, y0 + height + 0.4f, z}, {t + 0.03f, 0.18f, wide * 0.3f});
+
+    const uint32_t colors[] = {0x2E4A9A, 0x9A2A2A, 0xC89A3A, 0x2E7A5A, 0x6A3A8A, 0x3A6AAA};
+    glass.setColorJitter(0.08f);
+    constexpr int kCols = 3, kRows = 5;
+    const float pw = wide / kCols, ph = height / kRows;
+    for (int r = 0; r < kRows; ++r) {
+        for (int c = 0; c < kCols; ++c) {
+            // Mittelbahn mit eigenem Muster, Ränder blau-golden
+            const int pick = c == 1 ? (r + seed) % 6 : ((r + seed) % 2 == 0 ? 0 : 2);
+            glass.setColor(colors[pick]);
+            glass.box({x, y0 + ph * (static_cast<float>(r) + 0.5f), z - wide * 0.5f + pw * (static_cast<float>(c) + 0.5f)},
+                      {t + 0.05f, ph - 0.05f, pw - 0.05f});
+        }
+    }
+    glass.setColor(colors[(seed + 1) % 6]);
+    glass.box({x, y0 + height + 0.16f, z}, {t + 0.05f, 0.27f, wide * 0.62f - 0.06f});
+    glass.setColor(colors[2]);
+    glass.box({x, y0 + height + 0.4f, z}, {t + 0.05f, 0.13f, wide * 0.3f - 0.06f});
+}
+
+// Kerzenflamme vormerken (lokal) und Kerze bauen
+void buildCandle(MeshBuilder& b, Vec3 base, float height, std::vector<Vec3>& flames) {
+    b.setColorJitter(0.03f);
+    b.setColor(0xF0E8D0);
+    b.cylinder(base, 0.035f, height, 6);
+    b.setGlow(1.0f);
+    b.setColor(0x3A2A10);
+    b.box(base + Vec3{0, height + 0.03f, 0}, {0.02f, 0.05f, 0.02f});
     b.setGlow(0.0f);
-    // Turm
-    const float tz = -d * 0.5f - 1.6f;
+    flames.push_back(base + Vec3{0, height + 0.07f, 0});
+}
+
+// Hülle der Kapelle: Sockel, Steinboden, Wände, Fenster, Turm, Portal und die ganze Einrichtung (lokal).
+void buildChapelShell(MeshBuilder& b, MeshBuilder& glass, const House& h, float stepRise, std::vector<Vec3>& flames) {
+    using namespace chapel;
+    const float w = h.width, d = h.depth, wh = h.wallHeight;
+    const float fy = h.floorY - h.position.y;
+    const float t = House::kWall, hw = w * 0.5f, hd = d * 0.5f, gap = h.doorWidth * 0.5f;
+    const float iw = hw - t, id = hd - t; // halbe Innenmaße
+    const float base = -2.5f;
+    const float cy = fy + kChancelStep; // Boden des Altarraums
+
+    // Sockel aus Bruchstein, Turmfundament inklusive
+    b.setColorJitter(0.08f);
+    b.setColor(0x77726A);
+    b.box({0, (fy + base) * 0.5f, 0}, {w + 0.5f, fy - base, d + 0.5f});
+
+    // Steinplatten im Kirchenschiff, das Fugenbild ist der Sockel darunter
+    const int nx = 9, nz = 15;
+    const float sx = 2.0f * iw / static_cast<float>(nx), sz = 2.0f * id / static_cast<float>(nz);
+    const uint32_t slabs[] = {0x9A948A, 0x8C867C, 0xA49E92, 0x948D82};
+    b.setColorJitter(0.05f);
+    for (int i = 0; i < nx; ++i) {
+        for (int j = 0; j < nz; ++j) {
+            const float z = -id + sz * (static_cast<float>(j) + 0.5f);
+            if (z < kChancelZ - sz * 0.5f) continue;
+            b.setColor(slabs[static_cast<size_t>((i * 7 + j * 13 + (i * j) % 3) % 4)]);
+            b.box({-iw + sx * (static_cast<float>(i) + 0.5f), fy + 0.015f, z}, {sx - 0.035f, 0.03f, sz - 0.035f});
+        }
+    }
+    // Altarraum eine Stufe höher, mit heller Stufenkante
+    b.setColorJitter(0.04f);
+    b.setColor(0xA8A196);
+    b.box({0, fy + kChancelStep * 0.5f, (-id + kChancelZ) * 0.5f}, {2.0f * iw, kChancelStep, kChancelZ + id});
+    b.setColor(0xC2BBAD);
+    b.box({0, cy - 0.025f, kChancelZ - 0.07f}, {2.0f * iw, 0.06f, 0.16f});
+
+    // Roter Läufer im Mittelgang bis vor den Altar, mit Goldborte
+    const float runFront = id - 0.45f, altarFront = kAltar.y + kAltarHalf.y + 0.12f;
+    b.setColorJitter(0.03f);
+    b.setColor(0x7A2A26);
+    b.box({0, fy + 0.036f, (runFront + kChancelZ) * 0.5f}, {1.2f, 0.012f, runFront - kChancelZ});
+    b.box({0, cy + 0.006f, (kChancelZ + altarFront) * 0.5f}, {1.2f, 0.012f, kChancelZ - altarFront});
+    b.setColor(0xB08A3A);
+    for (float s : {-1.0f, 1.0f}) {
+        b.box({s * 0.57f, fy + 0.038f, (runFront + kChancelZ) * 0.5f}, {0.05f, 0.012f, runFront - kChancelZ});
+        b.box({s * 0.57f, cy + 0.008f, (kChancelZ + altarFront) * 0.5f}, {0.05f, 0.012f, kChancelZ - altarFront});
+    }
+
+    // Weiß gekalkte Wände mit Türöffnung
+    b.setColorJitter(0.02f);
+    b.setColor(h.wallColor);
+    const float wy = fy + wh * 0.5f, seg = hw - gap;
+    b.box({0, wy, -hd + t * 0.5f}, {w, wh, t});
+    b.box({-hw + t * 0.5f, wy, 0}, {t, wh, d - 2.0f * t});
+    b.box({hw - t * 0.5f, wy, 0}, {t, wh, d - 2.0f * t});
+    b.box({-(gap + seg * 0.5f), wy, hd - t * 0.5f}, {seg, wh, t});
+    b.box({gap + seg * 0.5f, wy, hd - t * 0.5f}, {seg, wh, t});
+    b.box({0, fy + (kDoorHeight + wh) * 0.5f, hd - t * 0.5f}, {gap * 2.0f, wh - kDoorHeight, t});
+
+    // Holzvertäfelung innen
+    b.setColorJitter(0.05f);
+    const float panel = 1.15f;
+    const float frontSeg = iw - gap - 0.12f;
+    auto wainscot = [&](uint32_t color, float height, float y, float inset) {
+        b.setColor(color);
+        b.box({0, y, -id + inset}, {2.0f * iw, height, 0.04f});
+        for (float s : {-1.0f, 1.0f}) {
+            b.box({s * (iw - inset), y, 0}, {0.04f, height, 2.0f * id});
+            b.box({s * (gap + 0.12f + frontSeg * 0.5f), y, id - inset}, {frontSeg, height, 0.04f});
+        }
+    };
+    wainscot(0x6E5238, panel, fy + panel * 0.5f, 0.02f);
+    wainscot(0x58402A, 0.08f, fy + panel + 0.02f, 0.04f);
+
+    // Außen: Sockelband, Eckquader, Traufgesims und Strebepfeiler aus hellem Stein
+    b.setColorJitter(0.06f);
+    b.setColor(0x8E887C);
+    const float course = 0.65f;
+    for (float s : {-1.0f, 1.0f}) {
+        b.box({s * (hw + 0.05f), fy + course * 0.5f, 0}, {0.12f, course, d + 0.1f});
+        b.box({s * (gap + 0.6f + (hw - gap - 0.6f) * 0.5f), fy + course * 0.5f, hd + 0.05f}, {hw - gap - 0.6f, course, 0.12f});
+    }
+    b.box({0, fy + course * 0.5f, -hd - 0.05f}, {w + 0.1f, course, 0.12f});
+    // Eckquader nur als Verblendung außen, damit innen nichts durch die dünne Wand ragt
+    b.setColor(kStone);
+    for (int k = 0; k < 8; ++k) {
+        const float y = fy + course + 0.2f + static_cast<float>(k) * 0.62f;
+        const float lx = k % 2 == 0 ? 0.62f : 0.42f, lz = k % 2 == 0 ? 0.42f : 0.62f;
+        for (float s : {-1.0f, 1.0f}) {
+            for (float e : {-1.0f, 1.0f}) {
+                b.box({s * (hw + 0.02f - lx * 0.5f), y, e * (hd - 0.03f)}, {lx, 0.3f, 0.1f});
+                b.box({s * (hw - 0.03f), y, e * (hd + 0.02f - lz * 0.5f)}, {0.1f, 0.3f, lz});
+            }
+        }
+    }
+    for (float s : {-1.0f, 1.0f}) b.box({s * (hw + 0.08f), fy + wh - 0.12f, 0}, {0.2f, 0.24f, d + 0.2f});
+    for (float z : {-hd + 0.3f, -2.3f, 2.3f, hd - 0.3f}) {
+        for (float s : {-1.0f, 1.0f}) {
+            b.setColor(kStone);
+            b.box({s * (hw + 0.22f), fy + 1.4f, z}, {0.44f, 2.8f, 0.6f});
+            b.box({s * (hw + 0.15f), fy + 3.6f, z}, {0.3f, 1.6f, 0.5f});
+            b.setColor(0xA49C8C);
+            b.beam({s * (hw + 0.42f), fy + 2.8f, z}, {s * (hw + 0.16f), fy + 3.15f, z}, 0.42f);
+            b.beam({s * (hw + 0.28f), fy + 4.4f, z}, {s * (hw + 0.04f), fy + 4.85f, z}, 0.34f);
+        }
+    }
+
+    // Spitzbogenfenster in beiden Langseiten
+    int seed = 0;
+    for (float z : {-4.6f, 0.0f, 4.6f})
+        for (float s : {-1.0f, 1.0f}) buildChapelWindow(b, glass, s * (hw - t * 0.5f), s, z, fy + 2.0f, 2.4f, seed++);
+
+    // Portal: Gewände, Säulen, Rundbogen aus Keilsteinen und ein Bogenfeld mit Kreuz
+    const float pz = hd + 0.08f;
+    b.setColorJitter(0.05f);
+    b.setColor(kStone);
+    for (float s : {-1.0f, 1.0f}) {
+        b.box({s * (gap + 0.15f), fy + kDoorHeight * 0.5f, pz}, {0.3f, kDoorHeight, 0.2f});
+        b.box({s * (gap + 0.45f), fy + (kDoorHeight + 0.35f) * 0.5f, pz + 0.05f}, {0.24f, kDoorHeight + 0.35f, 0.28f});
+        b.box({s * (gap + 0.45f), fy + kDoorHeight + 0.42f, pz + 0.05f}, {0.34f, 0.14f, 0.36f});
+    }
+    b.setColor(0x9E9686);
+    b.box({0, fy + kDoorHeight + 0.42f, pz - 0.02f}, {gap * 2.0f, 0.84f, 0.14f});
+    b.setColor(0x6A5A44);
+    b.box({0, fy + kDoorHeight + 0.45f, pz + 0.06f}, {0.08f, 0.56f, 0.04f});
+    b.box({0, fy + kDoorHeight + 0.55f, pz + 0.06f}, {0.36f, 0.08f, 0.04f});
+    b.setColor(kStone);
+    constexpr int kVoussoirs = 9;
+    for (int k = 0; k < kVoussoirs; ++k) {
+        const float a = kPi * (static_cast<float>(k) + 0.5f) / static_cast<float>(kVoussoirs);
+        const float rx = std::cos(a) * (gap + 0.18f), ry = std::sin(a) * 0.95f;
+        b.setTransform(Mat4::translation({rx, fy + kDoorHeight + ry, pz + 0.02f}) * Mat4::rotationZ(a - kPi * 0.5f));
+        b.box({0, 0, 0}, {0.36f, 0.34f, 0.24f});
+    }
+    b.setTransform(Mat4::identity());
+    // Türrahmen innen
+    b.setColor(h.timberColor);
+    b.box({0, fy + kDoorHeight + 0.05f, id - 0.05f}, {gap * 2.0f + 0.3f, 0.14f, 0.12f});
+    for (float s : {-1.0f, 1.0f}) b.box({s * (gap + 0.08f), fy + kDoorHeight * 0.5f, id - 0.05f}, {0.14f, kDoorHeight, 0.12f});
+
+    // Steinstufen vor dem Portal (die Rampe in World::height folgt ihnen)
+    const float stepTop[] = {fy - 0.02f, fy - stepRise * 0.36f, fy - stepRise * 0.7f};
+    const float stepDepth = h.ramp / 3.0f;
+    for (int k = 0; k < 3; ++k) {
+        const float bottom = fy - stepRise - 0.4f;
+        b.setColor(k % 2 ? 0xA8A092 : 0xB4AC9E);
+        b.box({0, (stepTop[k] + bottom) * 0.5f, hd + stepDepth * (static_cast<float>(k) + 0.5f)},
+              {gap * 2.0f + 1.3f, stepTop[k] - bottom, stepDepth});
+    }
+
+    // --- Einrichtung (passend zu den Kollisionen in World::addHouseColliders) ---
+
+    // Bankreihen: Sitz, Lehne, Wangen und Kniebank
+    for (int row = 0; row < kPewRows; ++row) {
+        const float z = pewZ(row);
+        for (float s : {-1.0f, 1.0f}) {
+            const float cx = s * (kPewInner + kPewOuter) * 0.5f, len = kPewOuter - kPewInner;
+            b.setColorJitter(0.05f);
+            b.setColor(0x6B4A30);
+            b.box({cx, fy + 0.45f, z - 0.05f}, {len - 0.1f, 0.06f, 0.42f});
+            b.box({cx, fy + 0.8f, z + 0.2f}, {len - 0.1f, 0.52f, 0.05f});
+            b.setColor(0x5A3C26);
+            for (float e : {-1.0f, 1.0f}) {
+                b.box({cx + e * (len * 0.5f - 0.04f), fy + 0.5f, z}, {0.07f, 1.0f, 0.54f});
+                b.box({cx + e * (len * 0.5f - 0.04f), fy + 1.02f, z + 0.12f}, {0.1f, 0.08f, 0.28f});
+            }
+            b.box({cx, fy + 0.2f, z + 0.14f}, {len - 0.12f, 0.05f, 0.05f});
+            b.box({cx, fy + 0.11f, z - 0.2f}, {len - 0.12f, 0.06f, 0.12f});
+            // Gesangbuch auf manchen Bänken
+            if ((row + (s > 0 ? 1 : 0)) % 3 == 0) {
+                b.setColor(0x3A2A4A);
+                b.box({cx + s * 0.3f, fy + 0.5f, z - 0.1f}, {0.16f, 0.04f, 0.22f});
+            }
+        }
+    }
+
+    // Altar mit Tuch, Antependium, Kerzen und Kreuz
+    b.setColorJitter(0.04f);
+    b.setColor(0xCFC8B8);
+    b.box({kAltar.x, cy + 0.5f, kAltar.y}, {kAltarHalf.x * 2.0f, 1.0f, kAltarHalf.y * 2.0f});
+    b.setColor(kStone);
+    b.box({kAltar.x, cy + 1.03f, kAltar.y}, {kAltarHalf.x * 2.0f + 0.12f, 0.06f, kAltarHalf.y * 2.0f + 0.12f});
+    b.setColorJitter(0.02f);
+    b.setColor(0xEDE8DC);
+    b.box({kAltar.x, cy + 1.066f, kAltar.y}, {kAltarHalf.x * 2.0f + 0.16f, 0.012f, kAltarHalf.y * 2.0f + 0.16f});
+    b.box({kAltar.x, cy + 0.83f, kAltar.y + kAltarHalf.y + 0.075f}, {kAltarHalf.x * 2.0f + 0.16f, 0.48f, 0.012f});
+    b.setColor(0x7A2A26);
+    b.box({kAltar.x, cy + 0.8f, kAltar.y + kAltarHalf.y + 0.085f}, {0.8f, 0.42f, 0.012f});
+    b.setColor(0xC8A040);
+    b.box({kAltar.x, cy + 0.8f, kAltar.y + kAltarHalf.y + 0.093f}, {0.05f, 0.28f, 0.01f});
+    b.box({kAltar.x, cy + 0.86f, kAltar.y + kAltarHalf.y + 0.093f}, {0.18f, 0.05f, 0.01f});
+    for (float x : {-0.62f, 0.62f}) {
+        b.setColor(0xB89A50);
+        b.frustum({kAltar.x + x, cy + 1.07f, kAltar.y - 0.12f}, 0.08f, 0.05f, 0.08f, 8);
+        buildCandle(b, {kAltar.x + x, cy + 1.15f, kAltar.y - 0.12f}, 0.3f, flames);
+    }
+    b.setColor(0xB89A50);
+    b.box({kAltar.x, cy + 1.1f, kAltar.y - 0.22f}, {0.2f, 0.06f, 0.14f});
+    b.box({kAltar.x, cy + 1.36f, kAltar.y - 0.22f}, {0.045f, 0.48f, 0.045f});
+    b.box({kAltar.x, cy + 1.46f, kAltar.y - 0.22f}, {0.24f, 0.045f, 0.045f});
+
+    // Altarbild als Triptychon und großes Holzkreuz an der Rückwand
+    b.setColorJitter(0.03f);
+    b.setColor(0xA88438);
+    b.box({0, cy + 2.05f, -id + 0.05f}, {2.7f, 1.5f, 0.06f});
+    b.box({0, cy + 2.85f, -id + 0.05f}, {1.0f, 0.3f, 0.06f});
+    const uint32_t panels[] = {0x2E4A7A, 0x8A2A2A, 0x2E4A7A};
+    for (int i = 0; i < 3; ++i) {
+        b.setColor(panels[i]);
+        b.box({-0.86f + 0.86f * static_cast<float>(i), cy + 2.0f, -id + 0.085f}, {0.72f, i == 1 ? 1.26f : 1.14f, 0.02f});
+    }
+    b.setColor(0xD8C890);
+    b.box({0, cy + 2.05f, -id + 0.1f}, {0.06f, 0.7f, 0.01f});
+    b.box({0, cy + 2.2f, -id + 0.1f}, {0.36f, 0.06f, 0.01f});
+    b.setColor(0x5A3A22);
+    b.box({0, fy + 4.35f, -id + 0.07f}, {0.18f, 1.9f, 0.1f});
+    b.box({0, fy + 4.75f, -id + 0.07f}, {1.05f, 0.18f, 0.1f});
+
+    // Lesepult mit aufgeschlagenem Buch
+    b.setColorJitter(0.05f);
+    b.setColor(0x5A3C26);
+    b.box({kLectern.x, cy + 0.04f, kLectern.y}, {0.5f, 0.08f, 0.5f});
+    b.box({kLectern.x, cy + 0.6f, kLectern.y}, {0.14f, 1.1f, 0.14f});
+    b.setTransform(Mat4::translation({kLectern.x, cy + 1.18f, kLectern.y}) * Mat4::rotationX(-0.38f));
+    b.box({0, 0, 0}, {0.62f, 0.05f, 0.46f});
+    b.setColor(0xE8E0C8);
+    b.box({-0.1f, 0.04f, 0}, {0.2f, 0.025f, 0.3f});
+    b.box({0.1f, 0.04f, 0}, {0.2f, 0.025f, 0.3f});
+    b.setColor(0x7A2A26);
+    b.box({0, 0.03f, 0.12f}, {0.02f, 0.02f, 0.2f});
+    b.setTransform(Mat4::identity());
+
+    // Kerzenständer aus Eisen links und rechts vom Altar
+    for (float s : {-1.0f, 1.0f}) {
+        const Vec3 p{s * kCandleStand.x, cy, kCandleStand.y};
+        b.setColorJitter(0.03f);
+        b.setColor(0x3A3430);
+        b.cylinder(p, 0.18f, 0.05f, 8);
+        b.box(p + Vec3{0, 0.75f, 0}, {0.05f, 1.4f, 0.05f});
+        b.cylinder(p + Vec3{0, 1.42f, 0}, 0.11f, 0.03f, 8);
+        buildCandle(b, p + Vec3{0, 1.45f, 0}, 0.36f, flames);
+    }
+
+    // Taufbecken neben dem Eingang
+    b.setColorJitter(0.05f);
+    b.setColor(kStone);
+    b.frustum({kFont.x, fy, kFont.y}, 0.32f, 0.18f, 0.55f, 8);
+    b.frustum({kFont.x, fy + 0.55f, kFont.y}, 0.24f, 0.44f, 0.34f, 10);
+    b.setColor(0x2A3A48);
+    b.cylinder({kFont.x, fy + 0.84f, kFont.y}, 0.37f, 0.01f, 10);
+
+    // Wandleuchter zwischen den Fenstern
+    for (float z : {-2.3f, 2.3f}) {
+        for (float s : {-1.0f, 1.0f}) {
+            const Vec3 p{s * (iw - 0.1f), fy + 2.2f, z};
+            b.setColor(0x3A3430);
+            b.box(p + Vec3{s * 0.04f, 0, 0}, {0.08f, 0.32f, 0.12f});
+            b.box(p + Vec3{-s * 0.08f, 0.14f, 0}, {0.2f, 0.03f, 0.03f});
+            b.cylinder(p + Vec3{-s * 0.16f, 0.15f, 0}, 0.07f, 0.025f, 8);
+            buildCandle(b, p + Vec3{-s * 0.16f, 0.17f, 0}, 0.22f, flames);
+        }
+    }
+
+    // Turm hinter der Altarwand mit Glockenstube, Spitzhelm und goldenem Kreuz
+    const float tz = -hd - kTowerSize * 0.5f, ts = kTowerSize, top = fy + 14.0f;
     b.setColorJitter(0.04f);
     b.setColor(0xD8D2C4);
-    b.box({0, fy + 7.0f, tz}, {4.0f, 14.0f, 4.0f});
-    b.setColor(0x2A2622);
-    b.box({0, fy + 11.8f, tz + 2.02f}, {1.0f, 1.6f, 0.05f});
-    b.box({2.02f, fy + 11.8f, tz}, {0.05f, 1.6f, 1.0f});
-    b.box({-2.02f, fy + 11.8f, tz}, {0.05f, 1.6f, 1.0f});
+    b.box({0, (base + top) * 0.5f, tz}, {ts, top - base, ts});
+    b.setColorJitter(0.06f);
+    b.setColor(kStone);
+    for (int k = 0; k < 20; ++k) {
+        const float y = fy + course + 0.2f + static_cast<float>(k) * 0.62f;
+        if (y > top - 0.4f) break;
+        const bool wideX = k % 2 == 0;
+        const Vec3 size = wideX ? Vec3{0.6f, 0.3f, 0.4f} : Vec3{0.4f, 0.3f, 0.6f};
+        for (float s : {-1.0f, 1.0f})
+            for (float e : {-1.0f, 1.0f})
+                b.box({s * (ts * 0.5f + 0.02f - size.x * 0.5f), y, tz + e * (ts * 0.5f + 0.02f - size.z * 0.5f)}, size);
+    }
+    b.box({0, top - 1.0f, tz}, {ts + 0.24f, 0.22f, ts + 0.24f});
+    b.box({0, top + 0.05f, tz}, {ts + 0.3f, 0.2f, ts + 0.3f});
+    // Schallöffnungen mit Lamellen auf allen vier Seiten, Schlitzfenster darunter
+    for (int side = 0; side < 4; ++side) {
+        const float a = static_cast<float>(side) * kPi * 0.5f;
+        b.setTransform(Mat4::translation({0, 0, tz}) * Mat4::rotationY(a));
+        b.setColorJitter(0.0f);
+        b.setColor(0x1E1A16);
+        b.box({0, top - 2.3f, ts * 0.5f + 0.01f}, {1.1f, 1.8f, 0.04f});
+        b.box({0, fy + 7.2f, ts * 0.5f + 0.01f}, {0.22f, 0.9f, 0.04f});
+        b.setColorJitter(0.05f);
+        b.setColor(0x4A3A2A);
+        for (int k = 0; k < 5; ++k) b.box({0, top - 3.0f + static_cast<float>(k) * 0.32f, ts * 0.5f + 0.04f}, {1.0f, 0.06f, 0.06f});
+        b.setColor(kStone);
+        for (float e : {-1.0f, 1.0f}) b.box({e * 0.62f, top - 2.3f, ts * 0.5f + 0.05f}, {0.14f, 1.9f, 0.12f});
+        b.box({0, top - 1.35f, ts * 0.5f + 0.05f}, {1.38f, 0.14f, 0.12f});
+    }
     b.setColorJitter(0.07f);
     b.setColor(0x3C3F47);
-    b.setTransform(eng::trs(pos, yaw) * Mat4::translation({0, fy + 14.0f, tz}) * Mat4::rotationY(kPi * 0.25f));
-    b.cone({0, 0, 0}, 3.3f, 5.2f, 4);
-    b.setTransform(eng::trs(pos, yaw));
-    b.setColor(0xB89A4A);
-    b.box({0, fy + 20.0f, tz}, {0.12f, 1.4f, 0.12f});
-    b.box({0, fy + 20.3f, tz}, {0.7f, 0.12f, 0.12f});
+    b.setTransform(Mat4::translation({0, top + 0.15f, tz}) * Mat4::rotationY(kPi * 0.25f));
+    b.cone({0, 0, 0}, 3.3f, 5.6f, 4);
     b.setTransform(Mat4::identity());
+    b.setColorJitter(0.02f);
+    b.setColor(0xC8A848);
+    b.cylinder({0, top + 5.6f, tz}, 0.09f, 0.3f, 6);
+    b.box({0, top + 6.45f, tz}, {0.12f, 1.4f, 0.12f});
+    b.box({0, top + 6.75f, tz}, {0.72f, 0.12f, 0.12f});
+}
+
+// Dach, Giebel mit Rosette und Giebelkreuz – wird ausgeblendet, wenn man drinnen ist.
+void buildChapelRoof(MeshBuilder& b, const House& h) {
+    const float w = h.width, d = h.depth, wh = h.wallHeight, rh = h.roofHeight;
+    const float fy = h.floorY - h.position.y, hd = d * 0.5f;
+    b.setColorJitter(0.02f);
+    b.setColor(h.wallColor);
+    b.gableWalls({0, fy + wh, 0}, w, d, rh, 0.5f);
+    b.setColorJitter(0.07f);
+    b.setColor(h.roofColor);
+    b.gableRoof({0, fy + wh, 0}, w, d, rh, 0.5f, false);
+    b.setColor(eng::lerp(hex(h.roofColor), hex(0x000000), 0.3f));
+    b.box({0, fy + wh + rh + 0.04f, 0}, {0.22f, 0.16f, d + 1.0f});
+    // Rosette im Frontgiebel: Steinring, Speichen, bunte Felder (leuchten nachts)
+    const Vec3 c{0, fy + wh + 1.55f, hd + 0.03f};
+    b.setColorJitter(0.04f);
+    b.setColor(kStone);
+    for (int k = 0; k < 16; ++k) {
+        const float a = static_cast<float>(k) / 16.0f * 2.0f * kPi;
+        b.box(c + Vec3{std::cos(a) * 0.82f, std::sin(a) * 0.82f, 0.04f}, {0.3f, 0.3f, 0.12f});
+    }
+    const uint32_t colors[] = {0x2E4A9A, 0x9A2A2A, 0xC89A3A, 0x2E7A5A};
+    b.setGlow(1.0f);
+    b.setColorJitter(0.08f);
+    b.setColor(0x1E1A16);
+    b.box(c, {1.45f, 1.45f, 0.06f});
+    for (int k = 0; k < 8; ++k) {
+        const float a = (static_cast<float>(k) + 0.5f) / 8.0f * 2.0f * kPi;
+        b.setColor(colors[k % 4]);
+        b.box(c + Vec3{std::cos(a) * 0.48f, std::sin(a) * 0.48f, 0.035f}, {0.3f, 0.3f, 0.04f});
+    }
+    b.setColor(colors[2]);
+    b.box(c + Vec3{0, 0, 0.04f}, {0.32f, 0.32f, 0.04f});
+    b.setGlow(0.0f);
+    // Steinkreuz auf der Giebelspitze
+    b.setColor(kStone);
+    b.box({0, fy + wh + rh + 0.55f, hd + 0.2f}, {0.16f, 0.9f, 0.16f});
+    b.box({0, fy + wh + rh + 0.7f, hd + 0.2f}, {0.56f, 0.16f, 0.16f});
 }
 
 void buildWell(MeshBuilder& b, Vec3 pos) {
@@ -699,27 +1053,46 @@ void WorldRenderer::build(const World& world) {
     for (size_t i = 0; i < world.houses().size(); ++i) {
         const House& h = world.houses()[i];
         HouseGfx& g = m_houses[i];
-        MeshBuilder shell, roof;
-        buildHouseShell(shell, h);
-        buildHouseRoof(roof, h);
+        MeshBuilder shell, roof, glass;
+        g.flames.clear();
+        if (h.chapel) {
+            const Vec2 rampEnd = world.houseToWorld(static_cast<int>(i), {0, h.depth * 0.5f + h.ramp});
+            const float rise = std::max(0.0f, h.floorY - world.terrainHeight(rampEnd.x, rampEnd.y));
+            buildChapelShell(shell, glass, h, rise, g.flames);
+            buildChapelRoof(roof, h);
+        } else {
+            buildHouseShell(shell, h);
+            buildHouseRoof(roof, h);
+        }
         shell.uploadTo(g.shell);
         roof.uploadTo(g.roof);
+        if (!glass.empty()) glass.uploadTo(g.glass);
+        g.chapel = h.chapel;
         g.position = h.position;
         g.yaw = h.yaw;
-        g.hinge = {-House::kDoorWidth * 0.5f + 0.05f, h.floorY - h.position.y, h.depth * 0.5f - House::kWall * 0.5f};
+        g.doorWidth = h.doorWidth;
+        g.hinge = {-h.doorWidth * 0.5f + 0.05f, h.floorY - h.position.y, h.depth * 0.5f - House::kWall * 0.5f};
         g.hearth = h.hearth;
         g.center = {h.position.x, h.floorY + h.wallHeight, h.position.z};
         g.width = h.width;
         g.depth = h.depth;
         g.height = h.wallHeight;
+        if (h.chapel) {
+            const Vec2 nave = world.houseToWorld(static_cast<int>(i), {0, 0.6f});
+            g.naveLight = {nave.x, h.floorY + 2.6f, nave.y};
+            const Mat4 m = eng::trs(h.position, h.yaw);
+            for (Vec3& f : g.flames) f = m.transformPoint(f);
+        }
     }
-    MeshBuilder door, reinforced;
-    buildDoorLeaf(door, false);
-    buildDoorLeaf(reinforced, true);
+    MeshBuilder door, reinforced, chapelDoor, chapelReinforced;
+    buildDoorLeaf(door, false, House::kDoorWidth - 0.1f, 1.96f);
+    buildDoorLeaf(reinforced, true, House::kDoorWidth - 0.1f, 1.96f);
+    buildDoorLeaf(chapelDoor, false, chapel::kDoorWidth * 0.5f - 0.06f, chapel::kDoorHeight - 0.08f);
+    buildDoorLeaf(chapelReinforced, true, chapel::kDoorWidth * 0.5f - 0.06f, chapel::kDoorHeight - 0.08f);
     door.uploadTo(m_door);
     reinforced.uploadTo(m_doorReinforced);
-    buildChapel(builders[static_cast<size_t>(chunkOf(world.chapel().x, world.chapel().z))], world.chapel(),
-                world.chapelYaw());
+    chapelDoor.uploadTo(m_chapelDoor);
+    chapelReinforced.uploadTo(m_chapelDoorReinforced);
     buildWell(builders[static_cast<size_t>(chunkOf(world.well().x, world.well().z))], world.well());
     buildBell(builders[static_cast<size_t>(chunkOf(world.bell().x, world.bell().z))], world.bell());
     m_bonfire = world.bonfire();
@@ -835,16 +1208,48 @@ void WorldRenderer::drawHouses(eng::Renderer3D& r, float night, float time) cons
             continue;
         }
         if (static_cast<int>(i) != m_hiddenRoof) r.draw(g.roof, m, burning ? Color{0.55f, 0.45f, 0.4f, 1.0f} : Color{1, 1, 1, 1});
+        // Buntglas leuchtet von selbst und wirft keinen Schatten: tagsüber von innen hell, nachts von außen (Kerzenschein)
+        if (g.glass.valid()) {
+            const bool within = static_cast<int>(i) == m_hiddenRoof;
+            const float glow = within ? eng::lerp(0.32f, 0.05f, night) : eng::lerp(0.16f, 0.36f, night);
+            r.draw(g.glass, m, burning ? Color{0.7f, 0.55f, 0.45f, 1.0f} : Color{1, 1, 1, 1}, glow, false);
+        }
 
-        // Tür: offen, zu oder eingeschlagen
-        const eng::Mesh& leaf = (g.flags & DoorReinforced) ? m_doorReinforced : m_door;
+        // Tür: offen, zu oder eingeschlagen (die Kapelle hat zwei Flügel)
+        const bool reinforced = g.flags & DoorReinforced;
+        const eng::Mesh& leaf = g.chapel ? (reinforced ? m_chapelDoorReinforced : m_chapelDoor) : (reinforced ? m_doorReinforced : m_door);
         if (g.flags & DoorBroken) {
-            r.draw(leaf, m * Mat4::translation({-0.45f, g.hinge.y + 0.05f, g.hinge.z - 0.3f}) * Mat4::rotationY(0.35f) *
-                             Mat4::rotationX(-kPi * 0.5f),
-                   Color{0.75f, 0.7f, 0.65f, 1.0f});
+            const Color splinters{0.75f, 0.7f, 0.65f, 1.0f};
+            if (g.chapel) {
+                for (float s : {-1.0f, 1.0f})
+                    r.draw(leaf, m * Mat4::translation({s * 0.95f - 0.4f, g.hinge.y + 0.05f, g.hinge.z - 0.4f - 0.5f * (s + 1.0f)}) *
+                                     Mat4::rotationY(0.35f * s) * Mat4::rotationX(-kPi * 0.5f),
+                           splinters);
+            } else {
+                r.draw(leaf, m * Mat4::translation({-0.45f, g.hinge.y + 0.05f, g.hinge.z - 0.3f}) * Mat4::rotationY(0.35f) *
+                                 Mat4::rotationX(-kPi * 0.5f),
+                       splinters);
+            }
         } else {
             const float angle = eng::smoothstep(0.0f, 1.0f, g.door) * kPi * 0.5f * 0.94f;
             r.draw(leaf, m * Mat4::translation(g.hinge) * Mat4::rotationY(angle));
+            if (g.chapel) r.draw(leaf, m * Mat4::translation({-g.hinge.x, g.hinge.y, g.hinge.z}) * Mat4::rotationY(kPi - angle));
+        }
+
+        // Kapelle: Kerzen auf dem Altar, an den Ständern und Wänden, nachts heller
+        if (g.chapel && !burning) {
+            const float fi = static_cast<float>(i);
+            const float flicker = 0.88f + 0.12f * std::sin(time * 9.0f + fi) * std::sin(time * 5.3f + fi * 1.7f);
+            r.light({g.hearth, 8.5f, {1.0f, 0.55f, 0.22f}, (0.7f + 2.6f * night) * flicker});
+            r.light({g.naveLight, 10.5f, {1.0f, 0.5f, 0.18f}, (0.4f + 2.0f * night) * flicker});
+            for (size_t k = 0; k < g.flames.size(); ++k) {
+                const float fk = static_cast<float>(k);
+                const float sway = std::sin(time * 7.0f + fk * 1.9f) * 0.006f;
+                const float pulse = 0.85f + 0.15f * std::sin(time * 13.0f + fk * 2.3f);
+                r.particle(g.flames[k] + Vec3{sway, 0, sway * 0.5f}, 0.09f * pulse, Vec3{4.5f, 2.6f, 0.9f}, 1.0f);
+                r.particle(g.flames[k] + Vec3{0, 0.02f, 0}, 0.4f, Vec3{1.6f, 0.75f, 0.22f} * (0.3f + 0.7f * night), 0.45f * pulse);
+            }
+            continue;
         }
 
         // Kaminfeuer: brennt immer, nachts heller

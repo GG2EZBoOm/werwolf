@@ -99,6 +99,13 @@ uint8_t Bot::strongestSuspect(const Match& match, float threshold) const {
 
 void Bot::chooseWanderTarget(const Match& match) {
     const World& w = match.world();
+    // Manche setzen sich eine Weile in eine Kirchenbank
+    if (const int chapelHouse = w.chapelIndex(); chapelHouse >= 0 && m_rng.chance(0.12f)) {
+        const int gap = std::min(static_cast<int>(m_rng.uniform(0.0f, static_cast<float>(chapel::kPewRows - 1))), chapel::kPewRows - 2);
+        const float side = m_rng.chance(0.5f) ? -1.0f : 1.0f;
+        m_target = w.houseToWorld(chapelHouse, {side * m_rng.uniform(1.3f, 2.6f), chapel::pewZ(gap) + chapel::kPewSpacing * 0.5f});
+        return;
+    }
     std::vector<Vec2> spots = {{0, 9},
                                {w.well().x, w.well().z + 2.0f},
                                {w.bell().x + 2.0f, w.bell().z},
@@ -367,7 +374,7 @@ Bot::Nav Bot::navigate(Match& match, const GameView& view, Vec2 target, float st
     const int there = w.houseAt(target, 0.15f);
     if (here == there) {
         if ((target - pos).length() <= stopDist) return Nav::Arrived;
-        wish = steerTo(target);
+        wish = steerTo(here >= 0 ? w.routeInside(here, pos, target) : target);
         return Nav::Moving;
     }
     // Erst durch die Tür des Hauses, das wir verlassen bzw. betreten
@@ -375,12 +382,13 @@ Bot::Nav Bot::navigate(Match& match, const GameView& view, Vec2 target, float st
     const House& h = w.houses()[static_cast<size_t>(house)];
     const Vec2 local = toLocal(h, pos);
     const float hd = h.depth * 0.5f;
-    const bool aligned = std::fabs(local.x) < 0.42f;
+    const bool aligned = std::fabs(local.x) < h.doorWidth * 0.5f - 0.15f;
     const Vec2 outside{h.door.x, h.door.z};
     const Vec2 inside{h.doorInside.x, h.doorInside.z};
+    const float doorStep = toLocal(h, outside).y; // vor der Kapelle liegt der Türpunkt hinter der Treppe
     Vec2 waypoint;
-    if (here >= 0) waypoint = (aligned && local.y > hd - 1.15f) ? outside : inside;
-    else waypoint = (aligned && local.y < hd + 1.35f && local.y > hd - 0.6f) ? inside : outside;
+    if (here >= 0) waypoint = (aligned && local.y > hd - 1.15f) ? outside : w.routeInside(here, pos, inside);
+    else waypoint = (aligned && local.y < doorStep + 0.15f && local.y > hd - 0.6f) ? inside : outside;
 
     if (static_cast<size_t>(house) < match.doors().size() && !doorPassable(match.doors()[static_cast<size_t>(house)]) &&
         (w.doorCenter(house) - pos).length() < kDoorRange) {
@@ -676,7 +684,7 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
             if (m_douseHouse < 0) {
                 std::vector<int> options;
                 for (size_t i = 0; i < match.doors().size(); ++i)
-                    if (static_cast<int>(i) != me.house && !(view.doused & (1u << i)) &&
+                    if (static_cast<int>(i) != me.house && !w.houses()[i].chapel && !(view.doused & (1u << i)) &&
                         !(match.doors()[i].flags & (DoorBurning | DoorBurnt)))
                         options.push_back(static_cast<int>(i));
                 if (!options.empty()) m_douseHouse = m_rng.pick(options);

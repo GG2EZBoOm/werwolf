@@ -36,7 +36,8 @@ std::vector<SoundCue> SoundEvents::update(const World& world, const std::vector<
             if (actor.distance >= stride) {
                 actor.distance = std::fmod(actor.distance, stride);
                 Sound sound = Sound::StepGrass;
-                if (world.houseAt(position) >= 0) sound = Sound::StepWood;
+                if (const int house = world.houseAt(position); house >= 0)
+                    sound = house == world.chapelIndex() ? Sound::StepStone : Sound::StepWood;
                 else if (world.squareFactor(e.x, e.z) > 0.5f || world.pathFactor(e.x, e.z) > 0.5f) sound = Sound::StepStone;
                 cues.push_back({sound, position, (e.flags & EntitySprint) ? 0.8f : 0.58f, 14.0f});
             }

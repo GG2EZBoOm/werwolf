@@ -113,10 +113,11 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
     m_settings.sanitize();
     m_rng.seed(seed);
 
-    // Häuser verteilen: jeder bekommt eines, bei vielen Spielern wird geteilt
+    // Häuser verteilen: jeder bekommt eines, bei vielen Spielern wird geteilt (die Kapelle gehört allen)
     const size_t houseCount = std::min<size_t>(world.houses().size(), 32);
     std::vector<uint8_t> homes;
-    for (size_t i = 0; i < houseCount; ++i) homes.push_back(static_cast<uint8_t>(i));
+    for (size_t i = 0; i < houseCount; ++i)
+        if (!world.houses()[i].chapel) homes.push_back(static_cast<uint8_t>(i));
     m_rng.shuffle(homes);
 
     m_players.clear();
@@ -246,12 +247,13 @@ std::string Match::nameOf(uint8_t id) const {
     return p ? p->name : std::string("?");
 }
 
-std::string Match::houseLabel(int house) const {
+std::string Match::houseLabel(int house, bool dative) const {
+    if (m_world && house == m_world->chapelIndex()) return dative ? "der Kapelle" : "die Kapelle";
     std::vector<std::string> owners;
     for (const Player& p : m_players)
         if (p.house == house) owners.push_back(p.name);
-    if (owners.empty()) return "ein leerstehendes Haus";
-    return "das Haus von " + joinNames(owners);
+    if (owners.empty()) return dative ? "einem leerstehenden Haus" : "ein leerstehendes Haus";
+    return (dative ? "dem Haus von " : "das Haus von ") + joinNames(owners);
 }
 
 int Match::sectOf(const Player& p) const {
@@ -343,7 +345,7 @@ bool Match::doorwayOccupied(int house) const {
     for (const Player& p : m_players) {
         if (!p.alive) continue;
         const Vec2 local = m_world->worldToHouse(house, {p.position.x, p.position.z});
-        if (std::fabs(local.x) < House::kDoorWidth * 0.5f + kPlayerRadius &&
+        if (std::fabs(local.x) < h.doorWidth * 0.5f + kPlayerRadius &&
             std::fabs(local.y - doorZ) < House::kWall * 0.5f + kPlayerRadius)
             return true;
     }
@@ -494,7 +496,7 @@ uint32_t Match::abilitiesFor(uint8_t id) const {
 
 std::string Match::checkDoor(const Player& p, uint8_t house, float range) const {
     if (house >= m_doors.size()) return "Hier ist keine Tür.";
-    if (m_doors[house].flags & DoorBurnt) return "Von diesem Haus ist nur Asche übrig.";
+    if (m_doors[house].flags & DoorBurnt) return house == m_world->chapelIndex() ? "Von der Kapelle ist nur Asche übrig." : "Von diesem Haus ist nur Asche übrig.";
     const Vec2 door = m_world->doorCenter(house);
     if ((Vec2{p.position.x, p.position.z} - door).length() > range + kRangeTolerance) return "Geh näher an die Tür.";
     return {};
@@ -685,8 +687,8 @@ std::string Match::checkInteraction(uint8_t id, Interaction kind, uint8_t target
             return "Für heute Nacht hast du genug getan.";
         }
         if (std::string why = checkDoor(*p, targetId, kDoorRange); !why.empty()) return why;
-        if (m_doused & (1u << targetId)) return "Dieses Haus ist schon mit Öl getränkt.";
-        if (m_doors[targetId].flags & DoorBurning) return "Dieses Haus brennt bereits.";
+        if (m_doused & (1u << targetId)) return targetId == m_world->chapelIndex() ? "Die Kapelle ist schon mit Öl getränkt." : "Dieses Haus ist schon mit Öl getränkt.";
+        if (m_doors[targetId].flags & DoorBurning) return targetId == m_world->chapelIndex() ? "Die Kapelle brennt bereits." : "Dieses Haus brennt bereits.";
         return {};
     }
     case Interaction::Ignite:
@@ -1135,7 +1137,7 @@ std::string Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
             if (!(m_doused & (1u << i))) continue;
             m_doors[i].flags |= DoorBurning;
             m_fire[i] = kFireSeconds;
-            names.push_back(houseLabel(static_cast<int>(i)));
+            names.push_back(houseLabel(static_cast<int>(i), true));
         }
         m_doused = 0;
         narrate(std::format("Feuer! Flammen schlagen aus {}! Wer drinnen ist, muss sofort hinaus!", joinNames(names)));

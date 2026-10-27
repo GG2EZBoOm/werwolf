@@ -40,16 +40,36 @@ struct House {
     uint32_t roofColor = 0x7A3B2E;
     uint32_t timberColor = 0x4A3426;
     bool chimney = true;
+    bool chapel = false; // die Kapelle: gehört niemandem, Steinboden, Bänke und Altar
     int variant = 0;
     Vec3 door;         // Weltposition vor der Tür (draußen)
     Vec3 doorInside;   // direkt hinter der Tür (drinnen)
-    Vec3 hearth;       // Kaminfeuer (Lichtquelle)
+    Vec3 hearth;       // Kaminfeuer bzw. Altarkerzen (Lichtquelle)
     float floorY = 0;  // Höhe des Fußbodens innen
+    float doorWidth = kDoorWidth;
+    float ramp = 1.3f; // Länge der Rampe vor der Tür
 
     static constexpr float kWall = 0.24f;      // Wandstärke
     static constexpr float kDoorWidth = 1.15f;
     static constexpr float kFloorOffset = 0.35f;
 };
+
+// Grundriss der Kapelle (lokal: x quer, z zur Tür hin). Kollision und Grafik nutzen dieselben Maße.
+namespace chapel {
+constexpr float kWidth = 8.4f, kDepth = 14.4f, kWallHeight = 5.6f, kRoofHeight = 4.6f;
+constexpr float kDoorWidth = 1.8f, kDoorHeight = 2.9f;
+constexpr float kChancelZ = -3.5f;   // dahinter (Richtung Altar) liegt der Altarraum eine Stufe höher
+constexpr float kChancelStep = 0.22f;
+constexpr int kPewRows = 6;
+constexpr float kPewFirstZ = -2.3f, kPewSpacing = 1.4f; // Mitte der ersten Bankreihe, Abstand der Reihen
+constexpr float kPewInner = 0.9f, kPewOuter = 3.0f, kPewHalfDepth = 0.27f; // Mittelgang bis Seitengang
+constexpr Vec2 kAltar{0.0f, -5.7f}, kAltarHalf{1.0f, 0.42f};
+constexpr Vec2 kCandleStand{2.2f, -5.0f}; // gespiegelt auf beiden Seiten
+constexpr Vec2 kLectern{-2.7f, -4.3f};
+constexpr Vec2 kFont{-2.9f, 6.0f};        // Taufbecken neben dem Eingang
+constexpr float kTowerSize = 4.0f;        // Turm hinter der Altarwand
+constexpr float pewZ(int row) { return kPewFirstZ + kPewSpacing * static_cast<float>(row); }
+} // namespace chapel
 
 enum class TreeKind : uint8_t { Pine, Broadleaf, Dead };
 
@@ -127,6 +147,10 @@ public:
     // Lokale Hauskoordinaten (x quer, z zur Tür hin) in Weltkoordinaten
     Vec2 houseToWorld(int house, Vec2 local) const;
     Vec2 worldToHouse(int house, Vec2 world) const;
+    // Nächster Wegpunkt innerhalb eines Gebäudes, um die Einrichtung herum (z. B. die Kirchenbänke)
+    Vec2 routeInside(int house, Vec2 from, Vec2 to) const;
+    // Index der Kapelle in houses(), sonst -1
+    int chapelIndex() const { return m_chapelIndex; }
 
     Vec3 spawnPoint(int index, int count) const;
     Vec3 bonfire() const { return ground(0.0f, 0.0f); }
@@ -142,20 +166,26 @@ public:
     const std::vector<Vec2>& pathPoints() const { return m_pathPoints; }
 
 private:
+    float naturalHeight(float x, float z) const;
     float rawHeight(float x, float z) const;
     void buildHeights();
     void placeVillage();
+    void placeChapel(Vec2 at, float yaw);
     void placeNature();
     void addCircle(Vec2 c, float r);
     void addBox(Vec2 c, Vec2 half, float yaw, bool opaque = false);
     void addHouseColliders(const House& h);
     Collider doorCollider(int house) const;
     void buildGrid();
+    void buildChapelRoutes();
     bool freeSpot(Vec2 p, float r) const;
     bool pushOut(const Collider& c, Vec2& pos, float radius) const;
+    // Frei von den Hindernissen im Bereich [first, last) der Kollisionsliste?
+    bool segmentClear(Vec2 a, Vec2 b, float radius, size_t first, size_t last) const;
 
     uint32_t m_seed = 0;
     std::vector<float> m_heights;
+    float m_yardHeight = 0.0f; // Höhe der Kirchhof-Terrasse
     std::vector<House> m_houses;
     std::vector<Tree> m_trees;
     std::vector<Prop> m_props;
@@ -163,6 +193,12 @@ private:
     std::vector<Vec2> m_pathPoints; // Polylinien als Paare (Start, Ende)
     Vec3 m_well, m_bell, m_chapel;
     float m_chapelYaw = 0.0f;
+    int m_chapelIndex = -1;
+
+    // Wegenetz in der Kapelle: Knoten (Welt), kürzeste Abstände zwischen allen Knoten
+    size_t m_chapelColliders[2] = {0, 0};
+    std::vector<Vec2> m_routeNodes;
+    std::vector<float> m_routeDist;
 
     // Raster zur schnellen Kollisionssuche
     static constexpr float kGridCell = 8.0f;

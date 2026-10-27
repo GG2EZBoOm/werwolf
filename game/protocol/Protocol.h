@@ -10,7 +10,7 @@
 // Jede Nachricht beginnt mit einem Typ-Byte, danach folgen die Felder.
 namespace ww::proto {
 
-constexpr uint16_t kVersion = 4;
+constexpr uint16_t kVersion = 5;
 constexpr uint16_t kDefaultPort = 27777;
 constexpr size_t kMaxNameLength = 16;  // Codepoints
 constexpr size_t kMaxChatLength = 240; // Codepoints

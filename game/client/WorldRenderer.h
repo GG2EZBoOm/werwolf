@@ -33,10 +33,15 @@ private:
     struct HouseGfx {
         eng::Mesh shell; // Fundament, Wände, Einrichtung
         eng::Mesh roof;  // Dach und Giebel (ausblendbar)
+        eng::Mesh glass; // Buntglasfenster der Kapelle (leuchten leicht)
+        bool chapel = false;
         Vec3 position;
         float yaw = 0.0f;
-        Vec3 hinge;      // Türangel (lokal)
-        Vec3 hearth;     // Kaminfeuer (Welt)
+        Vec3 hinge;      // Türangel (lokal), bei der Kapelle die des linken Flügels
+        float doorWidth = House::kDoorWidth;
+        Vec3 hearth;     // Kaminfeuer bzw. Altarkerzen (Welt)
+        Vec3 naveLight;  // Kerzenschein im Kirchenschiff (Welt)
+        std::vector<Vec3> flames; // Kerzenflammen (Welt)
         Vec3 center;     // Mitte auf Traufhöhe (Welt) für Feuer
         float width = 6.0f, depth = 5.0f, height = 3.0f;
         float door = 0.0f; // 0 = zu, 1 = offen (animiert)
@@ -49,6 +54,8 @@ private:
     std::vector<HouseGfx> m_houses;
     eng::Mesh m_door;
     eng::Mesh m_doorReinforced;
+    eng::Mesh m_chapelDoor;
+    eng::Mesh m_chapelDoorReinforced;
     int m_hiddenRoof = -1;
     std::vector<Vec3> m_lanterns;
     std::vector<Vec3> m_fireflies;
