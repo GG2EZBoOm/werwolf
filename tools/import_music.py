@@ -1,6 +1,6 @@
 """Import the user's licensed ZapSplat packs for embedding in the Windows client.
 
-Usage: python tools/import_music.py <horror_stingers.zip> <ticking_tension.zip>
+Usage: python tools/import_music.py <horror_stingers.zip> <a_place_of_contemplation.zip>
 Requires NumPy. Originals remain untouched; generated WAVs are ignored by Git.
 """
 import io
@@ -13,8 +13,8 @@ import zipfile
 import numpy as np
 
 TRACKS = (
-    (1, "music_dark_harmonics_Ticking_Tension_02_Ticking_Tension_no1_Stripped_Back_Version.wav", "day_tension_1.wav"),
-    (1, "music_dark_harmonics_Ticking_Tension_04_Ticking_Tension_no2_Stripped_Back_Version.wav", "day_tension_2.wav"),
+    (1, "music_DeepTheme_Audio_A_Brief_Pause_062.wav", "day_contemplation_1.wav"),
+    (1, "music_DeepTheme_Audio_Linger_065.wav", "day_contemplation_2.wav"),
     (0, "music_DeepTheme_Audio_stinger_Foreshadow_079.wav", "night_foreshadow.wav"),
     (0, "music_DeepTheme_Audio_Eyes_In_The_Dark_14.wav", "night_eyes_in_the_dark.wav"),
     (0, "music_DeepTheme_Audio_stinger_Creeping_Death_074.wav", "night_creeping_death.wav"),

@@ -1,5 +1,6 @@
 #include "client/App.h"
 #include "client/MusicResources.h"
+#include "client/FootstepResources.h"
 #include "engine/core/Log.h"
 
 #include <windows.h>
@@ -8,6 +9,19 @@
 #include <cmath>
 
 namespace ww {
+namespace {
+#if defined(WERWOLF_HAS_MUSIC) || defined(WERWOLF_HAS_FOOTSTEPS)
+eng::audio::ClipPtr readAudioResource(int id) {
+    const HMODULE module = GetModuleHandleW(nullptr);
+    const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(id), RT_RCDATA);
+    if (!resource) return {};
+    const HGLOBAL loaded = LoadResource(module, resource);
+    const auto* bytes = loaded ? static_cast<const uint8_t*>(LockResource(loaded)) : nullptr;
+    return bytes ? eng::audio::readWav({bytes, SizeofResource(module, resource)}) : eng::audio::ClipPtr{};
+}
+#endif
+} // namespace
+
 void App::initAudio() {
     m_sounds = std::make_unique<SoundBank>();
     m_audioReady = m_audioDevice.start(m_audio);
@@ -15,15 +29,18 @@ void App::initAudio() {
 #ifdef WERWOLF_HAS_MUSIC
     const int resourceIds[] = {WW_MUSIC_DAY1, WW_MUSIC_DAY2, WW_MUSIC_NIGHT1, WW_MUSIC_NIGHT2, WW_MUSIC_NIGHT3};
     for (size_t i = 0; i < m_music.size(); ++i) {
-        const HMODULE module = GetModuleHandleW(nullptr);
-        const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(resourceIds[i]), RT_RCDATA);
-        if (!resource) continue;
-        const HGLOBAL loaded = LoadResource(module, resource);
-        const auto* bytes = loaded ? static_cast<const uint8_t*>(LockResource(loaded)) : nullptr;
-        if (bytes) m_music[i] = eng::audio::readWav({bytes, SizeofResource(module, resource)});
+        m_music[i] = readAudioResource(resourceIds[i]);
         if (m_music[i]) eng::log::info("Musik {} geladen: {:.1f} s, Stereo", i + 1, m_music[i]->seconds());
         else eng::log::warn("Musik-Ressource {} konnte nicht gelesen werden", resourceIds[i]);
     }
+#endif
+#ifdef WERWOLF_HAS_FOOTSTEPS
+    std::vector<eng::audio::ClipPtr> footsteps;
+    for (size_t i = 0; i < SoundBank::kFootstepCount; ++i)
+        footsteps.push_back(readAudioResource(WW_FOOTSTEP_FIRST + static_cast<int>(i)));
+    if (m_sounds->setFootsteps(std::move(footsteps)))
+        eng::log::info("Schrittaufnahmen geladen: {} Varianten", SoundBank::kFootstepCount);
+    else eng::log::warn("Schrittaufnahmen konnten nicht vollständig gelesen werden");
 #endif
     const Sound loops[] = {Sound::Wind, Sound::Crickets, Sound::Birds, Sound::Fire};
     for (size_t i = 0; i < m_ambienceVoices.size(); ++i)
@@ -42,7 +59,7 @@ void App::applyAudioSettings() {
 void App::playSound(Sound sound, float gain, float pan, float pitch) {
     if (!m_audioReady || m_config.muted || m_config.masterVolume == 0 || m_config.effectsVolume == 0 ||
         (m_config.muteUnfocused && (!m_window.hasFocus() || m_window.isMinimized()))) return;
-    m_audio.play((*m_sounds)[sound], eng::audio::Bus::Effects, gain, pan, pitch);
+    m_audio.play(m_sounds->choose(sound, m_audioRng), eng::audio::Bus::Effects, gain, pan, pitch);
     if (sound == Sound::Bell || sound == Sound::Death || sound == Sound::Reveal || sound == Sound::Magic || sound == Sound::Victory)
         m_musicDuckUntil = m_time + 2.0;
 }
@@ -115,7 +132,7 @@ void App::updateAudio() {
             entities.push_back(e);
         };
         const uint8_t flags = static_cast<uint8_t>((m_playerAttack > 0.0f ? EntityAttack : 0) |
-                                                  (m_player.speed > kWalkSpeed + 0.5f ? EntitySprint : 0));
+                                                  (m_player.velocity.length() > kWalkSpeed + 0.5f ? EntitySprint : 0));
         add(0, m_player, m_playerWolf, flags);
         for (const SandboxNpc& npc : m_npcs) add(npc.id, npc.mover, 0.0f, 0);
     }
@@ -125,8 +142,11 @@ void App::updateAudio() {
         if (distance >= cue.range) continue;
         const float falloff = 1.0f - distance / cue.range;
         const float occlusion = m_world.lineBlocked(listener, cue.position, closedDoorMask(doors)) ? 0.4f : 1.0f;
-        const float pitch = m_audioRng.uniform(0.92f, 1.08f);
-        playSound(cue.sound, cue.gain * falloff * falloff * occlusion, panAt(cue.position), pitch);
+        const bool footstep = isFootstep(cue.sound);
+        const float pitch = footstep ? m_audioRng.uniform(0.98f, 1.02f) : m_audioRng.uniform(0.92f, 1.08f);
+        const float variation = footstep ? m_audioRng.uniform(0.92f, 1.0f) : 1.0f;
+        const float surface = cue.sound == Sound::StepGrass ? 0.85f : cue.sound == Sound::StepWood ? 0.95f : 1.0f;
+        playSound(cue.sound, cue.gain * falloff * falloff * occlusion * variation * surface, panAt(cue.position), pitch);
     }
 }
 
@@ -139,7 +159,7 @@ void App::updateMusic(bool inWorld, bool night) {
     const float duck = m_time < m_musicDuckUntil ? 0.4f : 1.0f;
     const float gathering = match && (isGatheringPhase(phase) || m_pauseOpen || m_journalOpen) ? 0.65f : 1.0f;
     const float follow = 1.0f - std::exp(-m_dt * 1.3f);
-    m_dayMusicGain += ((dayActive ? 0.85f * duck * gathering : 0.0f) - m_dayMusicGain) * follow;
+    m_dayMusicGain += ((dayActive ? 0.5f * duck * gathering : 0.0f) - m_dayMusicGain) * follow;
     m_nightMusicGain += ((nightActive ? 0.6f * duck : 0.0f) - m_nightMusicGain) * follow;
 
     // Alternate the two day tracks with a 2.5 second overlap, preserving stereo.

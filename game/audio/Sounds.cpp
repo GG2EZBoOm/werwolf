@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <numeric>
 
 namespace ww {
 namespace {
@@ -150,5 +151,28 @@ eng::audio::ClipPtr synthesize(Sound sound) {
 
 SoundBank::SoundBank() {
     for (size_t i = 0; i < m_clips.size(); ++i) m_clips[i] = synthesize(static_cast<Sound>(i));
+}
+
+bool SoundBank::setFootsteps(std::vector<eng::audio::ClipPtr> clips) {
+    if (clips.size() != kFootstepCount || std::any_of(clips.begin(), clips.end(), [](const auto& clip) {
+        return !clip || clip->channels != 1 || clip->samples.empty();
+    })) return false;
+    m_footsteps = std::move(clips);
+    m_stepOrder.resize(kFootstepCount);
+    std::iota(m_stepOrder.begin(), m_stepOrder.end(), size_t{0});
+    m_nextStep = m_lastStep = kFootstepCount;
+    return true;
+}
+
+eng::audio::ClipPtr SoundBank::choose(Sound sound, eng::Rng& rng) {
+    if (!isFootstep(sound) || m_footsteps.empty()) return (*this)[sound];
+    if (m_nextStep == kFootstepCount) {
+        rng.shuffle(m_stepOrder);
+        // Every recording plays once per shuffle, without a repeat at the boundary.
+        if (m_stepOrder.front() == m_lastStep) std::swap(m_stepOrder[0], m_stepOrder[1]);
+        m_nextStep = 0;
+    }
+    m_lastStep = m_stepOrder[m_nextStep++];
+    return m_footsteps[m_lastStep];
 }
 } // namespace ww

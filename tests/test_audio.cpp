@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <set>
 
 using namespace ww;
 using namespace eng::audio;
@@ -213,7 +214,7 @@ TEST(wav_reader_rejects_corruption_and_preserves_stereo) {
 
 #ifdef WERWOLF_TEST_MUSIC_DIR
 TEST(imported_music_files_decode_at_runtime) {
-    const char* names[] = {"day_tension_1.wav", "day_tension_2.wav", "night_foreshadow.wav",
+    const char* names[] = {"day_contemplation_1.wav", "day_contemplation_2.wav", "night_foreshadow.wav",
                            "night_eyes_in_the_dark.wav", "night_creeping_death.wav"};
     for (const char* name : names) {
         std::ifstream file(std::string(WERWOLF_TEST_MUSIC_DIR) + "/" + name, std::ios::binary);
@@ -222,8 +223,72 @@ TEST(imported_music_files_decode_at_runtime) {
         CHECK(clip != nullptr);
         if (!clip) continue;
         CHECK_EQ(clip->channels, 2u);
-        CHECK(clip->seconds() > 10 && clip->seconds() < 60);
+        const bool day = std::string_view(name).starts_with("day_");
+        CHECK(clip->seconds() > (day ? 80 : 10) && clip->seconds() < (day ? 120 : 60));
         CHECK(std::all_of(clip->samples.begin(), clip->samples.end(), [](float x) { return std::isfinite(x) && std::fabs(x) <= 0.86f; }));
+    }
+}
+#endif
+
+TEST(recorded_footsteps_replace_every_surface_and_do_not_repeat) {
+    SoundBank sounds;
+    eng::Rng rng(42);
+    std::vector<ClipPtr> recordings;
+    for (size_t i = 0; i < SoundBank::kFootstepCount; ++i)
+        recordings.push_back(constantClip(0.1f + static_cast<float>(i) * 0.01f));
+    CHECK(sounds.setFootsteps(recordings));
+    const Clip* previous = nullptr;
+    const Sound surfaces[] = {Sound::StepGrass, Sound::StepStone, Sound::StepWood};
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        std::set<const Clip*> used;
+        for (size_t i = 0; i < SoundBank::kFootstepCount; ++i) {
+            const auto selected = sounds.choose(surfaces[i % 3], rng);
+            CHECK(selected.get() != previous);
+            CHECK(std::find(recordings.begin(), recordings.end(), selected) != recordings.end());
+            used.insert(selected.get());
+            previous = selected.get();
+        }
+        CHECK_EQ(used.size(), SoundBank::kFootstepCount);
+    }
+    CHECK_EQ(sounds.choose(Sound::Bell, rng), sounds[Sound::Bell]);
+    auto incomplete = recordings;
+    incomplete[2].reset();
+    CHECK(!sounds.setFootsteps(incomplete));
+    incomplete.pop_back();
+    CHECK(!sounds.setFootsteps(incomplete));
+    const auto preserved = sounds.choose(Sound::StepGrass, rng);
+    CHECK(std::find(recordings.begin(), recordings.end(), preserved) != recordings.end());
+}
+
+#ifdef WERWOLF_TEST_FOOTSTEP_DIR
+TEST(imported_footsteps_decode_without_silence_or_clipping) {
+    SoundBank sounds;
+    std::vector<ClipPtr> clips;
+    for (size_t i = 1; i <= SoundBank::kFootstepCount; ++i) {
+        const std::string name = "footstep_" + std::string(i < 10 ? "0" : "") + std::to_string(i) + ".wav";
+        std::ifstream file(std::string(WERWOLF_TEST_FOOTSTEP_DIR) + "/" + name, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const auto clip = readWav(bytes);
+        CHECK(clip != nullptr);
+        if (!clip) continue;
+        CHECK_EQ(clip->channels, 1u);
+        CHECK(clip->seconds() > 0.2f && clip->seconds() < 0.9f);
+        CHECK(std::all_of(clip->samples.begin(), clip->samples.end(), [](float x) { return std::isfinite(x) && std::fabs(x) <= 0.721f; }));
+        CHECK_EQ(clip->samples.front(), 0.0f);
+        CHECK_EQ(clip->samples.back(), 0.0f);
+        const size_t onsetLimit = static_cast<size_t>(kSampleRate * 0.02);
+        CHECK(std::any_of(clip->samples.begin(), clip->samples.begin() + onsetLimit, [](float x) { return std::fabs(x) > 0.004f; }));
+        clips.push_back(clip);
+    }
+    CHECK(sounds.setFootsteps(clips));
+    eng::Rng rng(15);
+    Mixer mixer;
+    mixer.setVolume(0.75f, 0.85f, 0, false, 0);
+    std::vector<int16_t> pcm(kSampleRate / 3 * 2);
+    for (size_t i = 0; i < clips.size(); ++i) {
+        mixer.play(sounds.choose(Sound::StepStone, rng), Bus::Effects, 0.58f, 0, 1);
+        mixer.render(pcm);
+        CHECK(energy(pcm) > 10000);
     }
 }
 #endif

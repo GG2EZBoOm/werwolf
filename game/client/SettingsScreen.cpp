@@ -171,7 +171,7 @@ bool App::drawSettings(const Rect& area) {
         volume("settings/master", "Gesamtlautstärke", "Lautstärke aller Spielgeräusche. Null ist stumm.", m_config.masterVolume);
         volume("settings/effects", "Effekte", "Schritte, Türen, Verwandlungen, Spielereignisse und Menüs.", m_config.effectsVolume);
         volume("settings/ambience", "Umgebung", "Wind, Vögel, Grillen und das Knistern der Feuer.", m_config.ambienceVolume);
-        volume("settings/music", "Musik", "Spannungsmusik am Tag und Horror-Klänge in der Nacht.", m_config.musicVolume);
+        volume("settings/music", "Musik", "Ruhige Musik am Tag und Horror-Klänge in der Nacht.", m_config.musicVolume);
         onOff("settings/muted", "Stummschalten", "Schaltet alle Spielgeräusche aus, ohne die Regler zu verändern.", m_config.muted);
         onOff("settings/background", "Im Hintergrund stumm", "Blendet den Ton aus, sobald du zu einem anderen Fenster wechselst.", m_config.muteUnfocused);
         inner.takeTop(14.0f);

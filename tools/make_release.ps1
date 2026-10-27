@@ -26,9 +26,15 @@ Write-Host "Release $tag für $Repo"
 
 # Ein öffentliches Release muss die lokal lizenzierten Musikdateien enthalten.
 $musicDir = Join-Path $root "game\assets\audio"
-foreach ($track in @("day_tension_1", "day_tension_2", "night_foreshadow", "night_eyes_in_the_dark", "night_creeping_death")) {
+foreach ($track in @("day_contemplation_1", "day_contemplation_2", "night_foreshadow", "night_eyes_in_the_dark", "night_creeping_death")) {
     if (-not (Test-Path (Join-Path $musicDir "$track.wav"))) {
         throw "Musikdatei $track.wav fehlt. Vor dem Release tools/import_music.py mit den beiden lizenzierten Paketen ausführen."
+    }
+}
+foreach ($step in 1..20) {
+    $footstepName = 'footstep_{0:D2}.wav' -f $step
+    if (-not (Test-Path (Join-Path $musicDir $footstepName))) {
+        throw "Schrittaufnahme $footstepName fehlt. Vor dem Release tools/import_footsteps.py ausführen."
     }
 }
 
