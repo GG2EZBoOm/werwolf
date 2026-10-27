@@ -352,15 +352,6 @@ void App::renderBackdrop3D() {
     cam.target = m_menuCamTarget;
     eng::Environment env = m_worldRenderer.environment(0.93f, cam.target, t);
     applyGraphics(env);
-    // Tiefenunschärfe: im Hauptmenü bleibt das Dorf rechts scharf, sonst verschwimmt es hinter den Blättern
-    if (m_screen == Screen::Menu) {
-        env.focusBlur = m_menuPage == MenuPage::None ? 0.75f : 1.0f;
-        env.focusCenter = {0.7f, 0.55f};
-        env.focusRadius = m_menuPage == MenuPage::None ? 0.16f : 0.02f;
-    } else {
-        env.focusBlur = 1.0f;
-        env.focusRadius = 0.0f;
-    }
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), cam, env);
     m_worldRenderer.setHiddenRoof(-1);
     m_worldRenderer.draw(m_renderer3d, env, t);

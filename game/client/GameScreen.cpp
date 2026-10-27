@@ -531,10 +531,6 @@ void App::renderMatch3D() {
     m_lastCamera = m_camera.camera(m_player.position + Vec3{0, alive ? 0.0f : 0.4f, 0}, m_world);
     eng::Environment env = m_worldRenderer.environment(m_timeOfDay, m_player.position, t);
     applyGraphics(env);
-    // Hinter Tagebuch, Pause, Rollenkarte und Epilog verschwimmt das Dorf
-    const bool overlay = m_journalOpen || m_pauseOpen || !m_revealDone || v.phase == Phase::GameOver;
-    env.focusBlur = m_kit.anim("hud/blur", overlay ? 1.0f : 0.0f, 3.0f);
-    env.focusRadius = 0.0f;
     if (!alive && v.phase != Phase::GameOver) {
         env.saturation *= 0.45f;
         env.gradeTint = mul(env.gradeTint, Vec3{0.85f, 0.95f, 1.2f});
