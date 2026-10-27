@@ -1,0 +1,6 @@
+#include "@CMAKE_CURRENT_SOURCE_DIR@/client/MusicResources.h"
+WW_MUSIC_DAY1 RCDATA "@WERWOLF_MUSIC_ASSET_DIR@/day_tension_1.wav"
+WW_MUSIC_DAY2 RCDATA "@WERWOLF_MUSIC_ASSET_DIR@/day_tension_2.wav"
+WW_MUSIC_NIGHT1 RCDATA "@WERWOLF_MUSIC_ASSET_DIR@/night_foreshadow.wav"
+WW_MUSIC_NIGHT2 RCDATA "@WERWOLF_MUSIC_ASSET_DIR@/night_eyes_in_the_dark.wav"
+WW_MUSIC_NIGHT3 RCDATA "@WERWOLF_MUSIC_ASSET_DIR@/night_creeping_death.wav"

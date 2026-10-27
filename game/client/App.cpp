@@ -73,6 +73,7 @@ bool App::init() {
     m_kit.init();
     ensureWorld(kBackdropSeed);
     loadFonts(uiScale());
+    initAudio();
     applySettings();
     m_menuEnteredAt = eng::nowSeconds();
     eng::net::initialize();
@@ -395,6 +396,8 @@ void App::takeScreenshot(const std::filesystem::path& path) {
 }
 
 void App::shutdown() {
+    m_ui.onActivate = {};
+    m_audioDevice.stop();
     m_updater.cancel();
     m_net.disconnect();
     m_server.stop();
@@ -479,6 +482,7 @@ void App::frame() {
     m_dt = static_cast<float>(std::clamp(now - m_lastFrame, 0.0, 0.1));
     m_lastFrame = now;
     m_time = now;
+    applyAudioSettings();
 
     // Die Oberfläche wächst mit der Fenstergröße; Schriften werden passend neu gerastert
     const float ui = uiScale();
@@ -497,6 +501,7 @@ void App::frame() {
     }
 
     if (m_window.isMinimized()) {
+        m_soundEvents.reset();
         in.mouse = rawMouse;
         in.endFrame();
         eng::sleepSeconds(0.02);
@@ -522,6 +527,8 @@ void App::frame() {
         }
         break;
     }
+
+    updateAudio();
 
     // 2D-Oberfläche
     m_renderer.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), ui);
@@ -598,6 +605,15 @@ void App::updateSession() {
     }
 
     for (const LogEntry& e : fresh) {
+        if (m_time - m_lastNoticeSound > 0.3) {
+            if (e.isChat && e.from != m_net.myId()) {
+                playSound(Sound::Chat, 0.38f);
+                m_lastNoticeSound = m_time;
+            } else if (!e.isChat && (e.kind == NoticeKind::Warning || e.kind == NoticeKind::Private)) {
+                playSound(e.kind == NoticeKind::Warning ? Sound::Warning : Sound::Magic, 0.45f);
+                m_lastNoticeSound = m_time;
+            }
+        }
         if (e.isChat && e.from != kNoPlayer) m_bubbles[e.from] = Bubble{e.text, m_time, e.channel};
         if (!e.isChat && e.kind == NoticeKind::Narration) {
             m_subtitle = e.text;
@@ -621,6 +637,19 @@ void App::updateSession() {
 }
 
 void App::onPhaseChanged(const GameView& v) {
+    switch (v.phase) {
+    case Phase::Assembly: playSound(Sound::Bell, 0.8f); break;
+    case Phase::Vote: playSound(Sound::Vote, 0.75f); break;
+    case Phase::Execution: playSound(Sound::Death, 0.65f); break;
+    case Phase::Night: if (!m_music[2]) playSound(Sound::Night, 0.7f); break;
+    case Phase::Morning: playSound(Sound::Dawn, 0.65f); break;
+    case Phase::GameOver: {
+        const PlayerView* me = v.me();
+        playSound(me && me->winner ? Sound::Victory : Sound::Night, 0.75f);
+        break;
+    }
+    default: break;
+    }
     if (v.phase == Phase::Lobby || v.phase == Phase::GameOver) {
         m_bannerTime = -100.0;
         if (v.phase == Phase::GameOver) m_window.setMouseCaptured(false);

@@ -12,6 +12,13 @@ add_library(engine_core STATIC
 target_include_directories(engine_core PUBLIC include)
 target_link_libraries(engine_core PUBLIC Threads::Threads)
 
+add_library(engine_audio STATIC src/audio/Mixer.cpp src/audio/Wav.cpp)
+target_link_libraries(engine_audio PUBLIC engine_core)
+if(WIN32)
+    target_sources(engine_audio PRIVATE src/audio/Device_win32.cpp)
+    target_link_libraries(engine_audio PUBLIC winmm)
+endif()
+
 # --- Netzwerk: TCP mit Nachrichten-Framing (Winsock / BSD-Sockets) -------------
 add_library(engine_net STATIC
     src/net/Net.cpp

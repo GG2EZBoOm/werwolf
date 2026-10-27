@@ -44,7 +44,9 @@ bool Context::interact(uint64_t id, const Rect& r, bool enabled, bool& isHovered
     isHovered = enabled && hovered(r);
     if (isHovered && m_input->mousePressed()) m_active = id;
     isHeld = enabled && m_active == id && m_input->mouseDown();
-    return enabled && m_active == id && m_input->mouseReleased() && isHovered;
+    const bool clicked = enabled && m_active == id && m_input->mouseReleased() && isHovered;
+    if (clicked && onActivate) onActivate();
+    return clicked;
 }
 
 bool Context::clickArea(std::string_view id, const Rect& r, bool enabled) {

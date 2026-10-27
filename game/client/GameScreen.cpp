@@ -123,6 +123,8 @@ void App::enterMatch() {
     // Zu Beginn wird die eigene Rolle feierlich aufgedeckt (nicht beim Wiederverbinden mitten im Spiel)
     m_revealDone = v.day > 1 || v.phase == Phase::GameOver || m_dev.autoPlay || m_dev.journal || m_dev.pause;
     m_revealStart = m_time;
+    m_soundEvents.reset();
+    if (!m_revealDone) playSound(Sound::Reveal, 0.7f);
     m_journalOpen = m_dev.journal;
     m_pauseOpen = m_dev.pause;
     if (m_journalOpen || m_pauseOpen) m_window.setMouseCaptured(false);
@@ -346,7 +348,10 @@ void App::updateMatch() {
     }
 
     const bool alive = imAlive();
-    if (m_wasAlive && !alive) m_deathTime = m_time;
+    if (m_wasAlive && !alive) {
+        m_deathTime = m_time;
+        playSound(Sound::Death, 0.8f);
+    }
     m_wasAlive = alive;
 
     // Maus und Menüs

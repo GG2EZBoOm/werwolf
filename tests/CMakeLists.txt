@@ -2,6 +2,13 @@ add_executable(test_logic test_logic.cpp)
 target_link_libraries(test_logic PRIVATE werwolf_server_lib)
 add_test(NAME logik COMMAND test_logic)
 
+add_executable(test_audio test_audio.cpp)
+target_link_libraries(test_audio PRIVATE werwolf_audio)
+add_test(NAME audio COMMAND test_audio)
+if(EXISTS "${WERWOLF_MUSIC_ASSET_DIR}/day_tension_1.wav")
+    target_compile_definitions(test_audio PRIVATE WERWOLF_TEST_MUSIC_DIR="${WERWOLF_MUSIC_ASSET_DIR}")
+endif()
+
 add_executable(test_network test_network.cpp)
 target_link_libraries(test_network PRIVATE werwolf_server_lib)
 add_test(NAME netzwerk COMMAND test_network)

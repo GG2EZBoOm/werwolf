@@ -36,6 +36,12 @@ void Config::load() {
         else if (key == "fade_chat") fadeChat = value == "1";
         else if (key == "subtitles") subtitles = value == "1";
         else if (key == "show_fps") showFps = value == "1";
+        else if (key == "master_volume") masterVolume = std::clamp(std::atoi(value.c_str()), 0, 100);
+        else if (key == "effects_volume") effectsVolume = std::clamp(std::atoi(value.c_str()), 0, 100);
+        else if (key == "ambience_volume") ambienceVolume = std::clamp(std::atoi(value.c_str()), 0, 100);
+        else if (key == "music_volume") musicVolume = std::clamp(std::atoi(value.c_str()), 0, 100);
+        else if (key == "muted") muted = value == "1";
+        else if (key == "mute_unfocused") muteUnfocused = value == "1";
         else if (key == "port") {
             const int p = std::atoi(value.c_str());
             if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);
@@ -65,6 +71,12 @@ void Config::save() const {
     out << "fade_chat=" << (fadeChat ? 1 : 0) << "\n";
     out << "subtitles=" << (subtitles ? 1 : 0) << "\n";
     out << "show_fps=" << (showFps ? 1 : 0) << "\n";
+    out << "master_volume=" << masterVolume << "\n";
+    out << "effects_volume=" << effectsVolume << "\n";
+    out << "ambience_volume=" << ambienceVolume << "\n";
+    out << "music_volume=" << musicVolume << "\n";
+    out << "muted=" << (muted ? 1 : 0) << "\n";
+    out << "mute_unfocused=" << (muteUnfocused ? 1 : 0) << "\n";
 }
 
 } // namespace ww

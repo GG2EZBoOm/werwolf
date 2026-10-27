@@ -9,9 +9,11 @@
 param(
     [string]$Repo = "GG2EZBoOm/werwolf",
     [string]$Notes = "",
+    [string]$BinaryDir = "", # optional: bereits geprüfter Build, zusammen mit -SkipBuild
     [switch]$SkipBuild
 )
 $ErrorActionPreference = "Stop"
+if ($BinaryDir -and -not $SkipBuild) { throw "-BinaryDir erfordert -SkipBuild." }
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
@@ -22,12 +24,20 @@ $version = $Matches[1]
 $tag = "v$version"
 Write-Host "Release $tag für $Repo"
 
+# Ein öffentliches Release muss die lokal lizenzierten Musikdateien enthalten.
+$musicDir = Join-Path $root "game\assets\audio"
+foreach ($track in @("day_tension_1", "day_tension_2", "night_foreshadow", "night_eyes_in_the_dark", "night_creeping_death")) {
+    if (-not (Test-Path (Join-Path $musicDir "$track.wav"))) {
+        throw "Musikdatei $track.wav fehlt. Vor dem Release tools/import_music.py mit den beiden lizenzierten Paketen ausführen."
+    }
+}
+
 if (-not $SkipBuild) {
     & (Join-Path $root "build.ps1") -Preset release
     if ($LASTEXITCODE -ne 0) { throw "Build fehlgeschlagen." }
 }
 
-$bin = Join-Path $root "build\release\bin"
+$bin = if ($BinaryDir) { (Resolve-Path -LiteralPath $BinaryDir).Path } else { Join-Path $root "build\release\bin" }
 $dist = Join-Path $root "dist\$version"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 

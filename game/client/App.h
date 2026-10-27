@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/SoundEvents.h"
 #include "client/Characters.h"
 #include "client/Config.h"
 #include "client/Controller.h"
@@ -105,6 +106,11 @@ private:
     float uiScale() const;
     void updateSession();
     void onPhaseChanged(const GameView& v);
+    void initAudio();
+    void applyAudioSettings();
+    void updateAudio();
+    void updateMusic(bool inWorld, bool night);
+    void playSound(Sound sound, float gain = 1.0f, float pan = 0.0f, float pitch = 1.0f);
 
     // Vorschau und Sandbox
     void renderPreview3D();
@@ -165,6 +171,23 @@ private:
     void leaveSession();
 
     eng::Window m_window;
+    eng::audio::Mixer m_audio;
+    std::unique_ptr<SoundBank> m_sounds;
+    eng::audio::Device m_audioDevice; // destroyed before the mixer
+    bool m_audioReady = false;
+    SoundEvents m_soundEvents;
+    std::array<eng::audio::VoiceId, 4> m_ambienceVoices{};
+    int m_audioScene = -1;
+    float m_fireGain = 0.0f;
+    float m_firePan = 0.0f;
+    double m_lastNoticeSound = -100.0;
+    eng::Rng m_audioRng{eng::randomSeed()};
+    std::array<eng::audio::ClipPtr, 5> m_music{};
+    eng::audio::VoiceId m_dayMusicVoice = 0, m_previousDayVoice = 0, m_nightMusicVoice = 0;
+    size_t m_dayTrack = 0, m_nightTrack = 0;
+    double m_dayTrackStarted = 0.0, m_nextNightMusicAt = 0.0, m_musicDuckUntil = 0.0;
+    float m_dayMusicGain = 0.0f, m_nightMusicGain = 0.0f;
+    bool m_musicWasNight = false;
     eng::Renderer2D m_renderer;
     eng::Renderer3D m_renderer3d;
     World m_world;

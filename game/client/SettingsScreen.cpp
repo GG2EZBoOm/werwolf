@@ -32,6 +32,7 @@ constexpr KeyBinding kBindings[] = {
 } // namespace
 
 void App::applySettings() {
+    applyAudioSettings();
     m_window.setVSync(m_config.vsync);
     if (m_window.isFullscreen() != m_config.fullscreen) m_window.toggleFullscreen();
     m_renderer3d.setQuality(m_config.antialiasing, kShadowSizes[std::clamp(m_config.shadowQuality, 0, 2)]);
@@ -48,11 +49,12 @@ void App::applyGraphics(eng::Environment& env) const {
 bool App::drawSettings(const Rect& area) {
     eng::Renderer2D& r = m_renderer;
     // Lesebändchen als Reiter, die oben über das Blatt hängen
-    const char* tabs[] = {"Grafik", "Steuerung", "Oberfläche"};
-    const Color ribbons[] = {Color::hex(0x7A1F18), Color::hex(0x2F4A35), Color::hex(0x2E3D5C)};
+    const char* tabs[] = {"Grafik", "Steuerung", "Oberfläche", "Ton"};
+    const Color ribbons[] = {Color::hex(0x7A1F18), Color::hex(0x2F4A35), Color::hex(0x2E3D5C), Color::hex(0x69502F)};
     m_kit.paper(area, 7070u);
-    for (int i = 0; i < 3; ++i) {
-        const Rect tr{area.x + 40.0f + static_cast<float>(i) * 132.0f, area.y - 8.0f, 124.0f, 40.0f};
+    const float tabWidth = std::min(132.0f, (area.w - 60.0f) / 4.0f);
+    for (int i = 0; i < 4; ++i) {
+        const Rect tr{area.x + 30.0f + static_cast<float>(i) * tabWidth, area.y - 8.0f, tabWidth - 4.0f, 40.0f};
         if (m_kit.inkTab(std::string("settings/tab/") + tabs[i], tr, tabs[i], m_settingsTab == i, ribbons[i])) m_settingsTab = i;
     }
     Rect inner = area.shrink(44.0f, 30.0f);
@@ -153,11 +155,34 @@ bool App::drawSettings(const Rect& area) {
         }
         break;
     }
-    default:
+    case 2:
         onOff("settings/subtitles", "Erzähler-Untertitel", "Wichtige Ereignisse erscheinen kurz als Untertitel in der Bildmitte.", m_config.subtitles);
         onOff("settings/fadechat", "Chat ausblenden", "Der Chat tritt in den Hintergrund, solange niemand etwas sagt.", m_config.fadeChat);
         onOff("settings/fps", "Bildrate anzeigen", "Zeigt die aktuelle Bildrate oben links.", m_config.showFps);
         break;
+    case 3: {
+        auto volume = [&](const char* id, const char* label, const char* hint, int& setting) {
+            float value = static_cast<float>(setting);
+            if (m_kit.inkSlider(id, row(label, hint), value, 0.0f, 100.0f, std::format("{} %", setting))) {
+                setting = static_cast<int>(std::round(value));
+                changed = true;
+            }
+        };
+        volume("settings/master", "Gesamtlautstärke", "Lautstärke aller Spielgeräusche. Null ist stumm.", m_config.masterVolume);
+        volume("settings/effects", "Effekte", "Schritte, Türen, Verwandlungen, Spielereignisse und Menüs.", m_config.effectsVolume);
+        volume("settings/ambience", "Umgebung", "Wind, Vögel, Grillen und das Knistern der Feuer.", m_config.ambienceVolume);
+        volume("settings/music", "Musik", "Spannungsmusik am Tag und Horror-Klänge in der Nacht.", m_config.musicVolume);
+        onOff("settings/muted", "Stummschalten", "Schaltet alle Spielgeräusche aus, ohne die Regler zu verändern.", m_config.muted);
+        onOff("settings/background", "Im Hintergrund stumm", "Blendet den Ton aus, sobald du zu einem anderen Fenster wechselst.", m_config.muteUnfocused);
+        inner.takeTop(14.0f);
+        if (m_kit.inkButton("settings/testsound", inner.takeTop(38.0f), "Glocke probehören", false, m_audioReady)) {
+            applyAudioSettings();
+            playSound(Sound::Bell, 0.8f);
+        }
+        if (!m_audioReady) r.text(m_fonts.paperItalic, {inner.x, inner.y + 8.0f}, "Kein Audiogerät verfügbar.", inkRed);
+        break;
+    }
+    default: break;
     }
 
     // Beschreibung am unteren Rand
@@ -187,6 +212,12 @@ bool App::drawSettings(const Rect& area) {
         m_config.fadeChat = defaults.fadeChat;
         m_config.subtitles = defaults.subtitles;
         m_config.showFps = defaults.showFps;
+        m_config.masterVolume = defaults.masterVolume;
+        m_config.effectsVolume = defaults.effectsVolume;
+        m_config.ambienceVolume = defaults.ambienceVolume;
+        m_config.musicVolume = defaults.musicVolume;
+        m_config.muted = defaults.muted;
+        m_config.muteUnfocused = defaults.muteUnfocused;
         changed = true;
     }
     if (m_window.input().pressed(eng::Key::Escape) && !m_ui.anyFocused()) back = true;

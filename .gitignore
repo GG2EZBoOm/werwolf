@@ -4,3 +4,5 @@ dist/
 .vs/
 *.user
 CMakeUserPresets.json
+# Licensed music is imported locally and embedded in the executable, not shared as raw files.
+game/assets/audio/*.wav

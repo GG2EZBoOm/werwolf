@@ -1,0 +1,6 @@
+#pragma once
+#define WW_MUSIC_DAY1 201
+#define WW_MUSIC_DAY2 202
+#define WW_MUSIC_NIGHT1 203
+#define WW_MUSIC_NIGHT2 204
+#define WW_MUSIC_NIGHT3 205

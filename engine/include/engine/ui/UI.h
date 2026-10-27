@@ -4,6 +4,7 @@
 #include "engine/platform/Window.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -44,6 +45,7 @@ enum class ButtonKind { Normal, Primary, Danger, Ghost };
 // Zustand (Fokus, Cursorposition) wird anhand stabiler IDs gemerkt.
 class Context {
 public:
+    std::function<void()> onActivate;
     void beginFrame(Window& window, Renderer2D& renderer, double time);
     void endFrame();
 

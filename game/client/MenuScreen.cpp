@@ -30,7 +30,7 @@ constexpr MenuEntry kMenu[] = {
     {"Ein Dorf gründen", "Eröffne ein Spiel auf diesem PC. Deine Freunde treten über deine IP-Adresse bei.", -0.035f},
     {"Einem Dorf beitreten", "Verbinde dich mit einem Dorf, das jemand anderes gegründet hat.", 0.028f},
     {"Durchs Dorf streifen", "Allein durch das Dorf – ohne Regeln, ohne Wölfe. Nur du und die Nacht.", -0.018f},
-    {"Einstellungen", "Grafik, Steuerung und Oberfläche.", 0.032f},
+    {"Einstellungen", "Grafik, Ton, Steuerung und Oberfläche.", 0.032f},
     {"Das Feuer löschen", "Das Spiel beenden.", -0.026f},
 };
 
@@ -127,7 +127,10 @@ void App::drawMenu() {
             activated = i;
         if (m_ui.hovered(rc)) m_menuFocus = i;
     }
-    if (!typing && m_menuPage == MenuPage::None && in.pressed(eng::Key::Enter)) activated = m_menuFocus;
+    if (!typing && m_menuPage == MenuPage::None && in.pressed(eng::Key::Enter)) {
+        activated = m_menuFocus;
+        playSound(Sound::Click, 0.65f);
+    }
 
     switch (activated) {
     case 0: m_menuPage = m_menuPage == MenuPage::Host ? MenuPage::None : MenuPage::Host; break;

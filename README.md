@@ -36,6 +36,22 @@ den Port im Router weiterleiten oder ein VPN (Tailscale, Radmin) nutzen. 4 bis 1
 
 **Dorf erkunden** im Hauptmenü startet eine Offline-Runde zum Umsehen (ohne Spielregeln).
 
+### Ton
+
+Wind, Vögel und Grillen begleiten den Tag-Nacht-Wechsel; Lagerfeuer und Kamine knistern in der
+Nähe. Schritte klingen auf Gras, Pflaster und Holzböden unterschiedlich. Türen, Schläge und
+Verwandlungen sind mit Richtung und Entfernung hörbar; Wände dämpfen sie. Glocke, Rollenkarte,
+Phasenwechsel, Nachrichten und Spielende haben eigene Klangsignale. Das funktioniert auch offline.
+
+Tagsüber wechseln sich zwei Spannungstracks weich ab. Nachts erklingen Horror-Stinger mit
+ruhigen Abständen. Die Musik blendet beim Phasenwechsel über und tritt bei wichtigen Signalen zurück.
+
+Unter **Einstellungen → Ton** gibt es Regler für Gesamtlautstärke, Effekte, Umgebung und Musik, eine
+Stummschaltung und eine Glocke zum Probehören. Standardmäßig verstummt das Spiel im Hintergrund;
+das lässt sich dort abschalten. Die Einstellungen werden gespeichert. Die Geräusche entstehen im
+Spiel selbst, die ausgewählten Musiktracks sind in der EXE eingebettet; zusätzliche Dateien sind
+beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/assets/audio/README.md`.
+
 ### Steuerung
 
 | Taste            | Aktion                                                         |
@@ -153,7 +169,9 @@ engine/                 eigene Engine
                         Sonne/Mond/Sternen, MSAA, HDR, Bloom, Tonemapping, Color-Grading,
                         Partikel), prozedurale Meshes, 2D-Renderer, Schriftatlas
   ui/                   Immediate-Mode-UI
+  audio/                Stereo-Mixer mit Windows-Ausgabe, Lautstärkegruppen und weichen Übergängen
 game/
+  audio/                prozedurale Klänge und zustandsbasierte Geräuschereignisse
   world/                deterministisch erzeugtes Dorf (Gelände, Häuser, Kapelle, Wald, Felder),
                         Kollision, Bewegung
   logic/                Echtzeit-Regelwerk (Match) – testbar ohne Netz und Grafik
@@ -162,6 +180,7 @@ game/
   client/               Netzwerk-Client mit Interpolation, 3D-Spielansicht, HUD, Menüs, Updater
   update/               Update-Kern: Manifest, Versionen, sicheres Ersetzen mit Rollback
 tests/                  Regel-, Netzwerk- und Updater-Tests
+                        sowie Audio-Mixer, Klangdaten und Geräuschereignisse
 tools/                  make_release.ps1 (Release für den Auto-Updater erzeugen)
 ```
 

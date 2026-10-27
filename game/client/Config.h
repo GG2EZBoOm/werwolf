@@ -28,6 +28,13 @@ struct Config {
     bool fadeChat = true;   // Chat blendet sich aus, wenn nichts passiert
     bool subtitles = true;  // Erzähler als Untertitel
     bool showFps = false;
+    // Ton (Prozent)
+    int masterVolume = 75;
+    int effectsVolume = 85;
+    int ambienceVolume = 60;
+    int musicVolume = 65;
+    bool muted = false;
+    bool muteUnfocused = true;
 
     static std::filesystem::path path();
     void load();
