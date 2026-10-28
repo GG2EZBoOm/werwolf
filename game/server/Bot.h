@@ -1,11 +1,13 @@
 #pragma once
 
 #include "logic/Match.h"
+#include "server/Dialogue.h"
 #include "world/Movement.h"
 
 #include "engine/core/Random.h"
 
 #include <functional>
+#include <array>
 #include <map>
 #include <set>
 #include <string>
@@ -22,7 +24,9 @@ public:
     uint8_t id() const { return m_id; }
     void update(float dt, Match& match, const SayFn& say);
     // Der Bot hört eine Chatnachricht und passt seinen Verdacht an.
-    void hear(const Match& match, uint8_t speaker, const Text& text);
+    void hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel = ChatChannel::Global,
+              bool reply = true);
+    int replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel) const;
 
 private:
     enum class Nav { Moving, Arrived, Blocked };
@@ -42,6 +46,11 @@ private:
     uint8_t strongestSuspect(const Match& match, float threshold) const;
     uint8_t chooseVote(const Match& match, const GameView& view);
     uint8_t chooseCaptain(const Match& match, const GameView& view);
+    float suspicion(const Match& match, uint8_t target) const;
+    dialogue::Message understand(const Match& match, uint8_t speaker, const Text& text) const;
+    Text answer(const Match& match, uint8_t speaker, const dialogue::Message& message, bool contradiction) const;
+    Text explain(const Match& match, uint8_t target) const;
+    void updateConversation(float dt, const Match& match, const SayFn& say);
     Vec2 steerTo(Vec2 target) const;
     Vec2 position() const { return {m_mover.position.x, m_mover.position.z}; }
 
@@ -71,6 +80,24 @@ private:
     bool m_wantsSteal = false;            // Dieb will in dieser Nacht stehlen
     std::map<uint8_t, float> m_suspicion; // wen der Bot für einen Werwolf hält
     std::map<uint8_t, int> m_seenAsWolf;  // als Bestie beobachtet (Nacht-Nummer)
+    std::map<uint8_t, int> m_wolfWitness; // tatsächlich erkannt, nicht nur im Sichtfeld
+    dialogue::Memory m_dialogue;
+    struct Topic { uint8_t player = kNoPlayer; double time = 0; };
+    std::map<uint8_t, Topic> m_topics;
+    struct Reply {
+        uint8_t speaker = kNoPlayer;
+        ChatChannel channel = ChatChannel::Global;
+        Phase phase = Phase::Lobby;
+        int day = 0;
+        double due = 0;
+        Text text;
+    };
+    std::optional<Reply> m_reply;
+    double m_replyAfter = 0;
+    double m_reconsiderAfter = 0;
+    Topic m_lastReplyTo;
+    std::array<float, 6> m_nightPlaces{};
+    int m_alibiNight = -1;
 };
 
 } // namespace ww

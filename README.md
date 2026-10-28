@@ -66,6 +66,27 @@ Alle Gebäude sind begehbar. Jedes Wohnhaus gehört einem oder mehreren Spielern
 niemandem: Durch das Doppelportal geht es zwischen den Kirchenbänken hindurch bis zum Altar. Wer sich nachts
 dorthin flüchtet, kann sie wie ein Haus von innen verriegeln.
 
+### Gespräche mit Bots
+
+Bots reagieren auf deutsche und englische Spielernachrichten, zum Beispiel:
+
+- `Anton, Anna ist ein Werwolf` – Beschuldigung merken und nach einer Beobachtung fragen.
+- `Anna ist kein Werwolf` – Entlastung statt Beschuldigung; Fragen gelten nicht als Beweis.
+- `Anton, warum?` oder `Wen verdächtigst du?` – Verdacht mit Quelle erklären, Gesprächskontext kurz behalten.
+- `Anton, wo warst du letzte Nacht?` – Auskunft über tatsächlich besuchte Orte, soweit vorhanden.
+- `Ich bin die Seherin` – Rollenbehauptung merken und nach Prüfergebnissen fragen.
+
+Ein passender Bot antwortet nach kurzer Bedenkzeit. Namen werden unabhängig von Großschreibung erkannt;
+im Nähe-Chat gelten weiterhin Hörweite und Wände. Private Antworten bleiben im passenden Kanal.
+Widersprüchliche Rollen, Alibis und Beschuldigungen senken die Glaubwürdigkeit; eine ausdrückliche
+Korrektur (`Ich lag falsch ...`) wird berücksichtigt. Wiederholungen zählen nicht als zusätzliche Zeugen.
+Verdacht und Entlastung beeinflussen Wahlen; neue Hinweise können auch eine bereits abgegebene Stimme ändern.
+Eigene Seherprüfungen haben Vorrang, Gerüchte werden nicht als eigene Augenzeugenberichte ausgegeben.
+
+Das ist lokale, regelbasierte Spiel-KI ohne Cloud-Dienst oder API-Schlüssel. Sie erkennt typische Aussagen
+zum Spiel, führt aber kein allgemeines Sprachmodell-Gespräch. Unklare direkte Ansprachen beantwortet sie
+mit einer Rückfrage; Ironie und beliebig verschachtelte Sätze werden nicht zuverlässig verstanden.
+
 ### Ton
 
 Wind, Vögel und Grillen begleiten den Tag-Nacht-Wechsel; Lagerfeuer und Kamine knistern in der

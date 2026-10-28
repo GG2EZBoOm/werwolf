@@ -277,6 +277,55 @@ TEST(TexteInBeidenSprachen) {
     CHECK(Lf("{} Spieler", "{} players", 3) == "3 Spieler");
 }
 
+TEST(SpielerChatErreichtGenauEinenPassendenBot) {
+    ServerThread server;
+    ServerOptions options;
+    options.port = kTestPort + 3;
+    options.timeScale = 5.0f;
+    options.logChat = false;
+    std::string error;
+    CHECK(server.start(options, error));
+    if (!server.isRunning()) return;
+    NetClient client;
+    CHECK(client.connect("127.0.0.1", options.port, "Testerin"));
+    CHECK(pump(client, [&] { return client.hasView(); }, 5.0));
+    for (int i = 0; i < 4; ++i) client.sendAddBot();
+    Settings settings;
+    settings.captain = true; // first-day assembly before any night deaths
+    settings.daySeconds = 40;
+    settings.discussionSeconds = 120;
+    settings.voteSeconds = 30;
+    client.sendSettings(settings);
+    CHECK(pump(client, [&] { return client.view().players.size() == 5 && client.view().settings.discussionSeconds == 120; }, 5.0));
+    client.sendStartGame();
+    CHECK(pump(client, [&] { return client.view().phase == Phase::Assembly; }, 12.0));
+    uint8_t bot = kNoPlayer;
+    std::string name;
+    for (const auto& p : client.view().players) if (p.bot) { bot = p.id; name = p.name; break; }
+    CHECK(bot != kNoPlayer);
+    client.clearLog();
+    client.sendChat(name + ", ich bin die Seherin", false);
+    auto replies = [&] {
+        int count = 0;
+        for (const auto& entry : client.log())
+            if (entry.isChat && entry.from != client.myId() && entry.text.de.starts_with("Testerin, ")) ++count;
+        return count;
+    };
+    CHECK(pump(client, [&] { return replies() > 0; }, 3.0));
+    pump(client, [] { return false; }, 1.2); // allow enough time for accidental bot echoes
+    CHECK_EQ(replies(), 1);
+    for (const auto& entry : client.log()) {
+        if (!entry.isChat || !entry.text.de.starts_with("Testerin, ")) continue;
+        CHECK_EQ(entry.from, bot);
+        CHECK_EQ(entry.channel, ChatChannel::Global);
+        CHECK(entry.text.de.find("geprüft") != std::string::npos);
+        CHECK(entry.text.en.find("check") != std::string::npos);
+        std::printf("    %s: %s\n", entry.name.c_str(), entry.text.de.c_str());
+    }
+    client.disconnect();
+    server.stop();
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

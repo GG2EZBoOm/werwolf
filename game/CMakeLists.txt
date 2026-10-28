@@ -15,6 +15,8 @@ target_link_libraries(werwolf_audio PUBLIC werwolf_logic engine_audio)
 # --- Server-Bibliothek (wird vom dedizierten Server und vom Client genutzt) ----
 add_library(werwolf_server_lib STATIC
     server/Bot.cpp
+    server/BotConversation.cpp
+    server/Dialogue.cpp
     server/GameServer.cpp
     client/NetClient.cpp
 )

@@ -2,6 +2,10 @@ add_executable(test_logic test_logic.cpp)
 target_link_libraries(test_logic PRIVATE werwolf_server_lib)
 add_test(NAME logik COMMAND test_logic)
 
+add_executable(test_dialogue test_dialogue.cpp)
+target_link_libraries(test_dialogue PRIVATE werwolf_server_lib)
+add_test(NAME dialog COMMAND test_dialogue)
+
 add_executable(test_audio test_audio.cpp)
 target_link_libraries(test_audio PRIVATE werwolf_audio)
 add_test(NAME audio COMMAND test_audio)

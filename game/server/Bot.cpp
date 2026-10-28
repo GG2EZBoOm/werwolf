@@ -11,17 +11,17 @@ namespace {
 
 const std::vector<Text> kDayLines = {
     {"Guten Morgen … oder auch nicht.", "Good morning … or not."},
-    {"Ich habe heute Nacht seltsame Geräusche am Brunnen gehört.", "I heard strange noises at the well last night."},
+    {"Hat jemand etwas Verdächtiges beobachtet?", "Has anyone observed anything suspicious?"},
     {"{name}, wo warst du gestern Nacht?", "{name}, where were you last night?"},
-    {"Ich bin nur ein einfacher Dorfbewohner, ehrlich!", "I'm just a simple villager, honestly!"},
-    {"Ich traue {name} nicht über den Weg.", "I don't trust {name} one bit."},
+    {"Nicht jede Behauptung ist schon ein Beweis.", "Not every claim is proof."},
+    {"{name}, hast du einen konkreten Hinweis?", "{name}, do you have a specific lead?"},
     {"Wir müssen zusammenhalten, sonst holen sie uns alle.", "We have to stick together, or they'll get us all."},
     {"Hat jemand {name} heute Nacht gesehen?", "Did anyone see {name} last night?"},
-    {"Irgendetwas stimmt mit {name} nicht.", "Something is off about {name}."},
-    {"Ich habe Augen im Wald leuchten sehen …", "I saw eyes glowing in the forest …"},
+    {"Ich möchte Beobachtungen und Vermutungen auseinanderhalten.", "I'd like to distinguish observations from guesses."},
+    {"Wer kann ein Alibi bestätigen?", "Who can confirm an alibi?"},
     {"Lasst uns nicht vorschnell urteilen.", "Let's not judge too quickly."},
     {"Verriegelt heute Nacht eure Türen!", "Bolt your doors tonight!"},
-    {"Ich habe Holz krachen hören, ganz in der Nähe von {name}s Haus.", "I heard wood cracking right near {name}'s house."},
+    {"{name}, was spricht für deinen Verdacht?", "{name}, what supports your suspicion?"},
 };
 
 const std::vector<Text> kWolfLines = {
@@ -89,9 +89,14 @@ uint8_t Bot::nearestPlayer(const Match& match, Vec3 from, bool (*filter)(const M
 uint8_t Bot::strongestSuspect(const Match& match, float threshold) const {
     uint8_t suspect = kNoPlayer;
     float strongest = threshold;
-    for (const auto& [id, value] : m_suspicion) {
-        const Match::Player* p = match.find(id);
-        if (p && p->alive && id != m_id && value > strongest) {
+    const auto view = match.viewFor(m_id);
+    for (const auto& player : view.players) {
+        const uint8_t id = player.id;
+        const float value = !isWolfRole(view.yourRole) && isWolfRole(player.role)
+            ? std::max(8.0f, suspicion(match, id)) : suspicion(match, id);
+        if (isWolfRole(view.yourRole) && isWolfRole(player.role)) continue;
+        if (player.role != Role::Unknown && !isWolfRole(player.role)) continue;
+        if (player.alive && id != m_id && value > strongest) {
             strongest = value;
             suspect = id;
         }
@@ -135,6 +140,8 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
     m_chatTimer = -1.0f;
     m_transformDelay = m_rng.uniform(4.0f, 16.0f);
     m_goHome = false;
+    m_reply.reset();
+    m_dialogue.observeRevealed(view);
     m_wantsSteal = m_rng.chance(0.7f);
     const PlayerView* me = view.me();
     const bool alive = me && me->alive;
@@ -169,40 +176,6 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
     }
 }
 
-void Bot::hear(const Match& match, uint8_t speaker, const Text& message) {
-    if (speaker == m_id) return;
-    const Match::Player* me = match.find(m_id);
-    const Match::Player* from = match.find(speaker);
-    if (!me || !from) return;
-    // Menschen schreiben in einer Sprache, Bots in beiden: in beiden nach Stichworten suchen
-    const std::string text = message.de == message.en ? message.de : message.de + "\n" + message.en;
-    auto contains = [&](const char* word) { return text.find(word) != std::string::npos; };
-    float weight = 0.4f;
-    if (contains("Werwolf") || contains("werwolf") || contains("Wolf") || contains("wolf") || contains("Leiche von") ||
-        contains("body of"))
-        weight = 2.0f;
-    else if (contains("traue") || contains("verdächtig") || contains("stimmt") || contains("Stimme geht") ||
-             contains("gesehen") || contains("Leiche") || contains("trust") || contains("suspicious") || contains("off about") ||
-             contains("vote goes") || contains("saw") || contains("body"))
-        weight = 1.0f;
-    if (contains("unschuldig") || contains("vertraue") || contains("innocent")) weight = -1.0f;
-
-    for (const Match::Player& p : match.players()) {
-        if (!p.alive || p.id == speaker || p.name.size() < 2 || text.find(p.name) == std::string::npos) continue;
-        if (p.id == m_id) {
-            // selbst beschuldigt: Misstrauen gegenüber dem Ankläger
-            if (weight > 0.0f) m_suspicion[speaker] += weight * 0.6f;
-            continue;
-        }
-        if (isWolfRole(me->role) && isWolfRole(p.role)) {
-            // Wölfe lenken den Verdacht auf den Ankläger um
-            if (weight > 0.0f) m_suspicion[speaker] += weight;
-            continue;
-        }
-        m_suspicion[p.id] += weight * m_rng.uniform(0.5f, 1.0f);
-    }
-}
-
 uint8_t Bot::chooseCaptain(const Match& match, const GameView& view) {
     const bool wolf = isWolfRole(view.yourRole);
     std::vector<uint8_t> trusted, others;
@@ -210,7 +183,7 @@ uint8_t Bot::chooseCaptain(const Match& match, const GameView& view) {
         if (!p.alive || p.id == m_id) continue;
         const PlayerView* pv = view.player(p.id);
         if (wolf && pv && isWolfRole(pv->role)) trusted.push_back(p.id); // das Rudel hält zusammen
-        else if (!wolf && m_suspicion[p.id] <= 0.5f) trusted.push_back(p.id);
+        else if (!wolf && suspicion(match, p.id) <= 0.5f) trusted.push_back(p.id);
         else others.push_back(p.id);
     }
     if (!trusted.empty()) return m_rng.pick(trusted);
@@ -229,17 +202,7 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
         if (p && p->alive && isWolfRole(r.role) && !wolf) return r.player;
     }
     // stärkster Verdacht aus Beobachtungen und Gesprächen
-    uint8_t suspect = kNoPlayer;
-    float strongest = 1.0f;
-    for (const auto& [id, value] : m_suspicion) {
-        const PlayerView* p = view.player(id);
-        if (!p || !p->alive || id == m_id) continue;
-        if (wolf && isWolfRole(p->role)) continue;
-        if (value > strongest) {
-            strongest = value;
-            suspect = id;
-        }
-    }
+    const uint8_t suspect = strongestSuspect(match, 1.0f);
     if (suspect != kNoPlayer && m_rng.chance(0.75f)) return suspect;
     if (const Match::Player* me = match.find(m_id); me && me->role == Role::Sectarian) {
         std::vector<uint8_t> enemies;
@@ -267,9 +230,14 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
         const PlayerView* t = view.player(id);
         if (!t) continue;
         if (wolf && isWolfRole(t->role)) continue;
-        if (t->role == Role::Mayor && !wolf) continue; // der Bürgermeister ist bekannt und meist unverdächtig
+        if (!wolf && t->role != Role::Unknown && !isWolfRole(t->role)) continue;
         options.push_back(id);
     }
+    // Prefer a neutral candidate over somebody credibly defended, without treating an alibi as proof.
+    std::vector<uint8_t> unexonerated;
+    for (uint8_t id : options)
+        if (suspicion(match, id) >= -0.25f) unexonerated.push_back(id);
+    if (!unexonerated.empty()) return m_rng.pick(unexonerated);
     return options.empty() ? m_rng.pick(candidates) : m_rng.pick(options);
 }
 
@@ -292,15 +260,20 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
         onPhaseChange(match, view);
     }
     m_phaseTime += dt;
+    updateConversation(dt, match, say);
 
     // Augenzeuge: wer nachts als (halbe) Bestie gesehen wird, ist verdächtig
     if (me->alive && view.phase == Phase::Night) {
-        for (const Match::Player& p : match.players()) {
-            if (p.id == m_id || !p.alive || p.transform < 0.3f || m_seenAsWolf[p.id] == view.day) continue;
-            if (distanceXZ(p.position, me->position) > 12.0f || !match.hasLineOfSight(p.position, me->position)) continue;
+        for (const EntityState& p : match.entitiesFor(m_id)) {
+            if (p.id == m_id || p.kind != EntityLiving || p.transform < 0.3f || m_seenAsWolf[p.id] == view.day) continue;
+            const Vec3 pos{p.x, 0, p.z};
+            if (distanceXZ(pos, me->position) > 12.0f || !match.hasLineOfSight(pos, me->position)) continue;
             m_seenAsWolf[p.id] = view.day;
             // in der Dunkelheit erkennt man nicht jedes Gesicht
-            if (!isWolfRole(me->role) && m_rng.chance(0.6f)) m_suspicion[p.id] += 5.0f;
+            if (!isWolfRole(me->role) && m_rng.chance(0.6f)) {
+                m_suspicion[p.id] += 5.0f;
+                m_wolfWitness[p.id] = view.day;
+            }
         }
     }
 
@@ -318,20 +291,16 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
         }
     }
 
-    if (m_chatTimer > 0.0f) {
+    if (m_chatTimer > 0.0f && !m_reply && match.clock() >= m_replyAfter) {
         m_chatTimer -= dt;
         if (m_chatTimer <= 0.0f) {
             const uint8_t suspect = strongestSuspect(match, 1.5f);
-            const float strongest = suspect != kNoPlayer ? m_suspicion[suspect] : 0.0f;
             if (view.phase == Phase::GameOver) {
                 say(m_id, m_rng.pick(kEndLines), false);
             } else if (me->alive && me->role == Role::Jester && m_rng.chance(0.6f)) {
                 say(m_id, m_rng.pick(kJesterLines), false);
             } else if (me->alive && suspect != kNoPlayer && m_rng.chance(0.7f)) {
-                const std::string& name = match.find(suspect)->name;
-                say(m_id, strongest >= 4.0f ? tx("Ich habe {} heute Nacht als Werwolf gesehen!", "I saw {} as a werewolf last night!", name)
-                                            : tx("Ich bin mir sicher: {} ist ein Werwolf!", "I'm sure of it: {} is a werewolf!", name),
-                    false);
+                say(m_id, explain(match, suspect), false);
             } else if (me->alive) {
                 std::vector<std::string> names;
                 for (const Match::Player& p : match.players())
