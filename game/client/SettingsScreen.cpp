@@ -52,7 +52,6 @@ void App::applySettings() {
 
 void App::applyGraphics(eng::Environment& env) const {
     if (!m_config.bloom) env.bloomStrength = 0.0f;
-    if (!m_config.filmGrain) env.grain = 0.0f;
 }
 
 bool App::drawSettings(const Rect& area) {
@@ -139,8 +138,6 @@ bool App::drawSettings(const Rect& area) {
         }
         onOff("settings/bloom", L("Lichtschein", "Bloom"), L("Laternen, Feuer und Fenster leuchten weich nach.", "Lanterns, fires and windows glow softly."),
               m_config.bloom);
-        onOff("settings/grain", L("Filmkorn", "Film grain"), L("Feines Korn über dem Bild – wie ein alter Film.", "Fine grain over the picture – like an old film."),
-              m_config.filmGrain);
         float fov = m_config.fieldOfView;
         if (m_kit.inkSlider("settings/fov", row(L("Sichtfeld", "Field of view"), L("Wie weit die Kamera seitlich blickt.", "How wide the camera sees.")), fov,
                             50.0f, 95.0f, std::format("{:.0f}°", fov))) {
@@ -253,7 +250,6 @@ bool App::drawSettings(const Rect& area) {
         m_config.antialiasing = defaults.antialiasing;
         m_config.shadowQuality = defaults.shadowQuality;
         m_config.bloom = defaults.bloom;
-        m_config.filmGrain = defaults.filmGrain;
         m_config.fieldOfView = defaults.fieldOfView;
         m_config.mouseSensitivity = defaults.mouseSensitivity;
         m_config.invertY = defaults.invertY;

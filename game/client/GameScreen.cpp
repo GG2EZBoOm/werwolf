@@ -1029,7 +1029,6 @@ void App::drawPauseMenu(const GameView& v) {
         r.popTransform();
     }
     drawFooterHints(true);
-    m_kit.grain(m_config.filmGrain ? 0.04f * a : 0.0f);
 }
 void App::drawGameOver(const GameView& v) {
     eng::Renderer2D& r = m_renderer;
@@ -1120,7 +1119,6 @@ void App::drawGameOver(const GameView& v) {
         leaveSession();
     }
     m_kit.endTilt();
-    m_kit.grain(m_config.filmGrain ? 0.04f : 0.0f);
 }
 void App::drawMatchHud() {
     const GameView& v = m_net.view();

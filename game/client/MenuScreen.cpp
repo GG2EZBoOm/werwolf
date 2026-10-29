@@ -211,7 +211,6 @@ void App::drawMenu() {
 
     drawFooterHints(m_menuPage != MenuPage::None);
     r.text(m_fonts.small, {board.x + 6.0f, H - 40.0f}, Lf("Version {} · eigene C++-Engine", "Version {} · custom C++ engine", versionString()), smoke);
-    m_kit.grain(m_config.filmGrain ? 0.05f : 0.0f);
     m_kit.fade(1.0f - eng::smoothstep(0.0f, 0.9f, since));
 }
 
@@ -335,7 +334,6 @@ void App::drawConnecting() {
     m_kit.endTilt();
 
     if (m_kit.inkButton("connect/cancel", {W * 0.5f - 70.0f, letter.bottom() + 26.0f, 140.0f, 38.0f}, L("Umkehren", "Turn back"))) leaveSession();
-    m_kit.grain(m_config.filmGrain ? 0.05f : 0.0f);
 }
 
 void App::drawLost() {
@@ -362,7 +360,6 @@ void App::drawLost() {
     if (m_kit.inkButton("lost/retry", {note.x + 40.0f, by, 240.0f, 44.0f}, L("Erneut anklopfen", "Knock again"), true)) reconnect();
     if (m_kit.inkButton("lost/menu", {note.x + 300.0f, by + 4.0f, 170.0f, 38.0f}, L("Zur Tafel", "To the board"))) leaveSession();
     m_kit.endTilt();
-    m_kit.grain(m_config.filmGrain ? 0.05f : 0.0f);
 }
 
 } // namespace ww

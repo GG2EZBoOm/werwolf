@@ -39,20 +39,6 @@ std::string upper(std::string_view text) {
 // --- Rahmen ----------------------------------------------------------------------
 
 void UiKit::init() {
-    // Filmkorn: graues Rauschen
-    constexpr int kNoise = 128;
-    std::vector<uint8_t> noise(kNoise * kNoise * 4);
-    uint32_t state = 0x9E3779B9u;
-    for (int i = 0; i < kNoise * kNoise; ++i) {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        const uint8_t v = static_cast<uint8_t>(state & 0xFF);
-        noise[i * 4 + 0] = noise[i * 4 + 1] = noise[i * 4 + 2] = v;
-        noise[i * 4 + 3] = 255;
-    }
-    m_noise = eng::Renderer2D::createTexture(kNoise, kNoise, noise.data(), true);
-
     // Pergament/Holz: weiche, fleckige Struktur (nachtileable Wertrauschen)
     constexpr int kPaper = 256;
     std::vector<uint8_t> paper(kPaper * kPaper * 4);
@@ -89,9 +75,8 @@ void UiKit::init() {
 }
 
 void UiKit::shutdown() {
-    eng::Renderer2D::destroyTexture(m_noise);
     eng::Renderer2D::destroyTexture(m_paper);
-    m_noise = m_paper = 0;
+    m_paper = 0;
     destroyMaterials();
 }
 
@@ -134,17 +119,6 @@ void UiKit::sideShade(float width, float alpha) {
     eng::Renderer2D& r = *m_r;
     r.rect({0, 0, width * 0.35f, r.height()}, ink.withAlpha(alpha));
     r.gradientH({width * 0.35f, 0, width * 0.65f, r.height()}, ink.withAlpha(alpha), ink.withAlpha(0.0f));
-}
-
-void UiKit::grain(float strength) {
-    if (!m_noise || strength <= 0.0f) return;
-    eng::Renderer2D& r = *m_r;
-    const float W = r.width(), H = r.height();
-    // Jedes Bild ein anderer Ausschnitt – flimmert wie Filmkorn
-    const float frame = std::floor(static_cast<float>(m_time) * 24.0f);
-    const Vec2 off{hash1(frame), hash1(frame + 7.3f)};
-    const float scale = 1.0f / 128.0f * 1.6f;
-    r.image(m_noise, {0, 0, W, H}, off, off + Vec2{W * scale, H * scale}, Color{1, 1, 1, strength});
 }
 
 void UiKit::embers(const Rect& area, int count, float alpha) {

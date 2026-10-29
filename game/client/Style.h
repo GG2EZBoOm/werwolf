@@ -83,7 +83,6 @@ public:
 
     // Atmosphäre
     void vignette(float strength);
-    void grain(float strength);
     void embers(const eng::Rect& area, int count, float alpha);
     void fade(float alpha, eng::Color color = palette::ink);
     void sideShade(float width, float alpha); // dunkler Verlauf vom linken Rand
@@ -176,7 +175,6 @@ private:
     Fonts* m_fonts = nullptr;
     double m_time = 0.0;
     float m_dt = 0.0f;
-    unsigned m_noise = 0;
     unsigned m_paper = 0;
     uint64_t m_drag = 0;
     std::unordered_map<uint64_t, float> m_anim;

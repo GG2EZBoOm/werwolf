@@ -1172,7 +1172,6 @@ eng::Environment WorldRenderer::environment(float timeOfDay, Vec3 focus, float t
     env.exposure = eng::lerp(1.35f, 1.0f, day);
     env.bloomStrength = eng::lerp(0.85f, 0.4f, day);
     env.vignette = eng::lerp(1.35f, 0.75f, day);
-    env.grain = eng::lerp(0.04f, 0.02f, day);
     env.saturation = eng::lerp(0.6f, 1.05f, day);
     env.gradeTint = eng::lerp(Vec3{0.82f, 0.92f, 1.18f}, Vec3{1.02f, 1.0f, 0.96f}, day);
     env.time = time;

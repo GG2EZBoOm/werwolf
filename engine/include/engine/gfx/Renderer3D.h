@@ -43,7 +43,7 @@ struct Environment {
     float exposure = 1.0f;
     float bloomStrength = 0.6f;
     float vignette = 0.9f;
-    float grain = 0.03f;
+    float grain = 0.0f;
     float saturation = 1.0f;     // Farbsättigung (Color-Grading)
     Vec3 gradeTint{1, 1, 1};     // Farbstich (Color-Grading)
     float time = 0.0f;

@@ -215,7 +215,6 @@ void App::drawRoleReveal(const GameView& v) {
         const float hw = m_kit.keycapWidth(space) + 8.0f + m_fonts.small.measure(go);
         m_kit.hint({W * 0.5f - hw * 0.5f, std::min(H - 50.0f, y + 24.0f)}, space, go, hintA);
     }
-    m_kit.grain(m_config.filmGrain ? 0.05f : 0.0f);
 }
 
 void App::drawJournal(const GameView& v) {

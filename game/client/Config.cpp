@@ -29,7 +29,6 @@ void Config::load() {
         else if (key == "antialiasing") antialiasing = std::clamp(std::atoi(value.c_str()), 1, 8);
         else if (key == "shadows") shadowQuality = std::clamp(std::atoi(value.c_str()), 0, 2);
         else if (key == "bloom") bloom = value == "1";
-        else if (key == "film_grain") filmGrain = value == "1";
         else if (key == "fov") fieldOfView = std::clamp(static_cast<float>(std::atof(value.c_str())), 50.0f, 95.0f);
         else if (key == "mouse_sensitivity") mouseSensitivity = std::clamp(static_cast<float>(std::atof(value.c_str())), 0.2f, 3.0f);
         else if (key == "invert_y") invertY = value == "1";
@@ -67,7 +66,6 @@ void Config::save() const {
     out << "antialiasing=" << antialiasing << "\n";
     out << "shadows=" << shadowQuality << "\n";
     out << "bloom=" << (bloom ? 1 : 0) << "\n";
-    out << "film_grain=" << (filmGrain ? 1 : 0) << "\n";
     out << "fov=" << fieldOfView << "\n";
     out << "mouse_sensitivity=" << mouseSensitivity << "\n";
     out << "invert_y=" << (invertY ? 1 : 0) << "\n";

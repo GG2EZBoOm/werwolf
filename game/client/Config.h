@@ -19,7 +19,6 @@ struct Config {
     int antialiasing = 4;    // MSAA-Samples (1 = aus)
     int shadowQuality = 1;   // 0 niedrig, 1 mittel, 2 hoch
     bool bloom = true;
-    bool filmGrain = true;
     float fieldOfView = 62.0f; // Grad
     // Steuerung
     float mouseSensitivity = 1.0f; // Faktor
