@@ -1,5 +1,18 @@
 # Werwolf
 
+## Herunterladen (Windows)
+
+**[Spiel herunterladen: werwolf.exe](https://github.com/GG2EZBoOm/werwolf/releases/latest/download/werwolf.exe)**
+
+Die EXE in einen eigenen Ordner speichern und starten. Musik und Sounds sind bereits enthalten;
+zum Spielen ist kein Visual Studio erforderlich. Der integrierte Auto-Updater lädt neue Versionen.
+
+- [Alle Downloads und Versionshinweise](https://github.com/GG2EZBoOm/werwolf/releases/latest)
+- [Optional: dedizierter Server – werwolf_server.exe](https://github.com/GG2EZBoOm/werwolf/releases/latest/download/werwolf_server.exe)
+
+**Hinweis:** „Code → Download ZIP“ enthält den Quellcode. Die fertigen EXE-Dateien findest du über
+die Links oben oder rechts auf GitHub unter **Releases → Assets**.
+
 *Werwolf* als 3D-Multiplayer-Spiel: Man läuft in der dritten Person durch ein Dorf, redet im
 Nähe-Chat, beobachtet, versammelt sich am Feuer zur Abstimmung – und nachts verwandeln sich die
 Werwölfe und gehen auf die Jagd. Alles läuft auf einer eigenen, von Grund auf geschriebenen
