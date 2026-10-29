@@ -8,7 +8,9 @@
 
 #include <functional>
 #include <array>
+#include <deque>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -20,13 +22,29 @@ class Bot {
 public:
     using SayFn = std::function<void(uint8_t botId, const Text& text, bool wolves)>;
 
+    // Ein Hinweis aus erster Hand, den ein Bot gerade ausspricht. Andere Bots übernehmen nur
+    // diesen, nie den Wortlaut – so schaukeln sich Gerüchte zwischen Bots nicht auf.
+    struct Evidence {
+        enum class Kind { Seer, Witness, Trail, KnownRole };
+        Kind kind = Kind::Seer;
+        uint8_t target = kNoPlayer;
+        float weight = 0.0f; // > 0 belastet, < 0 entlastet
+    };
+    struct Speech {
+        std::optional<Evidence> evidence;
+        bool reply = false; // auf Antworten antworten Bots nicht, sonst reden sie endlos weiter
+    };
+
     Bot(uint8_t id, uint64_t seed);
     uint8_t id() const { return m_id; }
     void update(float dt, Match& match, const SayFn& say);
     // Der Bot hört eine Chatnachricht und passt seinen Verdacht an.
     void hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel = ChatChannel::Global,
-              bool reply = true);
-    int replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel) const;
+              bool reply = true, const Speech* speech = nullptr);
+    int replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
+                      const Speech* speech = nullptr) const;
+    // Was der Bot gerade sagt; nur während seines say()-Aufrufs gesetzt.
+    const Speech* speaking() const { return m_speaking ? &*m_speaking : nullptr; }
 
 private:
     enum class Nav { Moving, Arrived, Blocked };
@@ -48,8 +66,13 @@ private:
     uint8_t chooseCaptain(const Match& match, const GameView& view);
     float suspicion(const Match& match, uint8_t target) const;
     dialogue::Message understand(const Match& match, uint8_t speaker, const Text& text) const;
-    Text answer(const Match& match, uint8_t speaker, const dialogue::Message& message, bool contradiction) const;
-    Text explain(const Match& match, uint8_t target) const;
+    Text answer(const Match& match, uint8_t speaker, const dialogue::Message& message, bool contradiction,
+                std::optional<Evidence>* evidence) const;
+    Text react(const Match& match, const Evidence& heard, std::optional<Evidence>* evidence) const;
+    Text explain(const Match& match, uint8_t target, std::optional<Evidence>* evidence = nullptr) const;
+    bool knowsFirstHand(const Match& match, const Evidence& heard) const;
+    bool repeats(uint8_t speaker, const dialogue::Message& message) const;
+    void speak(const SayFn& say, const Text& text, bool secret, Speech speech = {});
     void updateConversation(float dt, const Match& match, const SayFn& say);
     Vec2 steerTo(Vec2 target) const;
     Vec2 position() const { return {m_mover.position.x, m_mover.position.z}; }
@@ -91,13 +114,22 @@ private:
         int day = 0;
         double due = 0;
         Text text;
+        dialogue::Intent intent = dialogue::Intent::Unknown;
+        uint8_t topic = kNoPlayer;
+        Speech speech;
     };
-    std::optional<Reply> m_reply;
-    double m_replyAfter = 0;
+    std::deque<Reply> m_replies;          // angesprochene Fragen warten, statt verloren zu gehen
+    std::optional<Reply> m_lastReply;     // zuletzt gegebene Antwort (gegen Wiederholungen)
+    std::optional<Speech> m_speaking;
+    double m_replyAfter = 0;              // so lange überlässt der Bot allgemeines Geplauder anderen
+    double m_nextReply = 0;               // frühester Zeitpunkt der nächsten Antwort
     double m_reconsiderAfter = 0;
-    Topic m_lastReplyTo;
     std::array<float, 6> m_nightPlaces{};
     int m_alibiNight = -1;
 };
+
+// Verteilt eine Chatnachricht an alle Bots, die sie hören; höchstens einer antwortet.
+void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
+                 eng::Rng& rng);
 
 } // namespace ww

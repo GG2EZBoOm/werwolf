@@ -325,6 +325,164 @@ TEST(NoSecretReplyLeaksAfterDawnAndNoDistantReply) {
     CHECK(replies.empty());
 }
 
+TEST(EverydayWordsAndVocatives) {
+    CHECK(weight(parseLine("Anna verhält sich komisch"), 2) > 0);
+    CHECK(weight(parseLine("Berta raus!"), 4) > 0);
+    CHECK(weight(parseLine("ok wir voten alle Berta"), 4) > 0);
+    CHECK(weight(parseLine("Anna ist böse"), 2) > 1.5f);
+    CHECK(weight(parseLine("Anna ist harmlos"), 2) < 0);
+    CHECK(weight(parseLine("Anna is sketchy"), 2) > 0);
+    auto m = parseLine("Anton du bist sus");
+    CHECK_EQ(m.addressed, 1);
+    CHECK(weight(m, 1) > 0);
+    CHECK_EQ(parseLine("Anton was denkst du über Anna").addressed, 1);
+    CHECK_EQ(parseLine("Anton was denkst du über Anna").topic, 2);
+    CHECK_EQ(parseLine("Wen votet ihr?").intent, Intent::AskVote);
+    CHECK_EQ(parseLine("Servus Anton").addressed, 1);
+    CHECK(parseLine("Anton, bist du ein Wolf?").wolfWord);
+    CHECK(parseLine("Ich war draußen am Brunnen").claims.empty());
+}
+
+TEST(BotTalksAboutItselfInFirstPerson) {
+    Conversation c;
+    auto text = c.ask("Anton, was denkst du?");
+    CHECK(text.de.find("Anton") == std::string::npos);
+    text = c.ask("Anton, bist du ein Werwolf?");
+    CHECK(text.de.starts_with("Spieler, nein, ich bin kein Werwolf"));
+    CHECK(text.en.find("I'm not a werewolf") != std::string::npos);
+    text = c.ask("Anton, kann man dir vertrauen?");
+    CHECK(text.de.find("Anton") == std::string::npos);
+    CHECK(text.de.find("kein Werwolf") != std::string::npos);
+    text = c.ask("Ich vertraue Anton");
+    CHECK(text.de.find("danke für dein Vertrauen") != std::string::npos);
+    CHECK(text.de.find("Anton") == std::string::npos);
+    // The reply continues the sentence after the name: "Spieler, das kann ich …", not "Spieler, Das …".
+    text = c.ask("Anton, blablabla");
+    CHECK(text.de.starts_with("Spieler, das kann"));
+}
+
+TEST(QuestionsWaitWhileTheBotIsBusy) {
+    Conversation c;
+    c.hear("Anton, hallo");
+    c.advance(3.0f);
+    CHECK_EQ(c.replies.size(), 1u);
+    // Right after an answer the bot is busy, but a new question meant for it is queued, not dropped.
+    CHECK(c.bot.replyPriority(c.match, 0, Text::same("Anton was denkst du über Anna"), ChatChannel::Global) > 0);
+    c.hear("Anton was denkst du über Anna");
+    c.hear("Anton, wo warst du letzte Nacht?");
+    c.advance(1.0f);
+    CHECK_EQ(c.replies.size(), 1u);
+    c.advance(9.0f);
+    CHECK_EQ(c.replies.size(), 3u);
+    if (c.replies.size() == 3) {
+        CHECK(c.replies[1].de.find("Anna") != std::string::npos);
+        CHECK(c.replies[2].de.find("Nacht") != std::string::npos);
+    }
+    // While busy, small talk from someone else is left to other bots.
+    c.hear("Anton, hallo");
+    CHECK_EQ(c.bot.replyPriority(c.match, 3, Text::same("Wer ist verdächtig?"), ChatChannel::Global), 0);
+}
+
+TEST(DeadPlayersAreNoticed) {
+    Conversation c;
+    c.match.playerLeft(4);
+    CHECK(!c.match.find(4)->alive);
+    CHECK(c.ask("Berta ist ein Wolf").de.find("Berta ist schon tot") != std::string::npos);
+    CHECK(c.ask("Berta du bist voll sus").de.find("Berta ist schon tot") != std::string::npos);
+    CHECK(c.ask("Berta, wo warst du letzte Nacht?").de.find("Berta ist schon tot") != std::string::npos);
+}
+
+namespace {
+// Several bots that hear each other through the same routing as the server.
+struct Village {
+    Match match;
+    std::vector<Bot> bots;
+    eng::Rng rng{7};
+    std::vector<std::pair<uint8_t, Text>> said;
+    Bot::SayFn say = [&](uint8_t id, const Text& text, bool secret) {
+        said.push_back({id, text});
+        if (const auto channel = match.chatChannel(id, secret)) deliverChat(bots, match, id, text, *channel, rng);
+    };
+    explicit Village(uint64_t seed) {
+        Settings settings;
+        settings.captain = false;
+        settings.discussionSeconds = 60;
+        settings.voteSeconds = 30;
+        const std::vector<Match::Seat> seats = {{0, "Spieler", false}, {1, "Anton", true}, {2, "Anna", true},
+            {3, "Ann", true}, {4, "Berta", true}, {5, "Jörg", true}};
+        Text error;
+        CHECK(match.startWithRoles(seats, {Role::Villager, Role::Seer, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager},
+                                   settings, world(), 42, error));
+        for (uint8_t id = 1; id <= 5; ++id) bots.emplace_back(id, seed * 10 + id);
+    }
+    void advance(float seconds) {
+        for (float t = 0; t < seconds; t += 0.1f) {
+            match.update(0.1f);
+            for (Bot& b : bots) b.update(0.1f, match, say);
+        }
+    }
+    void human(const std::string& text) { deliverChat(bots, match, 0, Text::same(text), *match.chatChannel(0, false), rng); }
+    void inspectAnna() {
+        phase(match, Phase::Night);
+        match.teleport(1, world().ground(4, 9));
+        match.teleport(2, world().ground(6, 9));
+        CHECK(match.interact(1, Interaction::Inspect, 2).empty());
+    }
+};
+}
+
+TEST(BotsActOnOtherBotsFirstHandEvidence) {
+    int withEvidence = 0, without = 0, votes = 0;
+    for (uint64_t seed = 1; seed <= 40; ++seed) {
+        for (bool reveal : {false, true}) {
+            Village v(seed);
+            v.inspectAnna();
+            phase(v.match, Phase::Assembly);
+            v.advance(0.5f);
+            if (reveal) {
+                v.human("Anton, wen verdächtigst du?");
+                v.advance(4.0f);
+            }
+            phase(v.match, Phase::Vote);
+            v.advance(8.0f);
+            const uint8_t voters[] = {3, 4, 5};
+            for (uint8_t voter : voters) {
+                const uint8_t vote = v.match.find(voter)->vote;
+                if (reveal) { ++votes; withEvidence += vote == 2; }
+                else without += vote == 2;
+            }
+        }
+    }
+    std::printf("    Votes of other bots for Anna: after the seer bot's answer %d/%d, without it %d/%d\n",
+                withEvidence, votes, without, votes);
+    CHECK(withEvidence * 10 >= votes * 6);
+    CHECK(withEvidence > without * 2);
+}
+
+TEST(AccusedBotDeniesAndAnswersNeverChain) {
+    Village v(3);
+    v.inspectAnna();
+    phase(v.match, Phase::Assembly);
+    v.advance(0.5f);
+    const Text line = Text::same("Ich bin die Seherin! Anna ist ein Werwolf!");
+    const Bot::Speech seer{Bot::Evidence{Bot::Evidence::Kind::Seer, 2, 2.4f}, false};
+    Bot::Speech answer = seer;
+    answer.reply = true;
+    const Bot::Speech rumour;
+    Bot& anna = v.bots[1];
+    CHECK_EQ(anna.replyPriority(v.match, 1, line, ChatChannel::Global, &seer), 90);
+    CHECK_EQ(anna.replyPriority(v.match, 1, line, ChatChannel::Global, &answer), 0);
+    CHECK_EQ(v.bots[2].replyPriority(v.match, 1, line, ChatChannel::Global, &rumour), 0);
+    CHECK_EQ(v.bots[2].replyPriority(v.match, 1, line, ChatChannel::Global, &seer), 0); // nothing to add
+    v.said.clear();
+    anna.hear(v.match, 1, line, ChatChannel::Global, true, &seer);
+    v.advance(4.0f);
+    const bool denied = std::any_of(v.said.begin(), v.said.end(), [](const auto& s) {
+        return s.first == 2 && s.second.de.starts_with("Anton, ") && s.second.de.find("Seherin") != std::string::npos;
+    });
+    CHECK(denied);
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

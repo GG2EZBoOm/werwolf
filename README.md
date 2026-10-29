@@ -88,9 +88,15 @@ Bots reagieren auf deutsche und englische Spielernachrichten, zum Beispiel:
 - `Anton, warum?` oder `Wen verdächtigst du?` – Verdacht mit Quelle erklären, Gesprächskontext kurz behalten.
 - `Anton, wo warst du letzte Nacht?` – Auskunft über tatsächlich besuchte Orte, soweit vorhanden.
 - `Ich bin die Seherin` – Rollenbehauptung merken und nach Prüfergebnissen fragen.
+- `Emil verhält sich komisch`, `Berta raus!`, `wir voten alle Berta`, `Anton du bist sus` – auch Umgangssprache
+  zählt als Verdacht oder Stimme; wer schon tot ist, wird als tot erkannt.
 
-Ein passender Bot antwortet nach kurzer Bedenkzeit. Namen werden unabhängig von Großschreibung erkannt;
+Ein passender Bot antwortet nach kurzer Bedenkzeit. Mehrere Fragen an denselben Bot beantwortet er
+nacheinander, statt sie zu übergehen. Namen werden unabhängig von Großschreibung erkannt;
 im Nähe-Chat gelten weiterhin Hörweite und Wände. Private Antworten bleiben im passenden Kanal.
+Bots hören auch einander zu, aber nur bei Hinweisen aus erster Hand: einer Seherprüfung, einer selbst
+gesehenen Verwandlung oder der Spur des Fährtenlesers. Der Beschuldigte widerspricht, wer dasselbe weiß,
+bestätigt es; Antworten lösen keine weiteren Bot-Antworten aus.
 Widersprüchliche Rollen, Alibis und Beschuldigungen senken die Glaubwürdigkeit; eine ausdrückliche
 Korrektur (`Ich lag falsch ...`) wird berücksichtigt. Wiederholungen zählen nicht als zusätzliche Zeugen.
 Verdacht und Entlastung beeinflussen Wahlen; neue Hinweise können auch eine bereits abgegebene Stimme ändern.

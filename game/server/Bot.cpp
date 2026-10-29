@@ -140,7 +140,7 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
     m_chatTimer = -1.0f;
     m_transformDelay = m_rng.uniform(4.0f, 16.0f);
     m_goHome = false;
-    m_reply.reset();
+    m_replies.clear();
     m_dialogue.observeRevealed(view);
     m_wantsSteal = m_rng.chance(0.7f);
     const PlayerView* me = view.me();
@@ -283,24 +283,26 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
         m_reported = true;
         m_suspicion[me->trackTarget] += 6.0f;
         if (const Match::Player* t = match.find(me->trackTarget); t && t->alive) {
-            say(m_id,
-                tx("Ich bin der Fährtenleser! Die Spur von {} führte heute Nacht direkt zur Leiche von {}!",
-                   "I'm the tracker! The trail of {} led straight to the body of {} last night!", t->name,
-                   match.find(me->trackVictims.front())->name),
-                false);
+            speak(say,
+                  tx("Ich bin der Fährtenleser! Die Spur von {} führte heute Nacht direkt zur Leiche von {}!",
+                     "I'm the tracker! The trail of {} led straight to the body of {} last night!", t->name,
+                     match.find(me->trackVictims.front())->name),
+                  false, {Evidence{Evidence::Kind::Trail, t->id, 2.0f}});
         }
     }
 
-    if (m_chatTimer > 0.0f && !m_reply && match.clock() >= m_replyAfter) {
+    if (m_chatTimer > 0.0f && m_replies.empty() && match.clock() >= m_replyAfter) {
         m_chatTimer -= dt;
         if (m_chatTimer <= 0.0f) {
             const uint8_t suspect = strongestSuspect(match, 1.5f);
             if (view.phase == Phase::GameOver) {
-                say(m_id, m_rng.pick(kEndLines), false);
+                speak(say, m_rng.pick(kEndLines), false);
             } else if (me->alive && me->role == Role::Jester && m_rng.chance(0.6f)) {
-                say(m_id, m_rng.pick(kJesterLines), false);
+                speak(say, m_rng.pick(kJesterLines), false);
             } else if (me->alive && suspect != kNoPlayer && m_rng.chance(0.7f)) {
-                say(m_id, explain(match, suspect), false);
+                std::optional<Evidence> evidence;
+                const Text line = explain(match, suspect, &evidence);
+                speak(say, line, false, {evidence});
             } else if (me->alive) {
                 std::vector<std::string> names;
                 for (const Match::Player& p : match.players())
@@ -311,13 +313,14 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                     for (const SeerResult& r : view.seerResults) {
                         const PlayerView* p = view.player(r.player);
                         if (p && p->alive && isWolfRole(r.role) && m_rng.chance(0.7f)) {
-                            say(m_id, tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", p->name), false);
+                            speak(say, tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", p->name), false,
+                                  {Evidence{Evidence::Kind::Seer, r.player, 2.4f}});
                             spoke = true;
                             break;
                         }
                     }
                 }
-                if (!spoke) say(m_id, fill(m_rng.pick(kDayLines), name), false);
+                if (!spoke) speak(say, fill(m_rng.pick(kDayLines), name), false);
             }
         }
     }
@@ -491,10 +494,10 @@ void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Ve
             if (target != kNoPlayer) {
                 match.interact(m_id, Interaction::Vote, target);
                 if (m_rng.chance(0.3f))
-                    say(m_id,
-                        view.election ? tx("Ich wähle {}.", "I choose {}.", view.player(target)->name)
-                                      : tx("Meine Stimme geht an {}.", "My vote goes to {}.", view.player(target)->name),
-                        false);
+                    speak(say,
+                          view.election ? tx("Ich wähle {}.", "I choose {}.", view.player(target)->name)
+                                        : tx("Meine Stimme geht an {}.", "My vote goes to {}.", view.player(target)->name),
+                          false);
             }
         }
         break;
@@ -606,7 +609,7 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
                 match.interact(m_id, Interaction::Transform, 1);
                 if (m_rng.chance(0.5f)) {
                     const uint8_t prey = nearestPlayer(match, me.position, isAliveNonWolf, 200.0f);
-                    if (prey != kNoPlayer) say(m_id, fill(m_rng.pick(kWolfLines), match.find(prey)->name), true);
+                    if (prey != kNoPlayer) speak(say, fill(m_rng.pick(kWolfLines), match.find(prey)->name), true);
                 }
             } else {
                 // vom Feuer weg in den Schatten

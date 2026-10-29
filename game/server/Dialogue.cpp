@@ -81,6 +81,10 @@ void identify(Tokens& tokens, const std::vector<Person>& people) {
     }
 }
 
+// "Böse" is game slang for the wolf team, like "evil" in English lobbies.
+const std::initializer_list<std::string_view> kWolfWords = {
+    "wolf", "werwolf", "werewolf", "woelfe", "werwoelfe", "wolves", "werewolves", "boese", "evil"};
+
 Role roleIn(const Tokens& t) {
     if (has(t, {"seherin", "seher", "seer"})) return Role::Seer;
     if (has(t, {"hexe", "witch"})) return Role::Witch;
@@ -103,15 +107,17 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
             result.mentions.push_back(token.person);
     result.question = has(t, {"?"}) || has(t, {"wer", "wen", "warum", "wieso", "weshalb", "wo", "welche", "welchen", "who", "why", "where"}) ||
         (!t.empty() && has(Tokens{t.front()}, {"ist", "sind", "bist", "hast", "habt", "is", "are", "did", "do"}));
-    // Vocatives: "Anton, ...", "Anton bist du ...", "Hallo Anton".
+    // Vocatives: "Anton, ...", "Anton bist du ...", "Anton du bist sus", "Hallo Anton".
     if (t.size() >= 2 && t[0].person != kNoPlayer &&
-        has(Tokens{t[1]}, {",", ":", "bist", "hast", "wer", "wen", "warum", "wo", "was", "are", "do", "why", "who", "where", "what"})) {
+        has(Tokens{t[1]}, {",", ":", "bist", "hast", "wer", "wen", "warum", "wo", "was", "du", "dich", "dir", "denkst",
+                           "meinst", "glaubst", "are", "do", "why", "who", "where", "what", "you"})) {
         result.addressed = t[0].person;
         t.erase(t.begin());
         if (!t.empty() && has(Tokens{t[0]}, {",", ":"})) t.erase(t.begin());
-    } else if (t.size() >= 2 && has(Tokens{t[0]}, {"hallo", "hi", "hey", "hello"}) && t[1].person != kNoPlayer) {
+    } else if (t.size() >= 2 && has(Tokens{t[0]}, {"hallo", "hi", "hey", "hello", "servus", "moin"}) && t[1].person != kNoPlayer) {
         result.addressed = t[1].person;
     }
+    result.wolfWord = has(t, kWolfWords);
     if (result.addressed != kNoPlayer) listener = result.addressed;
     if (!t.empty() && has(Tokens{t.front()}, {"ist", "sind", "bist", "hast", "habt", "warst", "was", "what", "is", "are", "did", "do", "were", "beweise", "evidence"}))
         result.question = true;
@@ -126,7 +132,8 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         else if (has(t, {"wo", "where"})) result.intent = Intent::AskAlibi;
         else if (has(t, {"unschuldig", "innocent", "safe", "vertrauen", "trust"})) result.intent = Intent::AskInnocence;
         else if (has(t, {"rolle", "role", "bist"}) || phrase(t, "are you")) result.intent = Intent::AskRole;
-        else if (has(t, {"waehlen", "waehlst", "waehlt", "waehlen", "abstimmen", "vote", "voting"})) result.intent = Intent::AskVote;
+        else if (has(t, {"waehlen", "waehlst", "waehlt", "abstimmen", "stimmst", "voten", "votest", "votet", "vote", "voting"}))
+            result.intent = Intent::AskVote;
         else result.intent = Intent::AskSuspicion;
     } else if (self && !negated && roleIn(t) != Role::Unknown && (has(t, {"bin", "im", "am"}))) {
         result.intent = Intent::RoleClaim;
@@ -138,7 +145,7 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         else if (has(t, {"brunnen", "well"})) result.place = Place::Well;
         else if (has(t, {"wald", "forest", "woods"})) result.place = Place::Forest;
         if (result.place != Place::Unknown) result.intent = Intent::Alibi;
-    } else if (has(t, {"hallo", "hi", "hey", "hello", "moin"})) result.intent = Intent::Greeting;
+    } else if (has(t, {"hallo", "hi", "hey", "hello", "moin", "servus", "huhu", "guten"})) result.intent = Intent::Greeting;
 
     // Separate clauses so "Anna ist unschuldig, aber Berta ist ein Wolf" is not flattened.
     std::vector<Tokens> clauses(1);
@@ -170,15 +177,21 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
             continue;
         }
         if (has(clause, {"wenn", "falls", "if", "ob", "whether"})) continue;
-        const bool wolfWord = has(clause, {"wolf", "werwolf", "werewolf", "woelfe", "werwoelfe", "wolves", "werewolves"});
+        const bool wolfWord = has(clause, kWolfWords);
         const bool wolf = wolfWord && (has(clause, {"ist", "sind", "bin", "bist", "is", "isnt", "are", "arent", "am", "im", "als", "as", "verwandelt", "transformed"}) || clause.size() <= 3) &&
             !has(clause, {"beim", "mit", "with", "near"});
-        const bool suspect = has(clause, {"verdaechtig", "verdaechtige", "suspicious", "misstraue", "suspect", "sus", "luegt", "lying"});
-        const bool defend = has(clause, {"unschuldig", "innocent", "vertraue", "traue", "trust", "safe"});
+        const bool suspect = has(clause, {"verdaechtig", "verdaechtige", "suspicious", "misstraue", "suspect", "sus", "luegt", "lying",
+                                          "komisch", "seltsam", "merkwuerdig", "suspekt", "schuldig", "luegner", "luegnerin",
+                                          "weird", "strange", "sketchy", "shady", "fishy", "guilty", "liar"});
+        const bool defend = has(clause, {"unschuldig", "innocent", "vertraue", "traue", "trust", "safe", "harmlos", "sauber",
+                                         "vertrauenswuerdig", "harmless", "clean", "cleared", "trustworthy"});
         const bool negative = has(clause, {"nicht", "kein", "keine", "keinen", "not", "no", "dont", "isnt", "arent", "never", "nie"}) ||
             (negatedBelief && has(clause, {"dass", "that"}));
         negatedBelief = false;
-        const bool vote = has(clause, {"waehle", "vote", "voting"}) || phrase(clause, "stimme geht") || phrase(clause, "stimme fuer");
+        // "Berta raus!", "wir voten Berta", "hängt Berta" – lobby slang for an elimination vote
+        const bool vote = has(clause, {"waehle", "waehlen", "voten", "vote", "voting", "raus", "haengen", "haengt", "lynchen",
+                                       "rauswerfen", "hinrichten", "lynch", "hang", "eliminate"}) ||
+            phrase(clause, "stimme geht") || phrase(clause, "stimme fuer") || phrase(clause, "stimmen fuer");
         float weight = wolf ? 1.8f : suspect ? 1.1f : defend ? -1.0f : vote ? 0.8f : 0.0f;
         if (negative) weight = -weight;
         if (has(clause, {"vielleicht", "maybe", "eventuell", "glaube", "think", "vermute"})) weight *= 0.55f;

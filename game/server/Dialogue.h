@@ -22,6 +22,7 @@ struct Message {
     Role claimedRole = Role::Unknown;
     Place place = Place::Unknown;
     bool question = false;
+    bool wolfWord = false; // mentions werewolves at all ("Anton, bist du ein Wolf?")
     bool correction = false;
     bool exclusiveAlibi = false;
 };

@@ -529,19 +529,7 @@ void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves) {
         const bool hidden = m_match && m_match->hidesSpeaker(target->id, channel);
         target->conn->send(hidden ? anonymous.data() : w.data());
     }
-    if (m_match) {
-        int priority = 0;
-        std::vector<uint8_t> responders;
-        for (const Bot& bot : m_bots) {
-            const int candidate = bot.replyPriority(*m_match, memberId, text, channel);
-            if (candidate > priority) { responders.clear(); priority = candidate; }
-            if (candidate > 0 && candidate == priority) responders.push_back(bot.id());
-        }
-        const uint8_t responder = responders.empty() ? kNoPlayer : m_rng.pick(responders);
-        for (Bot& bot : m_bots)
-            if (m_match->canHear(bot.id(), memberId, channel) && !m_match->hidesSpeaker(bot.id(), channel))
-                bot.hear(*m_match, memberId, text, channel, bot.id() == responder);
-    }
+    if (m_match) deliverChat(m_bots, *m_match, memberId, text, channel, m_rng);
 
     if (channel != ChatChannel::Nearby && channel != ChatChannel::Family) {
         HistoryEntry e;
