@@ -26,52 +26,6 @@ constexpr float kSniffRadius = 5.0f;      // der Fuchs wittert die Person und ih
 constexpr float kBearRange = 3.5f;
 constexpr float kBearCooldown = 30.0f;
 
-Text roleWithArticle(Role role) {
-    switch (role) {
-    case Role::Villager: return {"ein Dorfbewohner", "a villager"};
-    case Role::Werewolf: return {"ein Werwolf", "a werewolf"};
-    case Role::Seer: return {"die Seherin", "the seer"};
-    case Role::Witch: return {"die Hexe", "the witch"};
-    case Role::Hunter: return {"der Jäger", "the hunter"};
-    case Role::Cupid: return {"Amor", "Cupid"};
-    case Role::Protector: return {"der Beschützer", "the protector"};
-    case Role::Elder: return {"der Dorfälteste", "the elder"};
-    case Role::LittleGirl: return {"das kleine Mädchen", "the little girl"};
-    case Role::Medium: return {"das Medium", "the medium"};
-    case Role::Tracker: return {"der Fährtenleser", "the tracker"};
-    case Role::Blacksmith: return {"der Schmied", "the blacksmith"};
-    case Role::Priest: return {"der Pfarrer", "the priest"};
-    case Role::Mayor: return {"der Bürgermeister", "the mayor"};
-    case Role::Idiot: return {"der Dorfdepp", "the village idiot"};
-    case Role::Cursed: return {"der Verfluchte", "the cursed one"};
-    case Role::AlphaWolf: return {"der Urwolf", "the alpha wolf"};
-    case Role::WolfCub: return {"das Wolfsjunge", "the wolf cub"};
-    case Role::Jester: return {"der Narr", "the jester"};
-    case Role::SerialKiller: return {"der Serienmörder", "the serial killer"};
-    case Role::Arsonist: return {"der Brandstifter", "the arsonist"};
-    case Role::Thief: return {"der Dieb", "the thief"};
-    case Role::Scapegoat: return {"der Sündenbock", "the scapegoat"};
-    case Role::Fox: return {"der Fuchs", "the fox"};
-    case Role::BearTamer: return {"der Bärenführer", "the bear tamer"};
-    case Role::Knight: return {"der Ritter mit der rostigen Klinge", "the knight with the rusty sword"};
-    case Role::Servant: return {"die ergebene Magd", "the devoted servant"};
-    case Role::Judge: return {"der stotternde Richter", "the stuttering judge"};
-    case Role::Actor: return {"der Schauspieler", "the actor"};
-    case Role::WildChild: return {"das wilde Kind", "the wild child"};
-    case Role::WolfHound: return {"der Wolfshund", "the wolf hound"};
-    case Role::Sister: return {"eine der zwei Schwestern", "one of the two sisters"};
-    case Role::Brother: return {"einer der drei Brüder", "one of the three brothers"};
-    case Role::HonestVillager: return {"ein ehrlicher Dorfbewohner", "an honest villager"};
-    case Role::Raven: return {"der Rabe", "the raven"};
-    case Role::BigBadWolf: return {"der große böse Wolf", "the big bad wolf"};
-    case Role::WhiteWolf: return {"der weiße Werwolf", "the white werewolf"};
-    case Role::Piper: return {"der Flötenspieler", "the pied piper"};
-    case Role::Angel: return {"der Engel", "the angel"};
-    case Role::Sectarian: return {"der Sektierer", "the sectarian"};
-    default: return {"unbekannt", "unknown"};
-    }
-}
-
 bool isNeutralKiller(Role role) { return role == Role::SerialKiller || role == Role::Arsonist || role == Role::WhiteWolf; }
 
 } // namespace

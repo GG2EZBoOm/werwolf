@@ -88,19 +88,47 @@ Bots reagieren auf deutsche und englische Spielernachrichten, zum Beispiel:
 - `Anton, warum?` oder `Wen verdächtigst du?` – Verdacht mit Quelle erklären, Gesprächskontext kurz behalten.
 - `Anton, wo warst du letzte Nacht?` – Auskunft über tatsächlich besuchte Orte, soweit vorhanden.
 - `Ich bin die Seherin` – Rollenbehauptung merken und nach Prüfergebnissen fragen.
+- `ich hab Berta gecheckt, sie ist ein Werwolf` oder `Clara ist die Hexe` – Prüfergebnisse einer Seherin zählen
+  als starker Hinweis. Wer genannt wird, bestätigt oder widerspricht anhand der eigenen Rolle, die echte Seherin
+  meldet sich bei einer falschen Behauptung, und sobald Tote aufgedeckt werden, prüfen die Bots die Angaben nach.
+  Eine bestätigte Seherin wird geschützt, wer nachweislich lügt, gilt als verdächtig.
 - `Emil verhält sich komisch`, `Berta raus!`, `wir voten alle Berta`, `Anton du bist sus` – auch Umgangssprache
   zählt als Verdacht oder Stimme; wer schon tot ist, wird als tot erkannt.
 
 Ein passender Bot antwortet nach kurzer Bedenkzeit. Mehrere Fragen an denselben Bot beantwortet er
 nacheinander, statt sie zu übergehen. Namen werden unabhängig von Großschreibung erkannt;
 im Nähe-Chat gelten weiterhin Hörweite und Wände. Private Antworten bleiben im passenden Kanal.
-Bots hören auch einander zu, aber nur bei Hinweisen aus erster Hand: einer Seherprüfung, einer selbst
-gesehenen Verwandlung oder der Spur des Fährtenlesers. Der Beschuldigte widerspricht, wer dasselbe weiß,
-bestätigt es; Antworten lösen keine weiteren Bot-Antworten aus.
+Bots hören auch einander zu. Seherprüfungen, beobachtete Verwandlungen und Spuren werden getrennt von
+persönlichen Meinungen, Unterstützung und Vorwürfen behandelt. Der Beschuldigte widerspricht, Freunde
+stellen sich bei schwachen Anschuldigungen schützend vor jemanden; Antworten lösen keine weiteren Bot-Antworten aus.
 Widersprüchliche Rollen, Alibis und Beschuldigungen senken die Glaubwürdigkeit; eine ausdrückliche
 Korrektur (`Ich lag falsch ...`) wird berücksichtigt. Wiederholungen zählen nicht als zusätzliche Zeugen.
 Verdacht und Entlastung beeinflussen Wahlen; neue Hinweise können auch eine bereits abgegebene Stimme ändern.
 Eigene Seherprüfungen haben Vorrang, Gerüchte werden nicht als eigene Augenzeugenberichte ausgegeben.
+
+Jeder Bot hat eine eigene Persönlichkeit: gesprächig oder still, gutgläubig oder skeptisch, vorschnell oder
+vorsichtig, Mitläufer oder Einzelgänger – und schreibt förmlich, locker („hab Berta geprüft“) oder knapp.
+Bots ziehen Schlüsse aus dem Spielverlauf („Berta hat für Clara gestimmt, und Clara war unschuldig“, wer einen
+entlarvten Wolf verteidigt hat, wer nachts beim Haus eines Opfers zu sehen war), reagieren auf Tote und Urteile
+und können sich nachts auch einmal irren. Wölfe täuschen: Sie geben sich als Seherin aus, drehen eine
+Beschuldigung um und holen sich nachts bevorzugt die Seherin, lautstarke Ankläger oder Zeugen. Wer sich erst nach
+einer Beschuldigung als Seherin meldet, wirkt allerdings verdächtig. In der Welt drehen sich Bots zu dem, der
+spricht, gehen tagsüber mit Vertrauten mit, halten Abstand zu Verdächtigen, sehen sich morgens den Fundort an und
+zögern nachts, bevor sie losgehen.
+
+Gefühle bleiben über mehrere Phasen bestehen und klingen langsam ab. Bekannt gewordene Morde machen
+Bots ängstlicher: Sie gehen eher nach Hause und laufen bei großer Angst nicht jedem Geräusch hinterher.
+Nach einem öffentlich aufgedeckten Fehlurteil entstehen Wut und Groll gegen die damaligen Wähler;
+das beeinflusst spätere Stimmen. Gemeinsame Zeit und Unterstützung stärken Freundschaften, wiederholte
+Beschuldigungen schaffen Feindschaften. Freunde werden eher als Begleiter und Hauptmann gewählt.
+Unter Druck tippen Bots schneller und schreiben mit hektischer Zeichensetzung. Wiederholte gleiche
+Nachrichten verstärken diese Gefühle nicht beliebig; bekannte Rollen und eigene Seherprüfungen haben Vorrang.
+
+Jäger drohen unter Druck mit ihrem letzten Schuss, Hexen deuten die tatsächlich noch verfügbaren Tränke an.
+Die Seherin hält harmlose Prüfungen zunächst zurück und enthüllt sich für ein verwertbares Wolfsergebnis,
+zur Rettung eines geprüften Unschuldigen oder bei akuter eigener Gefahr. Wölfe können einen stark belasteten
+Partner öffentlich fallenlassen und gegen ihn stimmen, wenn das Rudel dafür nicht einen nahen Sieg aufgibt.
+Wer öffentlich gegen einen entlarvten Wolf gestimmt hat, gewinnt Vertrauen – auch ein täuschender Mitwolf.
 
 Das ist lokale, regelbasierte Spiel-KI ohne Cloud-Dienst oder API-Schlüssel. Sie erkennt typische Aussagen
 zum Spiel, führt aber kein allgemeines Sprachmodell-Gespräch. Unklare direkte Ansprachen beantwortet sie

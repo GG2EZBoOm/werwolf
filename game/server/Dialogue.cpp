@@ -91,7 +91,20 @@ Role roleIn(const Tokens& t) {
     if (has(t, {"beschuetzer", "protector"})) return Role::Protector;
     if (has(t, {"faehrtenleser", "tracker"})) return Role::Tracker;
     if (has(t, {"jaeger", "hunter"})) return Role::Hunter;
-    if (has(t, {"dorfbewohner", "villager"})) return Role::Villager;
+    if (has(t, {"dorfbewohner", "dorfbewohnerin", "villager"})) return Role::Villager;
+    return Role::Unknown;
+}
+
+// The role in "ich bin (immer noch) Seher", not another role named later in the same message.
+Role claimedRoleIn(const Tokens& t) {
+    for (size_t i = 0; i < t.size(); ++i) {
+        if (!has(Tokens{t[i]}, {"bin", "am", "im"})) continue;
+        Tokens rest;
+        for (size_t j = i + 1; j < t.size() && !has(Tokens{t[j]}, {".", "!", "?", ";", ",", "und", "and", "aber", "but"}); ++j)
+            rest.push_back(t[j]);
+        if (has(rest, {"nicht", "kein", "keine", "not", "no"})) continue;
+        if (const Role role = roleIn(rest); role != Role::Unknown) return role;
+    }
     return Role::Unknown;
 }
 
@@ -128,16 +141,17 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
     const bool self = has(t, {"ich", "i", "im"});
     const bool negated = has(t, {"nicht", "kein", "keine", "keinen", "not", "no", "dont", "isnt", "never", "nie"});
     if (result.question) {
-        if (has(t, {"warum", "wieso", "weshalb", "why", "beweis", "beweise", "evidence"})) result.intent = Intent::AskReason;
+        if (has(t, {"glaubt", "glaubst", "believe", "believes"})) result.intent = Intent::AskBelief; // "warum glaubt mir keiner?"
+        else if (has(t, {"warum", "wieso", "weshalb", "why", "beweis", "beweise", "evidence"})) result.intent = Intent::AskReason;
         else if (has(t, {"wo", "where"})) result.intent = Intent::AskAlibi;
         else if (has(t, {"unschuldig", "innocent", "safe", "vertrauen", "trust"})) result.intent = Intent::AskInnocence;
         else if (has(t, {"rolle", "role", "bist"}) || phrase(t, "are you")) result.intent = Intent::AskRole;
         else if (has(t, {"waehlen", "waehlst", "waehlt", "abstimmen", "stimmst", "voten", "votest", "votet", "vote", "voting"}))
             result.intent = Intent::AskVote;
         else result.intent = Intent::AskSuspicion;
-    } else if (self && !negated && roleIn(t) != Role::Unknown && (has(t, {"bin", "im", "am"}))) {
+    } else if (self && claimedRoleIn(t) != Role::Unknown) {
         result.intent = Intent::RoleClaim;
-        result.claimedRole = roleIn(t);
+        result.claimedRole = claimedRoleIn(t);
     } else if (self && has(t, {"war", "was"}) && !negated) {
         if (has(t, {"zuhause", "haus", "hause", "home", "house"})) result.place = Place::Home;
         else if (has(t, {"kapelle", "kirche", "chapel", "church"})) result.place = Place::Chapel;
@@ -157,7 +171,11 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         if (split) { if (!clauses.back().empty()) clauses.emplace_back(); }
         else clauses.back().push_back(token);
     }
+    // A seer presenting results states facts: "ich hab Berta gecheckt, sie ist ein Werwolf".
+    const bool seerContext = result.claimedRole == Role::Seer ||
+        has(t, {"gecheckt", "gechecked", "geprueft", "checked", "angeschaut", "angesehen", "untersucht", "inspiziert", "inspected", "peeked"});
     bool negatedBelief = false;
+    uint8_t lastNamed = kNoPlayer; // "er"/"sie" refers to the last person named in this message, never the speaker
     for (const auto& clause : clauses) {
         if (clause.empty()) continue;
         std::vector<uint8_t> targets;
@@ -168,8 +186,12 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         const bool asksWho = result.question && has(t, {"wer", "wen", "who"});
         if (targets.empty() && you && !asksWho && listener != kNoPlayer) targets.push_back(listener);
         if (targets.empty() && me && has(clause, {"bin", "am", "im"})) targets.push_back(speaker);
-        if (targets.empty() && has(clause, {"er", "sie", "ihn", "he", "she", "him", "her"}) && previousTopic != kNoPlayer)
-            targets.push_back(previousTopic);
+        if (targets.empty() && has(clause, {"er", "sie", "ihn", "he", "she", "him", "her"})) {
+            const uint8_t referent = lastNamed != kNoPlayer ? lastNamed : previousTopic;
+            if (referent != kNoPlayer && referent != speaker) targets.push_back(referent);
+        }
+        for (uint8_t id : targets)
+            if (id != speaker) lastNamed = id;
         if (!targets.empty()) result.topic = targets.back();
         if (result.question) continue; // asking is never evidence
         if (targets.empty() && (phrase(clause, "glaube nicht") || phrase(clause, "denke nicht") || phrase(clause, "dont think"))) {
@@ -192,24 +214,46 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         const bool vote = has(clause, {"waehle", "waehlen", "voten", "vote", "voting", "raus", "haengen", "haengt", "lynchen",
                                        "rauswerfen", "hinrichten", "lynch", "hang", "eliminate"}) ||
             phrase(clause, "stimme geht") || phrase(clause, "stimme fuer") || phrase(clause, "stimmen fuer");
-        float weight = wolf ? 1.8f : suspect ? 1.1f : defend ? -1.0f : vote ? 0.8f : 0.0f;
+        // "Clara ist die Hexe": somebody else's role, which later deaths can confirm or refute
+        const Role named = roleIn(clause);
+        const bool reportsRole = named != Role::Unknown && targets.size() == 1 && targets.front() != speaker && !negative &&
+            has(clause, {"ist", "war", "is", "was"}) && !has(clause, {"sagt", "sagte", "says", "said", "laut", "angeblich"});
+        if (reportsRole) result.roleReports.push_back({targets.front(), named});
+        const bool good = defend || reportsRole || has(clause, {"gut", "good", "dorfi"});
+        float weight = wolf ? 1.8f : suspect ? 1.1f : good ? -1.0f : vote ? 0.8f : 0.0f;
         if (negative) weight = -weight;
-        if (has(clause, {"vielleicht", "maybe", "eventuell", "glaube", "think", "vermute"})) weight *= 0.55f;
+        const bool hedged = has(clause, {"vielleicht", "maybe", "eventuell", "glaube", "think", "vermute"});
+        if (hedged) weight *= 0.55f;
         if (has(clause, {"sagt", "sagte", "says", "said", "laut", "angeblich", "supposedly"}) ||
             phrase(clause, "hat gesagt")) continue; // ambiguous reported speech: ask, do not pin it on every named person
-        if (wolf && weight > 0 && has(clause, {"gesehen", "saw", "verwandelt", "transformed", "geprueft", "checked"})) weight += 0.6f;
+        const bool fact = !hedged && !suspect && !vote &&
+            (wolf || reportsRole || (good && has(clause, {"ist", "sind", "war", "is", "are", "was"})));
+        if (seerContext && fact && weight != 0.0f) weight = weight > 0 ? kSeerWolf : kSeerGood;
+        else if (wolf && weight > 0 && has(clause, {"gesehen", "saw", "verwandelt", "transformed", "geprueft", "gecheckt", "checked"}))
+            weight += 0.6f;
         if (weight != 0.0f) {
             for (uint8_t id : targets) {
                 auto old = std::find_if(result.claims.begin(), result.claims.end(), [id](const Claim& c) { return c.target == id; });
-                if (old == result.claims.end()) result.claims.push_back({id, weight});
-                else old->weight = weight; // the last explicit correction in this message wins
+                if (old == result.claims.end()) result.claims.push_back({id, weight, fact});
+                else *old = {id, weight, fact}; // the last explicit correction in this message wins
             }
             if (!result.claims.empty() && result.intent == Intent::Unknown) result.intent = Intent::Statement;
         }
     }
     if (result.topic == kNoPlayer && (result.intent == Intent::AskReason || has(t, {"er", "sie", "he", "she"})))
         result.topic = previousTopic;
+    result.seerReport = seerContext && !result.question &&
+        std::any_of(result.claims.begin(), result.claims.end(), [](const Claim& c) { return c.fact; });
     return result;
+}
+
+bool presentSeerResults(Message& message) {
+    for (auto& c : message.claims)
+        if (c.fact) {
+            c.weight = c.weight > 0 ? kSeerWolf : kSeerGood;
+            message.seerReport = true;
+        }
+    return message.seerReport;
 }
 
 float Memory::credibility(uint8_t speaker) const {
@@ -217,12 +261,73 @@ float Memory::credibility(uint8_t speaker) const {
     return it == m_credibility.end() ? 0.8f : it->second;
 }
 
+Role Memory::claimedRole(uint8_t speaker) const {
+    const auto it = m_roles.find(speaker);
+    return it == m_roles.end() ? Role::Unknown : it->second;
+}
+
+std::vector<uint8_t> Memory::defenders(uint8_t target) const {
+    std::vector<uint8_t> out;
+    for (const auto& [key, e] : m_claims)
+        if (key.second == target && key.first != target && e.weight <= -0.5f) out.push_back(key.first);
+    return out;
+}
+
+bool Memory::otherSeer(uint8_t speaker) const {
+    return std::any_of(m_roles.begin(), m_roles.end(), [&](const auto& r) { return r.first != speaker && r.second == Role::Seer; });
+}
+
+int Memory::confirmed(uint8_t speaker) const {
+    const auto it = m_confirmed.find(speaker);
+    return it == m_confirmed.end() ? 0 : it->second;
+}
+
+void Memory::judge(uint8_t speaker, bool truthful) {
+    if (!truthful) {
+        m_liars.insert(speaker);
+        m_credibility[speaker] = 0.2f;
+    } else if (!liar(speaker)) {
+        ++m_confirmed[speaker];
+        m_credibility[speaker] = std::max(credibility(speaker), 1.3f);
+    }
+}
+
+void Memory::support(uint8_t speaker) {
+    if (!liar(speaker)) m_credibility[speaker] = std::min(1.3f, credibility(speaker) + 0.25f);
+}
+
 bool Memory::remember(uint8_t speaker, const Message& message, int day) {
     bool contradiction = false;
+    const bool seer = message.seerReport || message.claimedRole == Role::Seer || claimedRole(speaker) == Role::Seer;
     for (const auto& c : message.claims) {
         auto& old = m_claims[{speaker, c.target}];
         if (old.weight * c.weight < 0 && day - old.day <= 1 && !message.correction) contradiction = true;
-        old = {c.weight, day, false};
+        const bool report = message.seerReport && c.fact;
+        if (old.weight * c.weight > 0 && std::abs(old.weight) > std::abs(c.weight))
+            old.day = day; // "wir müssen Berta voten" must not weaken "Berta ist ein Werwolf" said before
+        else
+            old = {c.weight, day, false, report || (old.report && old.weight * c.weight > 0)};
+        if (!report) continue;
+        auto& r = m_reports[{speaker, c.target}];
+        if (r.weight * c.weight <= 0) r.checked = false; // a new or changed result is checked again
+        r.weight = c.weight;
+        r.seer = true;
+    }
+    for (const auto& reported : message.roleReports) {
+        auto& r = m_reports[{speaker, reported.target}];
+        if (r.role != reported.role) r.checked = false;
+        r.role = reported.role;
+        r.seer = r.seer || seer;
+    }
+    if (message.claimedRole == Role::Seer && claimedRole(speaker) != Role::Seer) {
+        // A second seer is suspicious, the more so when the "seer" was just accused by the first one.
+        for (const auto& [other, role] : m_roles) {
+            if (other == speaker || role != Role::Seer || liar(other)) continue;
+            const auto accused = m_claims.find({other, speaker});
+            const bool accusedFirst = accused != m_claims.end() && accused->second.weight > 0;
+            m_credibility[speaker] = credibility(speaker) * (accusedFirst ? 0.45f : 0.6f);
+            break;
+        }
     }
     if (message.claimedRole != Role::Unknown) {
         auto [it, fresh] = m_roles.emplace(speaker, message.claimedRole);
@@ -245,8 +350,11 @@ float Memory::suspicion(uint8_t target, int day) const {
     for (const auto& [key, e] : m_claims) {
         if (key.second != target) continue;
         const float selfClaim = key.first == target ? 0.25f : 1.0f;
-        total += e.weight * credibility(key.first) * selfClaim * std::pow(0.65f, static_cast<float>(std::max(0, day - e.day)));
+        const float age = e.report ? 0.0f : static_cast<float>(std::max(0, day - e.day)); // a seer's result does not fade
+        total += e.weight * credibility(key.first) * selfClaim * std::pow(0.65f, age);
     }
+    if (liar(target)) total += 3.0f; // whoever fakes seer results is most likely a wolf
+    else if (claimedRole(target) == Role::Seer) total -= 0.6f * credibility(target); // keep a credible seer alive
     return std::clamp(total, -2.0f, 4.0f);
 }
 
@@ -267,7 +375,25 @@ void Memory::observeRevealed(const GameView& view) {
         e.checked = true;
         if (std::abs(e.weight) < 1.5f) continue;
         const bool correct = (e.weight > 0) == isWolfRole(target->role);
-        m_credibility[key.first] = std::clamp(credibility(key.first) + (correct ? 0.1f : -0.25f), 0.3f, 1.2f);
+        const float old = credibility(key.first);
+        m_credibility[key.first] = std::clamp(old + (correct ? 0.1f : -0.25f), std::min(0.3f, old), std::max(1.2f, old));
+    }
+    for (auto& [key, r] : m_reports) {
+        const PlayerView* target = view.player(key.second);
+        if (r.checked || !target || target->alive || target->role == Role::Unknown) continue;
+        r.checked = true;
+        // "Dorfbewohner" is often meant as "on the village's side"
+        const bool match = r.role == Role::Villager ? !isWolfRole(target->role)
+                         : r.role != Role::Unknown  ? r.role == target->role
+                                                    : (r.weight > 0) == isWolfRole(target->role);
+        if (match) {
+            ++m_confirmed[key.first];
+            m_credibility[key.first] = std::min(1.5f, credibility(key.first) + 0.3f);
+        } else if (r.seer) {
+            judge(key.first, false);
+        } else {
+            m_credibility[key.first] = std::max(0.3f, credibility(key.first) - 0.25f);
+        }
     }
 }
 

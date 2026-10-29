@@ -6,6 +6,10 @@ add_executable(test_dialogue test_dialogue.cpp)
 target_link_libraries(test_dialogue PRIVATE werwolf_server_lib)
 add_test(NAME dialog COMMAND test_dialogue)
 
+add_executable(test_psychology test_psychology.cpp)
+target_link_libraries(test_psychology PRIVATE werwolf_server_lib)
+add_test(NAME gefuehle_rollen COMMAND test_psychology)
+
 add_executable(test_audio test_audio.cpp)
 target_link_libraries(test_audio PRIVATE werwolf_audio)
 add_test(NAME audio COMMAND test_audio)

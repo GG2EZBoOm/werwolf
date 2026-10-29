@@ -64,7 +64,8 @@ bool isNeutralKillerRole(Role r) { return r == Role::SerialKiller || r == Role::
 
 } // namespace
 
-Bot::Bot(uint8_t id, uint64_t seed) : m_rng(seed), m_id(id) {}
+Bot::Bot(uint8_t id, uint64_t seed, const Personality& personality)
+    : m_rng(seed), m_id(id), m_personality(personality), m_salt(seed * 0x9E3779B97F4A7C15ull + id) {}
 
 Vec2 Bot::steerTo(Vec2 target) const {
     const Vec2 d = target - position();
@@ -136,21 +137,36 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
     m_douseHouse = -1;
     m_phaseTime = 0.0f;
     m_idle = m_rng.uniform(0.0f, 3.0f);
-    m_think = m_rng.uniform(2.0f, 6.0f);
+    m_think = m_rng.uniform(2.0f, 6.0f) / m_personality.boldness; // Vorschnelle stimmen früh ab
     m_chatTimer = -1.0f;
     m_transformDelay = m_rng.uniform(4.0f, 16.0f);
     m_goHome = false;
     m_replies.clear();
+    m_companion = kNoPlayer;
+    m_hesitate = 0.0f;
     m_dialogue.observeRevealed(view);
+    review(match, view);
     m_wantsSteal = m_rng.chance(0.7f);
     const PlayerView* me = view.me();
     const bool alive = me && me->alive;
+    const float talk = m_personality.talk;
+    const bool planned = std::any_of(m_planned.begin(), m_planned.end(), [&](const Planned& p) { return p.phase == view.phase; });
     if (view.phase == Phase::Day) {
         chooseWanderTarget(match);
         m_reported = false;
-        if (alive && m_rng.chance(0.35f)) m_chatTimer = m_rng.uniform(8.0f, 40.0f);
+        if (alive && m_rng.chance(std::min(0.9f, 0.35f * talk))) m_chatTimer = m_rng.uniform(8.0f, 40.0f) / talk;
+        // Neugier: manche sehen sich zuerst an, wo heute Nacht jemand gestorben ist
+        for (const Match::Player& p : match.players()) {
+            if (!alive || p.alive || !p.diedAtNight || !m_aliveAtNight.contains(p.id) || !m_rng.chance(0.6f - 0.4f * m_personality.caution))
+                continue;
+            m_target = match.world().resolveCollision(Vec2{p.deathPosition.x, p.deathPosition.z} +
+                                                          Vec2{m_rng.uniform(-2.5f, 2.5f), m_rng.uniform(-2.5f, 2.5f)}, 0.6f);
+            if (match.world().houseAt(m_target, 0.5f) >= 0) m_target = {p.deathPosition.x, p.deathPosition.z};
+            m_idle = m_rng.uniform(0.0f, 1.5f);
+            break;
+        }
     } else if (view.phase == Phase::Assembly) {
-        if (alive && m_rng.chance(0.6f)) m_chatTimer = m_rng.uniform(3.0f, 20.0f);
+        if (alive && (planned || m_rng.chance(std::min(0.95f, 0.6f * talk)))) m_chatTimer = m_rng.uniform(3.0f, 20.0f) / talk;
         // Der Bär brummt öffentlich, wenn ein Sitznachbar des Bärenführers ein Werwolf ist
         std::vector<const Match::Player*> seated;
         for (const Match::Player& p : match.players())
@@ -165,9 +181,11 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
                 if (s->id != m_id && !isWolfRole(view.yourRole)) m_suspicion[s->id] += 1.5f;
         }
     } else if (view.phase == Phase::Night) {
+        // Vorsichtige schließen sich eher ein; erst ein Moment des Zögerns, dann los
         const float roll = m_rng.uniform(0.0f, 1.0f);
-        m_goHome = roll < 0.45f;
-        m_staysOut = roll >= 0.85f;
+        m_goHome = roll < 0.25f + 0.4f * m_personality.caution + 0.35f * m_feelings.fear;
+        m_staysOut = roll >= std::min(0.99f, 0.775f + 0.15f * m_personality.caution + 0.2f * m_feelings.fear);
+        if (!isWolfRole(view.yourRole)) m_hesitate = m_rng.uniform(0.5f, 2.5f) * (0.6f + m_personality.caution);
         const float a = m_rng.uniform(0.0f, 2.0f * eng::kPi);
         m_target = {std::cos(a) * m_rng.uniform(3.0f, 6.5f), std::sin(a) * m_rng.uniform(3.0f, 6.5f)};
         if (m_staysOut) chooseWanderTarget(match);
@@ -186,7 +204,11 @@ uint8_t Bot::chooseCaptain(const Match& match, const GameView& view) {
         else if (!wolf && suspicion(match, p.id) <= 0.5f) trusted.push_back(p.id);
         else others.push_back(p.id);
     }
-    if (!trusted.empty()) return m_rng.pick(trusted);
+    if (!trusted.empty()) {
+        const auto best = std::max_element(trusted.begin(), trusted.end(), [&](uint8_t a, uint8_t b) { return relationship(a) < relationship(b); });
+        if (relationship(*best) >= 0.4f && m_rng.chance(0.75f)) return *best;
+        return m_rng.pick(trusted);
+    }
     return others.empty() ? kNoPlayer : m_rng.pick(others);
 }
 
@@ -196,14 +218,18 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
     for (const Match::Player& p : match.players())
         if (p.alive && p.id != m_id) candidates.push_back(p.id);
     if (candidates.empty()) return kNoPlayer;
+    if (wolf) if (const uint8_t sacrifice = sacrificeTarget(match); sacrifice != kNoPlayer) return sacrifice;
     // bekannte Werwölfe (Seherin) zuerst
     for (const SeerResult& r : view.seerResults) {
         const Match::Player* p = match.find(r.player);
         if (p && p->alive && isWolfRole(r.role) && !wolf) return r.player;
     }
     // stärkster Verdacht aus Beobachtungen und Gesprächen
-    const uint8_t suspect = strongestSuspect(match, 1.0f);
-    if (suspect != kNoPlayer && m_rng.chance(0.75f)) return suspect;
+    const uint8_t suspect = strongestSuspect(match, 1.0f / m_personality.boldness);
+    // einem Seherergebnis oder Augenzeugen folgt man eher als einer vagen Ahnung; wer einen klaren
+    // Verdacht hat und trotzdem schwankt, läuft dann aber nicht einfach der Mehrheit hinterher
+    if (suspect != kNoPlayer && m_rng.chance(suspicion(match, suspect) >= 1.8f ? 0.9f : 0.75f)) return suspect;
+    const bool ownMind = suspect != kNoPlayer;
     if (const Match::Player* me = match.find(m_id); me && me->role == Role::Sectarian) {
         std::vector<uint8_t> enemies;
         for (const Match::Player& p : match.players())
@@ -219,12 +245,13 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
         const PlayerView* t = view.player(id);
         if (!t || !t->alive || id == m_id) continue;
         if (wolf && isWolfRole(t->role)) continue;
+        if (!wolf && suspicion(match, id) < -0.25f) continue; // nicht hinter den Wölfen her gegen eine glaubwürdige Seherin
         if (count > best) {
             best = count;
             leader = id;
         }
     }
-    if (leader != kNoPlayer && m_rng.chance(0.55f)) return leader;
+    if (leader != kNoPlayer && !ownMind && m_rng.chance(m_personality.follow)) return leader;
     std::vector<uint8_t> options;
     for (uint8_t id : candidates) {
         const PlayerView* t = view.player(id);
@@ -254,13 +281,18 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
         m_mover.velocity = {0, 0};
         m_initialized = true;
     }
+    updateFeelings(dt, match, view);
     if (view.phase != m_phase || view.day != m_day) {
         m_phase = view.phase;
         m_day = view.day;
         onPhaseChange(match, view);
     }
     m_phaseTime += dt;
+    m_now = match.clock();
     updateConversation(dt, match, say);
+    observe(dt, match, view);
+    roleplay(match, say);
+    speakPlanned(match, say);
 
     // Augenzeuge: wer nachts als (halbe) Bestie gesehen wird, ist verdächtig
     if (me->alive && view.phase == Phase::Night) {
@@ -269,12 +301,32 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
             const Vec3 pos{p.x, 0, p.z};
             if (distanceXZ(pos, me->position) > 12.0f || !match.hasLineOfSight(pos, me->position)) continue;
             m_seenAsWolf[p.id] = view.day;
-            // in der Dunkelheit erkennt man nicht jedes Gesicht
+            // in der Dunkelheit erkennt man nicht jedes Gesicht – und manchmal hält man die Bestie für jemanden,
+            // den man kurz vorher in der Nähe gesehen hat
             if (!isWolfRole(me->role) && m_rng.chance(0.6f)) {
-                m_suspicion[p.id] += 5.0f;
-                m_wolfWitness[p.id] = view.day;
+                uint8_t seen = p.id;
+                if (m_rng.chance(0.25f)) {
+                    float nearest = 10.0f;
+                    for (const auto& [other, positions] : m_sightings) {
+                        const Match::Player* o = match.find(other);
+                        if (other == p.id || !o || !o->alive) continue;
+                        for (Vec2 at : positions)
+                            if (const float d = (at - Vec2{p.x, p.z}).length(); d < nearest) { nearest = d; seen = other; }
+                    }
+                }
+                m_suspicion[seen] += 5.0f;
+                m_wolfWitness[seen] = view.day;
             }
         }
+        // Ein Wolf in Gestalt der Bestie merkt, wer ihn gesehen hat – und holt sich diesen Zeugen zuerst
+        if (me->wolfForm())
+            for (const Match::Player& p : match.players()) {
+                if (!p.alive || p.id == m_id || isWolfRole(p.role) || m_seenAsWolf[p.id] == -view.day - 1) continue;
+                if (distanceXZ(p.position, me->position) > 12.0f || !match.hasLineOfSight(p.position, me->position)) continue;
+                m_seenAsWolf[p.id] = -view.day - 1;
+                m_suspicion[p.id] += 4.0f;
+                m_quarry = kNoPlayer;
+            }
     }
 
     // Fährtenleser: Führte die Spur zu einer Leiche?
@@ -299,10 +351,30 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 speak(say, m_rng.pick(kEndLines), false);
             } else if (me->alive && me->role == Role::Jester && m_rng.chance(0.6f)) {
                 speak(say, m_rng.pick(kJesterLines), false);
-            } else if (me->alive && suspect != kNoPlayer && m_rng.chance(0.7f)) {
+            } else if (me->alive && view.phase == Phase::Assembly && view.day >= 2 && packSpeaker(match) && m_fakeReportDay != view.day &&
+                       (m_claimedSeer || (!packClaimedSeer(match) && m_rng.chance(0.55f * m_personality.boldness)))) {
+                // Ein Wolf gibt sich als Seherin aus: belastet einen Unschuldigen oder entlastet einen bedrängten Gefährten
+                m_fakeReportDay = view.day;
+                const bool first = !m_claimedSeer;
+                m_claimedSeer = true;
+                uint8_t mate = kNoPlayer;
+                for (const auto& p : view.players)
+                    if (p.alive && p.id != m_id && isWolfRole(p.role) && m_dialogue.suspicion(p.id, view.day) > 1.0f &&
+                        p.id != sacrificeTarget(match)) mate = p.id;
+                if (const Match::Player* m = match.find(mate); m && !first) {
+                    speak(say, tx("Ich habe {} geprüft: kein Werwolf.", "I checked {}: not a werewolf.", m->name), false,
+                          {Evidence{Evidence::Kind::Seer, mate, dialogue::kSeerGood}});
+                } else if (const Match::Player* v = match.find(scapegoat(match, kNoPlayer))) {
+                    speak(say,
+                          first ? tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", v->name)
+                                : tx("Ich habe {} geprüft: Werwolf.", "I checked {}: werewolf.", v->name),
+                          false, {Evidence{Evidence::Kind::Seer, v->id, dialogue::kSeerWolf}});
+                }
+            } else if (me->alive && suspect != kNoPlayer && match.clock() - m_heardTopic[suspect] > 25.0 && m_rng.chance(0.7f)) {
+                // nicht wiederholen, was ein anderer gerade über dieselbe Person gesagt hat
                 std::optional<Evidence> evidence;
                 const Text line = explain(match, suspect, &evidence);
-                speak(say, line, false, {evidence});
+                speak(say, line, false, {evidence, false, suspect});
             } else if (me->alive) {
                 std::vector<std::string> names;
                 for (const Match::Player& p : match.players())
@@ -312,7 +384,7 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 if (view.yourRole == Role::Seer) {
                     for (const SeerResult& r : view.seerResults) {
                         const PlayerView* p = view.player(r.player);
-                        if (p && p->alive && isWolfRole(r.role) && m_rng.chance(0.7f)) {
+                        if (p && p->alive && isWolfRole(r.role) && shouldReveal(match, r.player) && m_rng.chance(0.7f)) {
                             speak(say, tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", p->name), false,
                                   {Evidence{Evidence::Kind::Seer, r.player, 2.4f}});
                             spoke = true;
@@ -320,7 +392,13 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                         }
                     }
                 }
-                if (!spoke) speak(say, fill(m_rng.pick(kDayLines), name), false);
+                // Plaudern stört eine laufende Diskussion; "Guten Morgen" passt nur tagsüber
+                const bool discussing = match.clock() - m_lastDiscussion < 30.0 ||
+                    std::any_of(m_planned.begin(), m_planned.end(), [&](const Planned& p) { return p.phase == view.phase; });
+                if (!spoke && !discussing) {
+                    const int first = view.phase == Phase::Day ? 0 : 1;
+                    speak(say, fill(kDayLines[static_cast<size_t>(m_rng.range(first, static_cast<int>(kDayLines.size()) - 1))], name), false);
+                }
             }
         }
     }
@@ -345,6 +423,7 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
 
     const bool ghost = !me->alive;
     m_mover.move(wish, ghost ? kGhostSpeed * 0.5f : speed, dt, match.world(), !ghost, match.closedDoors());
+    if (!ghost) faceSomeone(dt, match); // stehend dreht man sich zu dem, der gerade spricht
     match.movePlayer(m_id, m_mover.position.x, m_mover.position.z, m_mover.yaw, speed > kWalkSpeed ? EntitySprint : 0);
 }
 
@@ -463,14 +542,41 @@ void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Ve
     switch (view.phase) {
     case Phase::Day: {
         if (dayRole(match, view, me, wish)) break;
+        // ein Stück mit jemandem gehen, dem man traut
+        const Match::Player* companion = match.find(m_companion);
+        if (companion && companion->alive && m_companionTime > 0.0f && w.houseAt({companion->position.x, companion->position.z}) < 0) {
+            m_companionTime -= dt;
+            m_target = w.resolveCollision(Vec2{companion->position.x, companion->position.z} + m_companionOffset, 0.6f);
+            if ((m_target - pos).length() > 4.0f) m_idle = 0.0f;
+        } else {
+            m_companion = kNoPlayer;
+        }
         if (m_idle > 0.0f) {
             m_idle -= dt;
-            break;
-        }
-        const Nav nav = navigate(match, view, m_target, 1.2f, wish, false);
-        if (nav != Nav::Moving) {
+        } else if (const Nav nav = navigate(match, view, m_target, m_companion != kNoPlayer ? 1.8f : 1.2f, wish, false); nav != Nav::Moving) {
             m_idle = nav == Nav::Arrived ? m_rng.uniform(3.0f, 12.0f) : 0.0f;
-            chooseWanderTarget(match);
+            if (m_companion == kNoPlayer && m_rng.chance(0.15f + 0.3f * m_personality.follow)) {
+                float best = 30.0f;
+                for (const Match::Player& p : match.players()) {
+                    const float d = distanceXZ(p.position, me.position) - 8.0f * relationship(p.id);
+                    if (!p.alive || p.id == m_id || d > best || relationship(p.id) < -0.25f || suspicion(match, p.id) > 0.5f) continue;
+                    best = d;
+                    m_companion = p.id;
+                }
+                const float a = m_rng.uniform(0.0f, 2.0f * eng::kPi);
+                m_companionOffset = Vec2{std::cos(a), std::sin(a)} * m_rng.uniform(1.5f, 2.5f);
+                m_companionTime = m_rng.uniform(15.0f, 35.0f);
+            }
+            if (m_companion == kNoPlayer) chooseWanderTarget(match);
+        }
+        // Vorsichtige halten Abstand zu dem, den sie für einen Wolf halten
+        if (m_personality.caution > 0.4f) {
+            for (const Match::Player& p : match.players()) {
+                const Vec2 away = pos - Vec2{p.position.x, p.position.z};
+                if (!p.alive || p.id == m_id || away.length() > 3.5f || away.length() < 0.01f || suspicion(match, p.id) < 2.0f) continue;
+                const Vec2 sum = wish + away.normalized() * m_personality.caution;
+                wish = sum.length() > 1.0f ? sum.normalized() : sum;
+            }
         }
         break;
     }
@@ -493,7 +599,7 @@ void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Ve
             const uint8_t target = view.election ? chooseCaptain(match, view) : chooseVote(match, view);
             if (target != kNoPlayer) {
                 match.interact(m_id, Interaction::Vote, target);
-                if (m_rng.chance(0.3f))
+                if (m_rng.chance(std::min(0.8f, 0.3f * m_personality.talk)))
                     speak(say,
                           view.election ? tx("Ich wähle {}.", "I choose {}.", view.player(target)->name)
                                         : tx("Meine Stimme geht an {}.", "My vote goes to {}.", view.player(target)->name),
@@ -556,6 +662,12 @@ bool Bot::hunt(Match& match, const GameView& view, const Match::Player& me, Vec2
             for (const Match::Player& o : match.players())
                 if (o.alive && o.id != p.id && o.id != m_id && distanceXZ(o.position, p.position) < 8.0f) ++company;
             float score = distanceXZ(p.position, me.position) + static_cast<float>(company) * 25.0f;
+            // Wölfe holen sich gezielt, wer ihnen gefährlich wird: eine Seherin oder lautstarke Ankläger
+            if (!killer && !isWolfRole(p.role)) {
+                const auto threat = m_suspicion.find(p.id);
+                score -= std::clamp(threat == m_suspicion.end() ? 0.0f : threat->second, 0.0f, 6.0f) * 12.0f;
+                if (m_dialogue.claimedRole(p.id) == Role::Seer) score -= 40.0f;
+            }
             const int h = match.world().houseAt({p.position.x, p.position.z});
             if (h >= 0 && static_cast<size_t>(h) < match.doors().size()) {
                 const DoorState& d = match.doors()[static_cast<size_t>(h)];
@@ -750,15 +862,16 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
                 }
             }
         }
-        if (view.can(AbilityPoison) && m_rng.chance(0.03f)) {
-            const uint8_t near = nearestPlayer(match, me.position, isAlive, kPoisonRange);
-            if (near != kNoPlayer) match.interact(m_id, Interaction::Poison, near);
+        if (view.can(AbilityPoison)) {
+            const uint8_t suspect = strongestSuspect(match, 3.0f);
+            if (suspect != kNoPlayer && match.checkInteraction(m_id, Interaction::Poison, suspect).empty())
+                match.interact(m_id, Interaction::Poison, suspect);
         }
     }
 
     // Krach an einer Tür: wer draußen ist oder gleich nebenan wohnt, läuft hin und sieht nach
     const int inside = w.houseAt(pos);
-    if (!isWolfRole(me.role) && !isNeutralKillerRole(me.role)) {
+    if (!isWolfRole(me.role) && !isNeutralKillerRole(me.role) && m_feelings.fear < 0.55f) {
         for (size_t i = 0; i < match.doors().size(); ++i) {
             const DoorState& d = match.doors()[i];
             if (doorPassable(d) || d.health >= 100 || static_cast<int>(i) == inside) continue;
@@ -768,6 +881,7 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
             m_goHome = false;
             m_staysOut = true;
             m_idle = 0.0f;
+            m_hesitate = 0.0f;
             m_target = door + Vec2{m_rng.uniform(-2.5f, 2.5f), m_rng.uniform(1.0f, 3.0f)};
             m_target = w.resolveCollision(m_target, 0.6f);
             speed = kSprintSpeed;
@@ -775,6 +889,12 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
         }
     }
 
+    // Erst einmal unschlüssig umsehen, dann los
+    if (m_hesitate > 0.0f) {
+        m_hesitate -= dt;
+        m_mover.yaw += dt * ((m_id & 1) ? 1.1f : -1.1f);
+        return;
+    }
     // Bewegung: viele schließen sich zu Hause ein, andere bleiben am Feuer oder streifen umher
     if (m_goHome) {
         goHome(match, view, me, wish);

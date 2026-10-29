@@ -173,6 +173,8 @@ constexpr float kSuccessorSeconds = 15.0f;
 const char* roleName(Role role, Lang lang);
 inline const char* roleName(Role role) { return roleName(role, language()); }
 Text roleText(Role role);
+// "die Hexe", "ein Dorfbewohner" – für Sätze wie "Anna ist die Hexe."
+Text roleWithArticle(Role role);
 const char* roleDescription(Role role, Lang lang);
 inline const char* roleDescription(Role role) { return roleDescription(role, language()); }
 Text roleDescriptionText(Role role);

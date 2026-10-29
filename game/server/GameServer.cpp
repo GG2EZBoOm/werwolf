@@ -405,7 +405,10 @@ void GameServer::startGame(Member& host) {
     m_match = std::move(match);
     m_bots.clear();
     for (auto& m : m_members)
-        if (m->bot) m_bots.emplace_back(m->id, m_rng.next64());
+        if (m->bot) {
+            const uint64_t seed = m_rng.next64();
+            m_bots.emplace_back(m->id, seed, Bot::Personality::random(seed)); // jeder Bot spielt und schreibt anders
+        }
     eng::log::info("Spiel gestartet mit {} Spielern (Welt {} in {:.0f} ms)", seats.size(), worldSeed,
                    (eng::nowSeconds() - t0) * 1000.0);
     routeMatchNotices();

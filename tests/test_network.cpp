@@ -304,22 +304,27 @@ TEST(SpielerChatErreichtGenauEinenPassendenBot) {
     for (const auto& p : client.view().players) if (p.bot) { bot = p.id; name = p.name; break; }
     CHECK(bot != kNoPlayer);
     client.clearLog();
-    client.sendChat(name + ", ich bin die Seherin", false);
+    // A greeting, not a role claim: the real seer among the bots would rightly object to that as well.
+    client.sendChat(name + ", hallo", false);
+    // Only answers to the greeting: a bot's own small talk may also start with "Testerin, ".
+    auto isReply = [&](const LogEntry& entry) {
+        return entry.isChat && entry.from != client.myId() && entry.text.de.starts_with("Testerin, ") &&
+               entry.text.de.find("Verdächtiges") != std::string::npos;
+    };
     auto replies = [&] {
         int count = 0;
         for (const auto& entry : client.log())
-            if (entry.isChat && entry.from != client.myId() && entry.text.de.starts_with("Testerin, ")) ++count;
+            if (isReply(entry)) ++count;
         return count;
     };
     CHECK(pump(client, [&] { return replies() > 0; }, 3.0));
     pump(client, [] { return false; }, 1.2); // allow enough time for accidental bot echoes
     CHECK_EQ(replies(), 1);
     for (const auto& entry : client.log()) {
-        if (!entry.isChat || !entry.text.de.starts_with("Testerin, ")) continue;
+        if (!isReply(entry)) continue;
         CHECK_EQ(entry.from, bot);
         CHECK_EQ(entry.channel, ChatChannel::Global);
-        CHECK(entry.text.de.find("geprüft") != std::string::npos);
-        CHECK(entry.text.en.find("check") != std::string::npos);
+        CHECK(entry.text.en.find("suspicious") != std::string::npos);
         std::printf("    %s: %s\n", entry.name.c_str(), entry.text.de.c_str());
     }
     client.disconnect();

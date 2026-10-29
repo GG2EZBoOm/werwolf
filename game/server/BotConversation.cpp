@@ -9,11 +9,11 @@ bool secretChannel(ChatChannel channel) {
     return channel == ChatChannel::Wolves || channel == ChatChannel::Family || channel == ChatChannel::Dead;
 }
 
-// "Mia, die Rolle …" rather than "Mia, Die Rolle …"; "Ich", "I" and player names keep their capital.
+// "Mia, die Rolle …" / "Mia, ich glaube dir" rather than "Mia, Die …" / "Mia, Ich …"; English "I" and
+// player names keep their capital.
 std::string lowerFirst(std::string s, const Match& match) {
     if (s.empty() || s[0] < 'A' || s[0] > 'Z') return s;
-    const std::string word = s.substr(0, s.find_first_of(" ,.!?:;'"));
-    if (word == "Ich" || word == "I") return s;
+    if (s.substr(0, s.find_first_of(" ,.!?:;'")) == "I") return s;
     for (const auto& p : match.players())
         if (!p.name.empty() && s.starts_with(p.name) &&
             (s.size() == p.name.size() || std::string_view(" ,.!?:;'").find(s[p.name.size()]) != std::string_view::npos))
@@ -26,11 +26,36 @@ Text addressTo(const std::string& name, const Text& response, const Match& match
     return {name + ", " + lowerFirst(response.de, match), name + ", " + lowerFirst(response.en, match)};
 }
 
+const dialogue::Claim* factAbout(const dialogue::Message& message, uint8_t target) {
+    for (const auto& c : message.claims)
+        if (c.target == target && c.fact) return &c;
+    return nullptr;
+}
+
+const dialogue::RoleReport* roleReportAbout(const dialogue::Message& message, uint8_t target) {
+    for (const auto& r : message.roleReports)
+        if (r.target == target) return &r;
+    return nullptr;
+}
+
+// Seer results and role reports: statements of fact that someone can confirm or refute.
+bool reportsFacts(const dialogue::Message& message) { return message.seerReport || !message.roleReports.empty(); }
+
+std::vector<uint8_t> reportedPlayers(const dialogue::Message& message) {
+    std::vector<uint8_t> out;
+    for (const auto& r : message.roleReports) out.push_back(r.target);
+    if (message.seerReport)
+        for (const auto& c : message.claims)
+            if (c.fact && std::find(out.begin(), out.end(), c.target) == out.end()) out.push_back(c.target);
+    return out;
+}
+
 } // namespace
 
 float Bot::suspicion(const Match& match, uint8_t target) const {
     const auto own = m_suspicion.find(target);
-    return (own == m_suspicion.end() ? 0.0f : own->second) + m_dialogue.suspicion(target, match.day());
+    // gutgläubige Bots geben mehr auf das, was andere sagen, skeptische weniger
+    return (own == m_suspicion.end() ? 0.0f : own->second) + m_personality.trust * m_dialogue.suspicion(target, match.day()) + socialBias(target);
 }
 
 dialogue::Message Bot::understand(const Match& match, uint8_t speaker, const Text& text) const {
@@ -38,13 +63,29 @@ dialogue::Message Bot::understand(const Match& match, uint8_t speaker, const Tex
     for (const auto& p : match.players()) people.push_back({p.id, p.name});
     uint8_t topic = kNoPlayer;
     if (auto it = m_topics.find(speaker); it != m_topics.end() && match.clock() - it->second.time < 60.0) topic = it->second.player;
-    return dialogue::parse(text.de.empty() ? text.en : text.de, people, speaker, m_id, topic);
+    auto message = dialogue::parse(text.de.empty() ? text.en : text.de, people, speaker, m_id, topic);
+    if (!message.seerReport && m_dialogue.claimedRole(speaker) == Role::Seer) dialogue::presentSeerResults(message);
+    return message;
 }
 
 bool Bot::knowsFirstHand(const Match& match, const Evidence& heard) const {
+    if (heard.kind == Evidence::Kind::KnownRole || heard.kind == Evidence::Kind::Vouch || heard.kind == Evidence::Kind::Opinion) return false;
     for (const auto& result : match.viewFor(m_id).seerResults)
         if (result.player == heard.target && isWolfRole(result.role) == (heard.weight > 0)) return true;
     return heard.weight > 0 && m_wolfWitness.contains(heard.target);
+}
+
+int Bot::verdict(const Match& match, const dialogue::Message& message, uint8_t target) const {
+    const auto view = match.viewFor(m_id);
+    Role known = target == m_id ? view.yourRole : Role::Unknown;
+    if (const auto* p = view.player(target); known == Role::Unknown && p) known = p->role;
+    for (const auto& result : view.seerResults)
+        if (known == Role::Unknown && result.player == target) known = result.role;
+    if (known == Role::Unknown) return 0;
+    if (const auto* r = roleReportAbout(message, target))
+        return (r->role == Role::Villager ? !isWolfRole(known) : r->role == known) ? 1 : -1;
+    if (const auto* c = factAbout(message, target); c && message.seerReport) return (c->weight > 0) == isWolfRole(known) ? 1 : -1;
+    return 0;
 }
 
 bool Bot::repeats(uint8_t speaker, const dialogue::Message& message) const {
@@ -65,25 +106,44 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         // Bots only respond to another bot's first-hand evidence, and never to a response.
         if (!speech || !speech->evidence || speech->reply) return 0;
         const Evidence& heard = *speech->evidence;
-        if (heard.target == m_id) return heard.weight > 0 ? 90 : 0;
-        if (knowsFirstHand(match, heard)) return 60;
         const auto view = match.viewFor(m_id);
+        if (heard.target == m_id) return heard.weight > 0 ? 90 : 0;
+        if (heard.kind == Evidence::Kind::Seer && view.yourRole == Role::Seer) return 85; // that is my role
+        dialogue::Message asMessage;
+        asMessage.seerReport = heard.kind == Evidence::Kind::Seer;
+        asMessage.claims.push_back({heard.target, heard.weight, true});
+        if (wouldCounterclaim(match, asMessage, speaker)) return 85;
+        if (knowsFirstHand(match, heard) && shouldReveal(match, heard.target)) return 60;
+        if (heard.weight > 0 && relationship(heard.target) >= 0.45f && suspicion(match, heard.target) < 3.0f &&
+            (heard.kind == Evidence::Kind::Opinion || heard.kind == Evidence::Kind::Sighting)) return 45;
         const auto* accused = view.player(heard.target);
         if (heard.weight > 0 && isWolfRole(view.yourRole) && accused && isWolfRole(accused->role)) return 50; // cover for the pack
+        if (heard.kind == Evidence::Kind::Seer && m_dialogue.otherSeer(speaker)) return 40;             // two seers: one is lying
         return 0;
     }
     const auto message = understand(match, speaker, text);
     const auto* addressed = match.find(message.addressed);
     const auto* topic = match.find(message.topic);
+    const auto reported = reportedPlayers(message);
+    const bool accused = std::any_of(message.claims.begin(), message.claims.end(),
+                                     [&](const dialogue::Claim& c) { return c.target == m_id && c.weight > 0; });
+    // Whoever is named or accused speaks up even when the message was addressed to someone else.
     int priority = 0;
-    if (addressed && addressed->alive) {
-        if (message.addressed != m_id) return 0;
+    if (addressed && addressed->alive && message.addressed == m_id) {
         priority = 100;
-    } else if (std::any_of(message.claims.begin(), message.claims.end(),
-                           [&](const dialogue::Claim& c) { return c.target == m_id && c.weight > 0; })) {
+    } else if (std::find(reported.begin(), reported.end(), m_id) != reported.end()) {
+        priority = 95; // confirm or refute what was said about me
+    } else if (accused) {
         priority = 90;
+    } else if ((message.claimedRole == Role::Seer && match.viewFor(m_id).yourRole == Role::Seer) ||
+               wouldCounterclaim(match, message, speaker)) {
+        priority = 85; // that is my role – or a wolf pretends it is
+    } else if (addressed && addressed->alive) {
+        return 0;
     } else if (message.topic == m_id) {
         priority = 70;
+    } else if (reportsFacts(message)) {
+        priority = 40; // a seer's results deserve a reaction from the room
     } else if (addressed || (topic && !topic->alive)) {
         priority = 30; // someone should point out that this player is dead
     } else if (message.intent == dialogue::Intent::Unknown) {
@@ -102,24 +162,59 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         match.phase() == Phase::GameOver || !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel)) return;
     // From bots only first-hand evidence counts, never their wording: a repeated rumour must not
     // turn into a new witness.
+    lookAt(speaker, match.clock() + 3.0);
+    // someone already said this; nodding along beats repeating it
+    if (speech && speech->topic != kNoPlayer) {
+        std::erase_if(m_planned, [&](const Planned& p) { return p.event == speech->topic; });
+        m_heardTopic[speech->topic] = match.clock();
+    }
     const Evidence* heard = from->bot && speech && speech->evidence ? &*speech->evidence : nullptr;
     if (from->bot && !heard) return;
     dialogue::Message message;
     if (heard) {
         message.intent = dialogue::Intent::Statement;
-        message.claims.push_back({heard->target, heard->weight});
+        message.claims.push_back({heard->target, heard->weight, heard->kind != Evidence::Kind::Opinion});
         message.mentions.push_back(heard->target);
         message.topic = heard->target;
+        // A bot presenting seer results claims the seer, true or not; later reveals can expose a liar.
+        message.seerReport = heard->kind == Evidence::Kind::Seer;
+        if (message.seerReport) message.claimedRole = Role::Seer;
     } else {
         message = understand(match, speaker, text);
     }
     std::erase_if(message.claims, [&](const dialogue::Claim& c) {
         const auto* p = match.find(c.target);
-        return !p || !p->alive;
+        return !p || (!p->alive && !(message.seerReport && c.fact)); // a result about the dead is checked against the reveal
     });
     float before = 0;
     for (const auto& claim : message.claims) before += m_dialogue.suspicion(claim.target, match.day());
-    const bool contradiction = m_dialogue.remember(speaker, message, match.day());
+    // Naming a role that was revealed already proves nothing; only a wrong one tells us something.
+    dialogue::Message remembered = message;
+    {
+        auto revealedAlready = [&](uint8_t id) {
+            const auto* p = match.find(id);
+            return p && !p->alive && verdict(match, message, id) > 0;
+        };
+        std::erase_if(remembered.claims, [&](const dialogue::Claim& c) { return c.fact && revealedAlready(c.target); });
+        std::erase_if(remembered.roleReports, [&](const dialogue::RoleReport& r) { return revealedAlready(r.target); });
+    }
+    const bool contradiction = m_dialogue.remember(speaker, remembered, match.day());
+    feelChat(match, speaker, remembered);
+    if (heard && heard->kind == Evidence::Kind::Vouch) m_dialogue.support(heard->target);
+    if (!message.claims.empty() || reportsFacts(message) || message.claimedRole != Role::Unknown) m_lastDiscussion = match.clock();
+    const auto view = match.viewFor(m_id);
+    if (reportsFacts(message) || message.claimedRole == Role::Seer) {
+        m_dialogue.observeRevealed(view); // a wrong result about the dead is caught at once
+        for (uint8_t target : reportedPlayers(remembered))
+            if (const int v = verdict(match, remembered, target)) m_dialogue.judge(speaker, v > 0);
+        if (message.claimedRole == Role::Seer && view.yourRole == Role::Seer) m_dialogue.judge(speaker, false);
+    }
+    // Wolves remember who is dangerous to the pack: whoever accuses one of them, a seer most of all.
+    if (isWolfRole(view.yourRole))
+        for (const auto& c : message.claims) {
+            const auto* p = view.player(c.target);
+            if (c.weight > 0 && (c.target == m_id || (p && isWolfRole(p->role)))) m_suspicion[speaker] += message.seerReport ? 3.0f : 1.0f;
+        }
     float after = 0;
     for (const auto& claim : message.claims) after += m_dialogue.suspicion(claim.target, match.day());
     if (match.phase() == Phase::Vote && !match.election() && m_voted && match.timeLeft() > 4.0f &&
@@ -129,10 +224,19 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         m_reconsiderAfter = match.clock() + 6.0;
     }
     if (message.topic != kNoPlayer) m_topics[speaker] = {message.topic, match.clock()};
-    if (!reply || replyPriority(match, speaker, text, channel, speech) == 0) return;
+    const int priority = reply ? replyPriority(match, speaker, text, channel, speech) : 0;
+    if (priority == 0) return;
     std::optional<Evidence> evidence;
-    const Text response = heard ? react(match, *heard, &evidence) : answer(match, speaker, message, contradiction, &evidence);
+    Text response = styled(heard ? react(match, speaker, *heard, &evidence) : answer(match, speaker, message, contradiction, &evidence),
+                           m_personality.style);
     if (response.empty()) return;
+    // Wer dreimal dasselbe fragt, bekommt nicht dreimal denselben Satz
+    const Reply* previous = !m_replies.empty() ? &m_replies.back() : m_lastReply ? &*m_lastReply : nullptr;
+    if (previous && previous->speaker == speaker && previous->text == addressTo(from->name, response, match))
+        response = styled({"Wie gesagt – dazu habe ich gerade nichts Neues.", "Like I said – nothing new from me on that right now."},
+                          m_personality.style);
+    // a wolf who answers with seer results has now claimed the seer
+    if (evidence && evidence->kind == Evidence::Kind::Seer && isWolfRole(view.yourRole)) m_claimedSeer = true;
     if ((message.topic == kNoPlayer || message.topic == m_id) &&
         (message.intent == dialogue::Intent::AskSuspicion || message.intent == dialogue::Intent::AskVote)) {
         const uint8_t discussed = message.intent == dialogue::Intent::AskVote && match.phase() == Phase::Vote && me->vote != kNoPlayer
@@ -140,8 +244,11 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         if (discussed != kNoPlayer) m_topics[speaker] = {discussed, match.clock()};
     }
     // Questions asked in quick succession are answered one after another, like a person typing.
-    const double due = std::max(match.clock() + m_rng.uniform(1.2f, 2.8f), m_nextReply);
-    m_nextReply = due + m_rng.uniform(2.5f, 3.5f);
+    // After a seer's results, whoever is not named takes a moment longer, so replies do not arrive all at once.
+    const float haste = 1.0f - 0.6f * m_feelings.stress;
+    const float think = m_rng.uniform(1.2f, 2.8f) * haste + (reportsFacts(message) && priority < 90 ? m_rng.uniform(1.5f, 3.0f) : 0.0f);
+    const double due = std::max(match.clock() + think, m_nextReply);
+    m_nextReply = due + m_rng.uniform(2.5f, 3.5f) * haste;
     m_replies.push_back(Reply{speaker, channel, match.phase(), match.day(), due, addressTo(from->name, response, match),
                               message.intent, message.topic, Speech{evidence, true}});
 }
@@ -159,6 +266,9 @@ Text Bot::explain(const Match& match, uint8_t target, std::optional<Evidence>* e
     const auto view = match.viewFor(m_id);
     for (const auto& result : view.seerResults) {
         if (result.player != target) continue;
+        if (!shouldReveal(match, target))
+            return {"Meine Einschätzung behalte ich vorerst für mich. Ich will erst sehen, wohin die Diskussion führt.",
+                    "I'm keeping my assessment to myself for now. I want to see where the discussion goes first."};
         cite(Kind::Seer, isWolfRole(result.role) ? 2.4f : -1.8f);
         return isWolfRole(result.role)
             ? tx("Ich habe {} als Seherin geprüft: Werwolf.", "I checked {} as the seer: werewolf.", p->name)
@@ -184,17 +294,38 @@ Text Bot::explain(const Match& match, uint8_t target, std::optional<Evidence>* e
                   "{} accused {}. That's a lead, not proof. Is there another witness?", source->name, p->name);
     }
     if (suspicion(match, target) > 1.0f)
+        if (const auto it = m_resentment.find(target); it != m_resentment.end() && it->second > 0.2f)
+            return tx("Nach dem Fehlurteil misstraue ich {}. Ich bin noch wütend, aber das allein beweist keine Wolfsrolle.",
+                      "After that wrongful execution, I distrust {}. I'm still angry, but that alone doesn't prove they're a wolf.", p->name);
+    if (suspicion(match, target) > 1.0f)
         return tx("Meine Beobachtungen im Spiel sprechen gegen {}. Ganz sicher bin ich mir noch nicht.",
                   "My observations in the game point towards {}. I'm not certain yet.", p->name);
     return tx("Gegen {} habe ich bisher keinen belastbaren Hinweis. Ein Name allein reicht mir nicht.",
               "I don't have solid evidence against {} so far. A name alone isn't enough.", p->name);
 }
 
-Text Bot::react(const Match& match, const Evidence& heard, std::optional<Evidence>* evidence) const {
+Text Bot::react(const Match& match, uint8_t speaker, const Evidence& heard, std::optional<Evidence>* evidence) const {
     using Kind = Evidence::Kind;
+    const auto view = match.viewFor(m_id);
+    dialogue::Message asMessage;
+    asMessage.seerReport = heard.kind == Kind::Seer;
+    asMessage.claims.push_back({heard.target, heard.weight, true});
+    if (wouldCounterclaim(match, asMessage, speaker)) return counterclaim(match, speaker, evidence);
     if (heard.target == m_id) {
+        if (heard.weight > 0) if (const Text hint = roleHint(match); !hint.empty()) return hint;
         // Not every accused bot should deny with the same sentence.
         const size_t pick = static_cast<size_t>(m_id + match.day());
+        if (heard.kind == Kind::Seer && !isWolfRole(view.yourRole))
+            return {"Das ist gelogen – ich bin kein Werwolf. Wer so etwas behauptet, ist wahrscheinlich selbst einer.",
+                    "That's a lie – I'm not a werewolf. Whoever claims that is probably one."};
+        if (heard.kind == Kind::Sighting) {
+            const std::array<Text, 2> lines = {{{"Ich war nur auf dem Heimweg.", "I was just on my way home."},
+                {"Da war ich, ja – aber ich habe niemandem etwas getan.", "I was there, yes – but I didn't hurt anyone."}}};
+            return lines[pick % lines.size()];
+        }
+        if (heard.kind == Kind::Opinion)
+            return {"Dein Vorwurf trifft mich. Ich kann mich geirrt haben, aber ich habe nach meiner Einschätzung gehandelt!",
+                    "That accusation hurts. I may have been wrong, but I acted on my own judgment!"};
         if (heard.kind == Kind::Seer) {
             const std::array<Text, 2> lines = {{{"Das ist gelogen. Bist du überhaupt die Seherin?", "That's a lie. Are you even the seer?"},
                 {"Eine Seherin, die erst jetzt auftaucht? Das glaube ich nicht.", "A seer who only shows up now? I don't believe that."}}};
@@ -212,8 +343,25 @@ Text Bot::react(const Match& match, const Evidence& heard, std::optional<Evidenc
     }
     const auto* target = match.find(heard.target);
     if (!target) return {};
+    if (heard.target == sacrificeTarget(match))
+        return tx("Ich halte nicht mehr zu {}. Die Vorwürfe wiegen zu schwer. Ich stimme dagegen.",
+                  "I'm no longer standing by {}. The accusations are too serious. I'm voting against them.", target->name);
+    if (heard.weight > 0 && relationship(heard.target) >= 0.45f && suspicion(match, heard.target) < 3.0f &&
+        (heard.kind == Kind::Opinion || heard.kind == Kind::Sighting)) {
+        if (evidence) *evidence = Evidence{Kind::Opinion, heard.target, -0.4f};
+        return tx("{} zählt zu meinen Freunden. Bevor ich mich gegen diese Person stelle, will ich Belege sehen.",
+                  "{} is my friend. Before I turn against them, I want to see evidence.", target->name);
+    }
+    if (heard.kind == Kind::Seer && view.yourRole == Role::Seer) {
+        if (view.seerResults.empty()) return {"Moment – ich bin die Seherin, nicht du. Du lügst.", "Hold on – I'm the seer, not you. You're lying."};
+        return tx("Moment – ich bin die Seherin, nicht du. {}", "Hold on – I'm the seer, not you. {}",
+                  explain(match, view.seerResults.back().player, evidence));
+    }
     if (knowsFirstHand(match, heard))
         return tx("Das kann ich bestätigen. {}", "I can confirm that. {}", explain(match, heard.target, evidence));
+    if (heard.kind == Kind::Seer && m_dialogue.otherSeer(speaker) && !(isWolfRole(view.yourRole) && isWolfRole(target->role)))
+        return {"Zwei Seherinnen? Eine von euch lügt – und wer sich erst nach einer Beschuldigung meldet, macht sich verdächtig.",
+                "Two seers? One of you is lying – and whoever only speaks up after being accused looks suspicious."};
     return tx("Bist du dir sicher? {} kam mir bisher harmlos vor.", "Are you sure? {} has seemed harmless to me so far.", target->name);
 }
 
@@ -226,10 +374,84 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
     const auto* topic = match.find(message.topic);
     if (contradiction) return {"Das widerspricht deiner früheren Aussage. Was hat deine Einschätzung geändert?",
                               "That contradicts your earlier statement. What changed your mind?"};
+    if (std::any_of(message.claims.begin(), message.claims.end(), [&](const dialogue::Claim& c) { return c.target == m_id && c.weight > 0; })) {
+        if (const Text hint = roleHint(match); !hint.empty()) return hint;
+    }
+    // Someone else claims my role: one of us is lying, and I know who.
+    if (message.claimedRole == Role::Seer && view.yourRole == Role::Seer)
+        return {"Moment – ich bin die Seherin, nicht du. Du lügst.", "Hold on – I'm the seer, not you. You're lying."};
+    // A wolf whose pack was exposed claims the seer for itself and turns the accusation around.
+    if (wouldCounterclaim(match, message, speaker)) return counterclaim(match, speaker, evidence);
+    // A result or role named for me: I know whether it is true.
+    const auto reported = reportedPlayers(message);
+    if (std::find(reported.begin(), reported.end(), m_id) != reported.end()) {
+        const auto* fact = factAbout(message, m_id);
+        const bool calledWolf = fact && fact->weight > 0;
+        if (isWolfRole(view.yourRole))
+            return calledWolf ? Text{"Das stimmt nicht! Du lügst, ich bin kein Werwolf.", "That's not true! You're lying, I'm not a werewolf."}
+                              : Text{"Stimmt, ich stehe auf eurer Seite.", "That's right, I'm on your side."};
+        if (verdict(match, message, m_id) > 0) {
+            if (evidence) *evidence = Evidence{Evidence::Kind::Vouch, speaker, -1.5f};
+            if (roleReportAbout(message, m_id))
+                return tx("Stimmt, ich bin {}. Du sagst die Wahrheit.", "That's right, I'm {}. You're telling the truth.",
+                          roleWithArticle(view.yourRole));
+            return {"Stimmt, ich bin kein Werwolf. Du sagst die Wahrheit.", "That's right, I'm not a werewolf. You're telling the truth."};
+        }
+        if (calledWolf)
+            return {"Das ist gelogen – ich bin kein Werwolf. Wer so etwas behauptet, ist wahrscheinlich selbst einer.",
+                    "That's a lie – I'm not a werewolf. Whoever claims that is probably one."};
+        return {"Nein, das stimmt nicht – meine Rolle ist eine andere. Du lügst.", "No, that's not right – my role is a different one. You're lying."};
+    }
     for (const auto& c : message.claims) {
-        if (c.target == m_id && c.weight > 0)
+        if (c.target == m_id && c.weight > 0) {
+            if (relationship(speaker) < -0.55f)
+                return {"Schon wieder du! Deine ständigen Beschuldigungen machen mich wütend. Ich traue dir nicht mehr. Zeig endlich Beweise!",
+                        "You again! Your constant accusations make me angry. I don't trust you any more. Show some evidence!"};
             return {"Ich widerspreche deiner Beschuldigung. Was genau hast du gesehen, und in welcher Nacht?",
                     "I dispute that accusation. What exactly did you see, and on which night?"};
+        }
+    }
+    // A result about someone already revealed: everybody can check it, but a right one proves nothing.
+    for (uint8_t target : reported) {
+        const auto* p = match.find(target);
+        const auto* known = view.player(target);
+        if (!p || p->alive || !known || known->role == Role::Unknown) continue;
+        if (verdict(match, message, target) > 0)
+            return tx("{} war ja schon aufgedeckt – das beweist leider nichts.", "{} had already been revealed – that doesn't prove anything.", p->name);
+        return tx("{} war aber {}. Da stimmt etwas nicht.", "But {} was {}. Something doesn't add up.", p->name, roleWithArticle(known->role));
+    }
+    if (reportsFacts(message)) {
+        if (m_dialogue.liar(speaker)) return {"Dir glaube ich nichts mehr. Deine Angaben haben nicht gestimmt.",
+                                              "I don't believe you any more. Your claims didn't hold up."};
+        if (message.claimedRole == Role::Seer && m_dialogue.otherSeer(speaker))
+            return {"Zwei Seherinnen? Eine von euch lügt. Was habt ihr beide in welcher Nacht geprüft?",
+                    "Two seers? One of you is lying. What did each of you check, and on which night?"};
+        const dialogue::Claim* wolfResult = nullptr;
+        const dialogue::Claim* goodResult = nullptr;
+        for (const auto& c : message.claims) {
+            const auto* p = match.find(c.target);
+            if (!c.fact || !p || !p->alive) continue;
+            if (c.weight > 0 && !wolfResult) wolfResult = &c;
+            if (c.weight < 0 && !goodResult) goodResult = &c;
+        }
+        if (wolfResult) {
+            const std::string& accused = match.find(wolfResult->target)->name;
+            const auto* known = view.player(wolfResult->target);
+            if (wolfResult->target == sacrificeTarget(match))
+                return tx("Ich werde {} nicht länger decken. Ich stimme ebenfalls dagegen.",
+                          "I won't cover for {} any longer. I'm voting against them too.", accused);
+            if (isWolfRole(view.yourRole) && known && isWolfRole(known->role))
+                return {"Das kann jeder behaupten. Wer bestätigt, dass du wirklich die Seherin bist?",
+                        "Anyone can claim that. Who confirms you're really the seer?"};
+            if (m_dialogue.confirmed(speaker) > 0)
+                return tx("Deine Angaben haben bisher gestimmt. Ich stimme heute für {}.", "Your claims have held up so far. I'm voting for {} today.", accused);
+            if (m_dialogue.credibility(speaker) >= 0.75f)
+                return tx("Okay. Wenn das stimmt, sollten wir heute {} wählen.", "Okay. If that's true, we should vote for {} today.", accused);
+            return {"Kann das jemand bestätigen? Seherin kann jeder spielen.", "Can anyone confirm that? Anyone can play the seer."};
+        }
+        if (goodResult)
+            return tx("Gut zu wissen. Dann lassen wir {} erst einmal in Ruhe.", "Good to know. Then we'll leave {} alone for now.",
+                      match.find(goodResult->target)->name);
     }
     auto dead = [&](const Match::Player& p) {
         if (const auto* known = view.player(p.id); known && known->role != Role::Unknown)
@@ -246,6 +468,14 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
     const bool aboutMe = topic && topic->id == m_id;
     const auto* other = aboutMe ? nullptr : topic;
     switch (message.intent) {
+    case Intent::AskBelief:
+        if (other) return explain(match, other->id, evidence);
+        if (isWolfRole(view.yourRole)) return {"Weil das jeder behaupten kann.", "Because anyone can claim that."};
+        if (m_dialogue.liar(speaker)) return {"Weil deine Angaben nicht gestimmt haben.", "Because your claims didn't hold up."};
+        if (m_dialogue.confirmed(speaker) > 0 || m_dialogue.credibility(speaker) >= 1.0f)
+            return {"Ich glaube dir. Deine Angaben haben bisher gestimmt.", "I believe you. Your claims have held up so far."};
+        return {"Noch hat niemand deine Angaben bestätigt. Wer kann für dich sprechen?",
+                "Nobody has confirmed your claims yet. Who can vouch for you?"};
     case Intent::AskReason:
         return explain(match, other ? other->id : strongestSuspect(match, 1.0f), evidence);
     case Intent::AskInnocence:
@@ -289,6 +519,7 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
         if (other) return explain(match, other->id, evidence);
         if (aboutMe && message.wolfWord) return {"Nein, ich bin kein Werwolf.", "No, I'm not a werewolf."};
         if (me->role == Role::Seer && !view.seerResults.empty()) return explain(match, view.seerResults.back().player, evidence);
+        if (m_feelings.stress >= 0.3f) if (const Text hint = roleHint(match); !hint.empty()) return hint;
         return {"Meine Rolle behalte ich vorerst für mich. Über konkrete Beobachtungen können wir sprechen.",
                 "I'm keeping my role to myself for now. We can discuss specific observations."};
     case Intent::RoleClaim:
@@ -317,6 +548,15 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
                           "I'll take your defence of {} into account. How can you back it up?", accused->name);
             }
             const auto* known = view.player(c.target);
+            if (relationship(c.target) >= 0.45f && c.weight < 3.0f && suspicion(match, c.target) < 3.0f &&
+                (!known || known->role == Role::Unknown)) {
+                if (evidence) *evidence = Evidence{Evidence::Kind::Opinion, c.target, -0.4f};
+                return tx("{} zählt zu meinen Freunden. Eine bloße Vermutung reicht mir nicht. Welche Belege hast du?",
+                          "{} is my friend. I won't abandon them over a hunch. What evidence do you have?", accused->name);
+            }
+            if (c.target == sacrificeTarget(match))
+                return tx("Auch ich stimme gegen {}. Diese Vorwürfe lassen sich nicht mehr wegreden.",
+                          "I'm voting against {} too. These accusations can't be dismissed any more.", accused->name);
             if (isWolfRole(me->role) && known && isWolfRole(known->role))
                 return tx("Die Beschuldigung gegen {} überzeugt mich nicht. Hast du mehr als einen Verdacht?",
                           "I'm not convinced by the accusation against {}. Do you have more than a suspicion?", accused->name);
@@ -334,8 +574,15 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
 }
 
 void Bot::speak(const SayFn& say, const Text& text, bool secret, Speech speech) {
+    if (speech.evidence) lookAt(speech.evidence->target, m_now + 3.0); // den ansehen, über den man spricht
+    if (speech.evidence && speech.evidence->kind == Evidence::Kind::Seer) {
+        m_seerRevealed = true;
+        m_sharedResults.insert(speech.evidence->target);
+    }
+    if (dialogue::parse(text.de, {}, m_id, m_id).claimedRole == Role::Seer) m_seerRevealed = true;
+    const Text line = emotionalStyle(speech.reply ? text : styled(text, m_personality.style));
     m_speaking = std::move(speech);
-    say(m_id, text, secret);
+    say(m_id, line, secret);
     m_speaking.reset();
 }
 
@@ -377,17 +624,24 @@ void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, co
     for (const Bot& bot : bots)
         if (bot.id() == speaker && bot.speaking()) speech = *bot.speaking();
     const Bot::Speech* said = speech ? &*speech : nullptr;
-    int priority = 0;
+    struct Candidate { uint8_t id; int priority; float tie; };
+    std::vector<Candidate> candidates;
+    for (const Bot& bot : bots)
+        if (const int priority = bot.replyPriority(match, speaker, text, channel, said); priority > 0)
+            candidates.push_back({bot.id(), priority, rng.uniform()});
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) { return a.priority != b.priority ? a.priority > b.priority : a.tie < b.tie; });
+    // The best match answers; everyone else who is named or accused speaks up as well. When that
+    // happened (a seer named someone), one more voice from the room reacts.
     std::vector<uint8_t> responders;
-    for (const Bot& bot : bots) {
-        const int candidate = bot.replyPriority(match, speaker, text, channel, said);
-        if (candidate > priority) { responders.clear(); priority = candidate; }
-        if (candidate > 0 && candidate == priority) responders.push_back(bot.id());
-    }
-    const uint8_t responder = responders.empty() ? kNoPlayer : rng.pick(responders);
+    for (const auto& c : candidates)
+        if (responders.empty() || (c.priority >= 80 && responders.size() < 3)) responders.push_back(c.id);
+    if (!candidates.empty() && candidates.front().priority >= 80 && responders.size() < 3)
+        for (const auto& c : candidates)
+            if (c.priority == 40 || c.priority == 45) { responders.push_back(c.id); break; }
     for (Bot& bot : bots)
         if (match.canHear(bot.id(), speaker, channel) && !match.hidesSpeaker(bot.id(), channel))
-            bot.hear(match, speaker, text, channel, bot.id() == responder, said);
+            bot.hear(match, speaker, text, channel, std::find(responders.begin(), responders.end(), bot.id()) != responders.end(), said);
 }
 
 } // namespace ww

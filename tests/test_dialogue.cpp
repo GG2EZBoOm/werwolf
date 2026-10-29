@@ -190,7 +190,7 @@ TEST(BotRespondsToAccusationsAndFollowupWithSource) {
 
 TEST(BotDefendsItselfAndClarifiesUnknownText) {
     Conversation c;
-    CHECK(c.ask("Anton ist ein Wolf").de.find("widerspreche") != std::string::npos);
+    CHECK(c.ask("Anton ist ein Wolf").de.starts_with("Spieler, ich widerspreche"));
     CHECK(c.ask("Anton, blablabla").de.find("Wen meinst du") != std::string::npos);
     CHECK(c.ask("Anton, ich bin die Seherin").de.find("geprüft") != std::string::npos);
     CHECK(c.ask("Anton, ich war zu Hause").de.find("bestätigen") != std::string::npos);
@@ -359,6 +359,9 @@ TEST(BotTalksAboutItselfInFirstPerson) {
     // The reply continues the sentence after the name: "Spieler, das kann ich …", not "Spieler, Das …".
     text = c.ask("Anton, blablabla");
     CHECK(text.de.starts_with("Spieler, das kann"));
+    // asked the same again, a person says "like I said" instead of repeating the sentence
+    text = c.ask("Anton, blablabla");
+    CHECK(text.de.find("Wie gesagt") != std::string::npos || text.de.find("wie gesagt") != std::string::npos);
 }
 
 TEST(QuestionsWaitWhileTheBotIsBusy) {
@@ -384,12 +387,13 @@ TEST(QuestionsWaitWhileTheBotIsBusy) {
 }
 
 TEST(DeadPlayersAreNoticed) {
-    Conversation c;
-    c.match.playerLeft(4);
-    CHECK(!c.match.find(4)->alive);
-    CHECK(c.ask("Berta ist ein Wolf").de.find("Berta ist schon tot") != std::string::npos);
-    CHECK(c.ask("Berta du bist voll sus").de.find("Berta ist schon tot") != std::string::npos);
-    CHECK(c.ask("Berta, wo warst du letzte Nacht?").de.find("Berta ist schon tot") != std::string::npos);
+    // each in a fresh conversation: asked twice in a row, the bot would say "wie gesagt" instead
+    for (const char* line : {"Berta ist ein Wolf", "Berta du bist voll sus", "Berta, wo warst du letzte Nacht?"}) {
+        Conversation c;
+        c.match.playerLeft(4);
+        CHECK(!c.match.find(4)->alive);
+        CHECK(c.ask(line).de.find("Berta ist schon tot") != std::string::npos);
+    }
 }
 
 namespace {
@@ -403,7 +407,8 @@ struct Village {
         said.push_back({id, text});
         if (const auto channel = match.chatChannel(id, secret)) deliverChat(bots, match, id, text, *channel, rng);
     };
-    explicit Village(uint64_t seed) {
+    explicit Village(uint64_t seed, std::vector<Role> roles = {Role::Villager, Role::Seer, Role::Werewolf, Role::Villager,
+                                                                Role::Villager, Role::Villager}) {
         Settings settings;
         settings.captain = false;
         settings.discussionSeconds = 60;
@@ -411,9 +416,11 @@ struct Village {
         const std::vector<Match::Seat> seats = {{0, "Spieler", false}, {1, "Anton", true}, {2, "Anna", true},
             {3, "Ann", true}, {4, "Berta", true}, {5, "Jörg", true}};
         Text error;
-        CHECK(match.startWithRoles(seats, {Role::Villager, Role::Seer, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager},
-                                   settings, world(), 42, error));
+        CHECK(match.startWithRoles(seats, roles, settings, world(), 42, error));
         for (uint8_t id = 1; id <= 5; ++id) bots.emplace_back(id, seed * 10 + id);
+    }
+    bool heard(uint8_t id, const std::string& part) const {
+        return std::any_of(said.begin(), said.end(), [&](const auto& s) { return s.first == id && s.second.de.find(part) != std::string::npos; });
     }
     void advance(float seconds) {
         for (float t = 0; t < seconds; t += 0.1f) {
@@ -436,7 +443,7 @@ TEST(BotsActOnOtherBotsFirstHandEvidence) {
     for (uint64_t seed = 1; seed <= 40; ++seed) {
         for (bool reveal : {false, true}) {
             Village v(seed);
-            v.inspectAnna();
+            if (reveal) v.inspectAnna(); // a seer with a wolf result now reveals proactively at the vote
             phase(v.match, Phase::Assembly);
             v.advance(0.5f);
             if (reveal) {
@@ -481,6 +488,190 @@ TEST(AccusedBotDeniesAndAnswersNeverChain) {
         return s.first == 2 && s.second.de.starts_with("Anton, ") && s.second.de.find("Seherin") != std::string::npos;
     });
     CHECK(denied);
+}
+
+TEST(SeerResultsInChat) {
+    // "sie" is the person named before, never the speaker.
+    auto m = parseLine("ich bin seher, ich hab Anna gecheckt, sie ist ein Werwolf");
+    CHECK_EQ(m.claimedRole, Role::Seer);
+    CHECK(m.seerReport);
+    CHECK_EQ(weight(m, 2), kSeerWolf);
+    CHECK_EQ(weight(m, 0), 0.0f);
+    m = parseLine("ich bin immer noch seher. heute nacht hab ich Berta gecheckt, Berta ist die Hexe");
+    CHECK_EQ(m.claimedRole, Role::Seer); // not the witch named later
+    CHECK_EQ(m.roleReports.size(), 1u);
+    if (!m.roleReports.empty()) CHECK_EQ(m.roleReports.front().role, Role::Witch);
+    CHECK_EQ(weight(m, 4), kSeerGood);
+    CHECK(weight(parseLine("Anna ist gut"), 2) < 0);
+    CHECK(!parseLine("Anna ist gut").seerReport);
+    CHECK(parseLine("Ich vertraue Anna").claims.front().fact == false);
+    // A seer who claimed earlier: "Anna ist böse" is a result, a vote call is not.
+    m = parseLine("Anna ist böse");
+    CHECK(presentSeerResults(m));
+    CHECK_EQ(weight(m, 2), kSeerWolf);
+    m = parseLine("wir müssen Anna voten");
+    CHECK(!presentSeerResults(m));
+    CHECK_EQ(parseLine("warum glaubt mir keiner?").intent, Intent::AskBelief);
+}
+
+TEST(SeerReportsAreCheckedAgainstRevealedRoles) {
+    Memory memory;
+    auto seer = parseLine("ich bin seher, Anna ist ein Werwolf und Berta ist die Hexe");
+    memory.remember(0, seer, 1);
+    const float believed = memory.suspicion(2, 1);
+    memory.remember(0, parseLine("wir müssen Anna voten"), 1);
+    CHECK_EQ(memory.suspicion(2, 1), believed); // a vote call does not weaken the result
+    CHECK_EQ(memory.suspicion(2, 3), believed); // nor does a seer's result fade
+    CHECK(memory.suspicion(0, 1) < 0);          // a claimed seer is kept alive
+    GameView view;
+    PlayerView berta;
+    berta.id = 4;
+    berta.alive = false;
+    berta.role = Role::Witch;
+    view.players.push_back(berta);
+    memory.observeRevealed(view);
+    CHECK_EQ(memory.confirmed(0), 1);
+    CHECK(memory.credibility(0) > 0.8f);
+    Memory liar;
+    liar.remember(0, parseLine("ich bin seher, Berta ist ein Werwolf"), 1);
+    liar.observeRevealed(view);
+    CHECK(liar.liar(0));
+    CHECK(liar.suspicion(0, 1) > 2.0f);
+}
+
+TEST(NamedBotsConfirmOrRefuteTheSeer) {
+    // The human really is the seer here; Ann is the witch, Anna a werewolf.
+    Village v(5, {Role::Seer, Role::Villager, Role::Werewolf, Role::Witch, Role::Villager, Role::Villager});
+    phase(v.match, Phase::Assembly);
+    v.advance(0.5f);
+    v.human("ich bin seher");
+    v.advance(6.0f);
+    v.said.clear();
+    v.human("ich hab Anna gecheckt, sie ist ein Werwolf");
+    v.advance(8.0f);
+    CHECK(v.heard(2, "Du lügst"));           // the wolf denies
+    CHECK(v.heard(1, "Anna") || v.heard(3, "Anna") || v.heard(4, "Anna") || v.heard(5, "Anna")); // the room reacts, too
+    for (const auto& s : v.said) CHECK(s.second.de.find("Verdacht gegen Spieler") == std::string::npos);
+    v.said.clear();
+    v.human("Ann ist die Hexe");
+    v.advance(6.0f);
+    CHECK(v.heard(3, "Spieler, stimmt, ich bin die Hexe"));
+    // In the default village Anton is the real seer and Berta a villager: a false claim is called out.
+    Village fake(5);
+    phase(fake.match, Phase::Assembly);
+    fake.advance(0.5f);
+    fake.human("ich bin seher, Berta ist ein Werwolf");
+    fake.advance(8.0f);
+    CHECK(fake.heard(1, "ich bin die Seherin, nicht du"));
+    CHECK(fake.heard(4, "Das ist gelogen") || fake.heard(4, "das ist gelogen"));
+}
+
+TEST(VillagersFollowABelievedSeerAndKeepThemAlive) {
+    int onWolf = 0, onSeer = 0, votes = 0, counterclaims = 0;
+    for (uint64_t seed = 1; seed <= 30; ++seed) {
+        Village v(seed, {Role::Seer, Role::Villager, Role::Werewolf, Role::Witch, Role::Villager, Role::Villager});
+        phase(v.match, Phase::Assembly);
+        v.advance(0.5f);
+        v.human("ich bin seher, ich hab Anna gecheckt, sie ist ein Werwolf");
+        v.advance(6.0f);
+        counterclaims += v.heard(2, "ich bin die Seherin") || v.heard(2, "Ich bin die Seherin");
+        v.human("wir müssen Anna voten");
+        v.advance(4.0f);
+        phase(v.match, Phase::Vote);
+        v.advance(10.0f);
+        const uint8_t voters[] = {1, 3, 4, 5};
+        for (uint8_t voter : voters) {
+            const uint8_t vote = v.match.find(voter)->vote;
+            ++votes;
+            onWolf += vote == 2;
+            onSeer += vote == 0;
+        }
+    }
+    std::printf("    Village votes after the seer's result: Anna (wolf) %d/%d, the seer %d/%d (Anna counterclaimed in %d of 30)\n", onWolf,
+                votes, onSeer, votes, counterclaims);
+    CHECK(counterclaims > 0); // the wolf turns it around sometimes, but whoever claims only after being accused is doubted
+    CHECK(onWolf * 10 >= votes * 8);
+    CHECK(onSeer * 20 <= votes); // a stray vote after a wolf's counterclaim, as among people, but no lynch mob
+}
+
+TEST(ResultsAboutTheDeadAreCheckedAtOnce) {
+    // Naming a role that is already public proves nothing ...
+    Conversation truthful;
+    truthful.match.playerLeft(3);
+    auto text = truthful.ask("ich bin seher, ich habe Ann gecheckt, sie ist eine Dorfbewohnerin");
+    CHECK(text.de.find("Ann war ja schon aufgedeckt") != std::string::npos);
+    text = truthful.ask("Anton, warum glaubt mir keiner?");
+    CHECK(text.de.find("noch hat niemand deine Angaben bestätigt") != std::string::npos);
+    // ... but a wrong one gives the liar away.
+    Conversation lying;
+    lying.match.playerLeft(3);
+    text = lying.ask("ich bin seher, Ann ist ein Werwolf");
+    CHECK(text.de.find("Ann war aber ein Dorfbewohner") != std::string::npos);
+    text = lying.ask("Anton, warum glaubt mir keiner?");
+    CHECK(text.de.find("nicht gestimmt") != std::string::npos);
+}
+
+TEST(PersonalitiesAndWritingStyles) {
+    const auto a = Bot::Personality::random(1), b = Bot::Personality::random(2);
+    CHECK(a.talk != b.talk || a.trust != b.trust);
+    CHECK(Bot(1, 1).personality().style == Bot::Personality::Style::Formal); // neutral unless chosen
+    const Text line{"Ich habe Anna geprüft: Werwolf. Glaubt mir. Wirklich.", "I have checked Anna: werewolf. Believe me. Really."};
+    CHECK_EQ(Bot::styled(line, Bot::Personality::Style::Formal).de, line.de);
+    CHECK_EQ(Bot::styled(line, Bot::Personality::Style::Casual).de, std::string("hab Anna geprüft: Werwolf. Glaubt mir. Wirklich"));
+    CHECK_EQ(Bot::styled(Text::same("Berta hat für Ann gestimmt."), Bot::Personality::Style::Casual).de,
+             std::string("Berta hat für Ann gestimmt")); // names keep their capital
+    CHECK_EQ(Bot::styled(line, Bot::Personality::Style::Casual).en, std::string("I've checked Anna: werewolf. Believe me. Really"));
+    CHECK_EQ(Bot::styled(line, Bot::Personality::Style::Terse).de, std::string("Ich habe Anna geprüft: Werwolf. Glaubt mir"));
+}
+
+TEST(FakeSeerBotIsCalledOut) {
+    // Anna (wolf bot) pretends to be the seer and accuses Berta; the real seer Anton and Berta know better.
+    Village v(4);
+    phase(v.match, Phase::Assembly);
+    v.advance(0.5f);
+    const Text line = Text::same("Ich bin die Seherin! Berta ist ein Werwolf!");
+    const Bot::Speech fake{Bot::Evidence{Bot::Evidence::Kind::Seer, 4, kSeerWolf}, false};
+    for (Bot& bot : v.bots) bot.hear(v.match, 2, line, ChatChannel::Global, bot.id() == 1 || bot.id() == 4, &fake);
+    v.advance(6.0f);
+    CHECK(v.heard(1, "ich bin die Seherin, nicht du"));
+    CHECK(v.heard(4, "das ist gelogen"));
+}
+
+TEST(ExecutionsTeachFromVotes) {
+    int reactions = 0, conclusions = 0;
+    for (uint64_t seed = 1; seed <= 6; ++seed) {
+        Village v(seed);
+        phase(v.match, Phase::Vote);
+        v.advance(8.0f);
+        const uint8_t voters[] = {0, 1, 2, 4, 5};
+        for (uint8_t voter : voters) v.match.interact(voter, Interaction::Vote, 3); // Ann is a villager
+        v.advance(1.0f);
+        phase(v.match, Phase::Execution);
+        v.advance(5.0f);
+        CHECK(!v.match.find(3)->alive);
+        for (const auto& [id, text] : v.said)
+            reactions += text.de.find("unschuldig") != std::string::npos || text.de.find("tut mir leid") != std::string::npos ||
+                         text.de.find("Fehler") != std::string::npos;
+        v.said.clear();
+        phase(v.match, Phase::Assembly);
+        v.advance(40.0f);
+        for (const auto& [id, text] : v.said) conclusions += text.de.find("für Ann gestimmt, und Ann war unschuldig") != std::string::npos;
+    }
+    std::printf("    After executing an innocent: %d reactions, %d conclusions from the votes\n", reactions, conclusions);
+    CHECK(reactions > 0);
+    CHECK(conclusions > 0);
+}
+
+TEST(BotsTurnToWhoeverSpeaks) {
+    Village v(2);
+    phase(v.match, Phase::Assembly);
+    v.advance(1.0f);
+    v.human("Anton, hallo");
+    v.advance(1.5f);
+    const auto* anton = v.match.find(1);
+    const auto* human = v.match.find(0);
+    const float want = std::atan2(human->position.x - anton->position.x, human->position.z - anton->position.z);
+    CHECK(std::abs(wrapAngle(want - anton->yaw)) < 0.4f);
 }
 
 int main() {
