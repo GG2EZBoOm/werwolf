@@ -183,7 +183,9 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         priority = 30; // someone should point out that this player is dead
     } else if (message.intent == dialogue::Intent::Unknown) {
         if (!m_language || !m_language->available()) return 0;
-        priority = 20; // keep following a free conversation even during the short reply cooldown
+        priority = m_lastReply && m_lastReply->speaker == speaker && m_lastReply->channel == channel &&
+                   match.clock() - m_lastReply->due < 60.0 ? 35 : 20;
+        // An unaddressed follow-up normally belongs to the bot who was just talking to this player.
     } else {
         priority = m_lastReply && m_lastReply->speaker == speaker && match.clock() - m_lastReply->due < 60.0 ? 20 : 10;
     }
@@ -199,7 +201,7 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         match.phase() == Phase::GameOver || !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel, speaker)) return;
     if (m_language) {
         m_conversation.push_back({speaker, text, channel, match.day()});
-        while (m_conversation.size() > 12) m_conversation.pop_front();
+        while (m_conversation.size() > 32) m_conversation.pop_front();
     }
     // From bots only first-hand evidence counts, never their wording: a repeated rumour must not
     // turn into a new witness.
@@ -357,10 +359,19 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
                                                        message.intent != dialogue::Intent::Greeting);
         auto request = languageRequest(match, speaker, channel, response, preserve);
         if (interpreted) request.focus = message.topic == m_id ? kNoPlayer : message.topic;
-        request.chooseReason = !preserve && message.intent != dialogue::Intent::Greeting;
+        request.chooseReason = !preserve && reasoning;
+        request.freeConversation = !preserve && !reasoning;
+        if (request.freeConversation) {
+            pending.speech.conversation = true;
+            request.reasons.clear();
+            request.assessments.clear();
+            request.focus = kNoPlayer;
+            pending.text = {"Moment, darauf fällt mir gerade keine gute Antwort ein.",
+                            "Give me a moment, I can't think of a good answer to that right now."};
+        }
         for (const auto& reason : request.reasons) pending.languageReasons.emplace_back(reason.text, reason.evidence);
         pending.languageTicket = m_language->submit(std::move(request));
-        pending.languageDeadline = eng::nowSeconds() + 7.0;
+        pending.languageDeadline = eng::nowSeconds() + LocalLanguage::kReplyTimeout;
     }
 }
 
@@ -756,7 +767,7 @@ void Bot::speak(const SayFn& say, const Text& text, bool secret, Speech speech) 
         m_seerRevealed = true;
         m_sharedResults.insert(speech.evidence->target);
     }
-    if (dialogue::parse(text.de, {}, m_id, m_id).claimedRole == Role::Seer) m_seerRevealed = true;
+    if (!speech.conversation && dialogue::parse(text.de, {}, m_id, m_id).claimedRole == Role::Seer) m_seerRevealed = true;
     const Text line = emotionalStyle(speech.reply ? text : styled(text, m_personality.style));
     m_speaking = std::move(speech);
     say(m_id, line, secret);
@@ -820,7 +831,7 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
     speak(say, pending.text, secret, pending.speech);
     if (m_language) {
         m_conversation.push_back({m_id, pending.text, pending.channel, match.day()});
-        while (m_conversation.size() > 12) m_conversation.pop_front();
+        while (m_conversation.size() > 32) m_conversation.pop_front();
     }
 }
 

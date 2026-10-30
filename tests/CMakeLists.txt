@@ -10,7 +10,7 @@ add_executable(test_psychology test_psychology.cpp)
 target_link_libraries(test_psychology PRIVATE werwolf_server_lib)
 add_test(NAME gefuehle_rollen COMMAND test_psychology)
 
-add_executable(test_local_language test_local_language.cpp test_language_understanding.cpp)
+add_executable(test_local_language test_local_language.cpp test_language_understanding.cpp test_free_conversation.cpp)
 target_link_libraries(test_local_language PRIVATE werwolf_server_lib)
 add_test(NAME lokale_ki COMMAND test_local_language)
 

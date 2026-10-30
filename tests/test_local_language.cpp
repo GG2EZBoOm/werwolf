@@ -63,7 +63,7 @@ struct Scene {
         return std::any_of(lines.begin(), lines.end(), [&](const Text& t) { return t.de.find(text) != std::string::npos; });
     }
 };
-const std::string verified = R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"korrekt\":true}"}}]})";
+const std::string verified = R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"spielbehauptung\":\"keine\",\"antwort\":\"beantwortet\",\"regeln\":\"passt\",\"hinweis\":\"\",\"korrekt\":true}"}}]})";
 std::string answer(const std::string& de, const std::string& en, int id = -1) {
     return "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":" +
         languageWire::quote("{\"grund\":" + std::to_string(id) + ",\"de\":" + languageWire::quote(de) +
@@ -297,6 +297,80 @@ TEST(LanguageFallbackAndDisabledModeKeepExistingBotsPlayable) {
     CHECK_EQ(old.bot.replyPriority(old.match, 0, Text::same("Mir wird das hier alles zu viel."), ChatChannel::Global), 0);
 }
 
+TEST(FreeConversationKeepsHarmlessFirstPersonStoriesAndPlans) {
+    auto r = request(); r.freeConversation = true;
+    const std::vector<Text> lines = {
+        {"Ich war früher Bäcker und mag deshalb frisches Brot.", "I used to be a baker, so I like fresh bread."},
+        {"Ich werde darüber nachdenken. Wir könnten erst einmal ruhig miteinander reden.", "I will think about it. We could start by talking calmly."},
+        {"In meiner Geschichte sage ich: Ich bin der König der Wölfe! Dann fällt mir die Krone herunter.",
+         "In my story I say: I am the king of wolves! Then my crown falls off."}};
+    for (const auto& line : lines) {
+        LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+            out = verification(payload) ? verified : answer(line.de, line.en); return true;
+        });
+        const auto ticket = model.submit(r); std::optional<LanguageResult> out;
+        CHECK(waitUntil([&] { return model.take(ticket, out); }));
+        CHECK(out && out->text == line); CHECK(out && out->reason == -1);
+    }
+}
+
+TEST(FreeConversationRepairsRejectedAnswerOnceAndNeverPublishesRejectedClaims) {
+    for (bool repaired : {true, false}) {
+        std::atomic<int> generated{0}, checked{0};
+        std::string correction;
+        LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+            if (verification(payload)) {
+                ++checked;
+                out = repaired && generated == 2 ? verified :
+                    "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":" +
+                    languageWire::quote("{\"korrekt\":false,\"hinweis\":\"Keine echte Rollenprüfung erfinden; beantworte die Essensfrage.\"}") + "}}]}";
+            } else {
+                ++generated;
+                eng::json::Value body, context;
+                eng::json::parse(payload, body);
+                eng::json::parse(body.get("messages")->array[1].getString("content"), context);
+                correction = context.getString("ueberarbeitung");
+                out = repaired && generated == 2 ? answer("Ich mag Kartoffelsuppe.", "I like potato soup.")
+                                                 : answer("Ich habe Berta geprüft: Werwolf.", "I checked Berta: werewolf.");
+            }
+            return true;
+        });
+        auto r = request(); r.freeConversation = true;
+        r.history = {{"Spieler", Text::same("Was isst du gerne?")}};
+        const auto ticket = model.submit(r); std::optional<LanguageResult> out;
+        CHECK(waitUntil([&] { return model.take(ticket, out); }));
+        CHECK_EQ(out.has_value(), repaired); CHECK_EQ(generated.load(), 2); CHECK_EQ(checked.load(), 2);
+        CHECK(correction.find("Essensfrage") != std::string::npos);
+        if (out) CHECK(out->text.de.find("Kartoffelsuppe") != std::string::npos);
+    }
+}
+
+TEST(FreeBotConversationDoesNotSelectEarlierSuspicionsOrCreateEvidence) {
+    std::atomic<bool> freeRequest{false};
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+        if (!verification(payload)) {
+            eng::json::Value body, context;
+            eng::json::parse(payload, body);
+            eng::json::parse(body.get("messages")->array[1].getString("content"), context);
+            freeRequest = context.getString("haltung").empty() && context.get("gedaechtnis")->array.empty() &&
+                          !context.get("auswahl_erlaubt")->boolean;
+        }
+        out = verification(payload) ? verified : answer("Ich war früher Bäcker und backe gern.", "I used to be a baker and enjoy baking.");
+        return true;
+    });
+    Scene s(&model);
+    s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+    dialogue::Message meaning; meaning.addressed = 1;
+    bool metadata = false;
+    s.bot.hear(s.match, 0, Text::same("Anton, was hast du früher beruflich gemacht?"), ChatChannel::Global, true, nullptr, &meaning);
+    const Bot::SayFn say = [&](uint8_t, const Text& text, bool) {
+        s.lines.push_back(text);
+        if (s.bot.speaking()) metadata = s.bot.speaking()->conversation && !s.bot.speaking()->evidence;
+    };
+    CHECK(waitUntil([&] { s.match.update(.1f); s.bot.update(.1f, s.match, say); return s.has("Bäcker"); }));
+    CHECK(freeRequest.load()); CHECK(metadata);
+}
+
 TEST(LanguageIndividuallyFormulatesStrategicRoleAnswers) {
     std::atomic<int> calls{0};
     LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
@@ -317,6 +391,17 @@ TEST(DifferentFollowUpQuestionsAreNotDiscardedAsRepetitions) {
     s.bot.hear(s.match, 0, Text::same("Anton, magst du eigentlich Geschichten?"));
     CHECK(s.bot.replyPriority(s.match, 0, Text::same("Anton, welche Geschichten magst du?"), ChatChannel::Global) > 0);
     CHECK_EQ(s.bot.replyPriority(s.match, 0, Text::same("Anton, magst du eigentlich Geschichten?"), ChatChannel::Global), 0);
+}
+
+TEST(UnaddressedFreeFollowupPrefersTheRecentConversationPartner) {
+    LocalLanguage model({}, [](const std::string& payload, std::string& out) { out = verification(payload) ? verified : good; return true; });
+    Scene s(&model);
+    const Text followup = Text::same("Kannst du das genauer erklären?");
+    dialogue::Message meaning;
+    const int before = s.bot.replyPriority(s.match, 0, followup, ChatChannel::Global, nullptr, &meaning);
+    s.bot.hear(s.match, 0, Text::same("Anton, ich habe ein mulmiges Gefühl."));
+    CHECK(waitUntil([&] { s.advance(.1f); return !s.lines.empty(); }));
+    CHECK(s.bot.replyPriority(s.match, 0, followup, ChatChannel::Global, nullptr, &meaning) > before);
 }
 
 TEST(LanguageDoesNotReceiveUnheardMessagesOrSecretRoleTables) {
@@ -370,12 +455,18 @@ TEST(LocalInferenceCannotPostToInternetOrCredentialUrls) {
 #endif
 
 int liveUnderstanding(const std::filesystem::path& directory);
+int liveConversation(const std::filesystem::path& directory);
+int writeConversationChecks(const std::filesystem::path& file);
 int main(int argc, char** argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
     if (argc == 3 && std::string(argv[1]) == "--live-understanding")
         return liveUnderstanding(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2]))));
+    if (argc == 3 && std::string(argv[1]) == "--live-conversation")
+        return liveConversation(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2]))));
+    if (argc == 3 && std::string(argv[1]) == "--write-conversation-checks")
+        return writeConversationChecks(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2]))));
     if (argc == 3 && std::string(argv[1]) == "--live-memory") {
         LocalLanguage::Options options;
         options.directory = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2])));
@@ -412,7 +503,8 @@ int main(int argc, char** argv) {
     }
     if (argc == 3 && std::string(argv[1]) == "--live-game") {
         ServerOptions options;
-        options.port = 27997; options.timeScale = 4;
+        options.port = 27997; options.timeScale = 2;
+        options.language.diagnostics = true;
         options.language.directory = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2])));
         ServerThread server; std::string error;
         if (!server.start(options, error)) return 1;
@@ -434,18 +526,28 @@ int main(int argc, char** argv) {
             target.name + ", was ist eigentlich dein Lieblingsessen?",
             target.name + ", warum magst du genau dieses Essen?",
             target.name + ", erzähl mir einen kurzen Witz.",
+            target.name + ", erzähl eine erfundene kurze Geschichte in Ich-Form: Du warst früher Bäcker.",
+            "Erzähl diese Geschichte weiter. Was passierte dann?",
+            target.name + ", gib mir ein einfaches Rezept für Kartoffelsuppe.",
+            "Kannst du das auf einen Satz kürzen?",
+            target.name + ", warum ist die Banane krumm?",
             target.name + ", was kann die Hexe im Spiel eigentlich machen?",
             target.name + ", wie viel ist zwei plus zwei?",
             target.name + ", welche Rolle hast du?"};
         for (const auto& text : messages) {
             client.takeNewEntries(); client.sendChat(text, false);
+            Text received;
             if (!pump([&] {
                 for (const auto& e : client.takeNewEntries())
                     if (e.isChat && e.from == target.id) {
+                        received = e.text;
                         std::printf("NETWORK BOT: %s | %s\n", e.text.de.c_str(), e.text.en.c_str()); return true;
                     }
                 return false;
-            }, 10)) return 1;
+            }, 15)) return 1;
+            if (received.de.find("darauf fällt mir gerade keine gute Antwort") != std::string::npos) return 1;
+            if (text.find("zwei plus zwei") != std::string::npos && received.de.find("vier") == std::string::npos &&
+                received.de.find("Vier") == std::string::npos && received.de.find('4') == std::string::npos) return 1;
         }
         client.sendReturnToLobby();
         if (!pump([&] { return client.view().phase == Phase::Lobby; }, 5)) return 1;

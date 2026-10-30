@@ -46,6 +46,7 @@ struct LanguageRequest {
     std::vector<Reason> reasons;
     std::vector<Assessment> assessments;
     bool chooseReason = false;
+    bool freeConversation = false; // ordinary chat: no evidence selection or fixed sentence to paraphrase
 };
 
 struct UnderstandingRequest {
@@ -61,18 +62,21 @@ struct LanguageResult {
     std::optional<dialogue::Message> understanding;
 };
 
-std::string languagePayload(const LanguageRequest& request);
+std::string languagePayload(const LanguageRequest& request, const std::string& feedback = {});
 // Parse and structurally check a candidate. The worker also verifies its meaning before publication.
 bool languageReply(const LanguageRequest& request, const std::string& response, LanguageResult& result);
 std::string languageVerificationPayload(const LanguageRequest& request, const LanguageResult& candidate);
 std::string languageRephrasePayload(const LanguageRequest& request, int reason = -1);
 bool languageVerified(const std::string& response);
+bool languageConversationVerified(const std::string& response);
 std::string understandingPayload(const UnderstandingRequest& request);
 bool understandingReply(const UnderstandingRequest& request, const std::string& response, dialogue::Message& result);
-std::string understandingVerificationPayload(const UnderstandingRequest& request, const std::string& response);
+std::string understandingVerificationPayload(const UnderstandingRequest& request, const std::string& response, bool question = false);
+bool understandingVerified(const std::string& response);
 
 class LocalLanguage {
 public:
+    static constexpr double kReplyTimeout = 12.0;
     struct Options {
         bool enabled = true; // starts only when an optional pack is installed
         uint16_t port = 0;   // 0: managed pack; otherwise an existing loopback server

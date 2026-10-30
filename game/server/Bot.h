@@ -42,6 +42,7 @@ public:
         uint8_t topic = kNoPlayer;   // worum es geht: wer es gerade gehört hat, muss es nicht wiederholen
         bool alarm = false;          // "Hilfe, ein Werwolf!": wer es hört, flieht vor topic
         bool protectOffer = false;   // "Seherin, sag mir heimlich, wer du bist – ich passe auf dich auf"
+        bool conversation = false;   // fiction and personal chat never reveal a game role
     };
 
     // Wie ein Bot spielt und schreibt. Jeder Bot im Spiel bekommt eigene Züge; neutral ist der Standard.

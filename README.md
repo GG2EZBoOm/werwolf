@@ -194,6 +194,14 @@ Die Auswertung einer Nachricht wird einmal durchgeführt und an die Bots verteil
 
 Bots können auch auf Smalltalk, Gefühle, Witze, allgemeine Fragen und Gesprächsnachfragen eingehen.
 Unterschiedliche Nachfragen werden nicht mehr allein wegen gleicher Frageart als Wiederholung verworfen.
+Ab **0.12.1** verwenden normale Gespräche einen eigenen freien Antwortweg: keine Auswahl alter
+Verdachtsgründe und keine pauschalen Satzsperren für „ich war“, „ich werde“ oder harmlose Zeichen.
+Geschichten, Erklärungen, Übersetzungen und persönliche Vorlieben können frei formuliert werden.
+Bis zu 16 gehörte Gesprächsbeiträge bleiben im Modellkontext; bei Nachfragen ohne Namensanrede
+wird der bisherige Gesprächspartner bevorzugt. Ein beanstandeter freier Entwurf erhält einmal
+konkrete Korrekturhinweise, bevor der Ersatzdialog greift. Erfundene Geschichten zählen nicht als Rollenenthüllung.
+Eine zusätzliche Themenprüfung verhindert, dass eine neue allgemeine Frage unnötig in einen
+vorherigen Verdachtsdialog eingeordnet wird.
 Bei Verdachtsfragen wählt die KI einen erlaubten Grund und formuliert ihn individuell; auch Rollenhinweise,
 Ausflüchte und taktische Antworten dürfen sinngleich umformuliert werden. Die Spielentscheidung bleibt
 vorgegeben. Namen und Belegzuordnung werden technisch erhalten, weitere Bedeutungstreue wird in
@@ -209,8 +217,9 @@ Die KI ist kein fehlerfreies Sprachverständnis: Mehrdeutigkeit, Ironie und frei
 weiterhin missverstanden werden. Auch die Bedeutungsprüfung ist modellbasiert, kein formaler Beweis.
 
 Antworten entstehen auf einem Hintergrundthread; eine begrenzte Warteschlange, ein Zeitlimit von sieben
-Sekunden je Auswertungs-/Antwortauftrag und die Prüfung von Phase, Kanal und lebenden Gesprächspartnern verhindern blockiertes oder
-verspätetes Chatten. Bei Ausfällen oder verworfenen Modellantworten greift der bisherige Dialog.
+Sekunden für die Eingabeauswertung und zwölf Sekunden für eine Antwort einschließlich Korrekturversuch
+sowie die Prüfung von Phase, Kanal und lebenden Gesprächspartnern verhindern blockiertes oder
+verspätetes Chatten. Bei Ausfällen oder verworfenen Modellantworten greift ein Ersatzdialog.
 Deutsch und Englisch werden gemeinsam erzeugt. Ohne installiertes Paket startet kein KI-Prozess.
 
 Technik: **Qwen3-4B-Instruct-2507 Q4_K_M** (GGUF von Unsloth, Apache-2.0), **llama.cpp b11960** (MIT)

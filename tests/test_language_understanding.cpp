@@ -63,7 +63,7 @@ TEST(UnderstandingWorkerRequiresMeaningVerificationBeforeChangingKnowledge) {
         LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
             ++calls;
             out = payload.find("\"korrekt\"") != std::string::npos
-                ? envelope(accepted ? "{\"korrekt\":true}" : "{\"korrekt\":false}")
+                ? envelope(accepted ? "{\"bedeutung\":\"gleich\",\"korrekt\":true}" : "{\"bedeutung\":\"veraendert\",\"korrekt\":false}")
                 : normalized("Berta wirkt verdächtig.", 2);
             return true;
         });
@@ -73,6 +73,29 @@ TEST(UnderstandingWorkerRequiresMeaningVerificationBeforeChangingKnowledge) {
         CHECK_EQ(result.has_value(), accepted); CHECK_EQ(calls.load(), 2);
         if (result) CHECK(result->understanding && accuses(*result->understanding, 1));
     }
+}
+
+TEST(UnderstandingRejectsUnrelatedGameQuestionsAfterATopicChange) {
+    std::atomic<int> calls{0};
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+        ++calls;
+        out = payload.find("\"frageart\"") != std::string::npos
+            ? envelope("{\"frageart\":\"anderes\"}")
+            : normalized("Warum verdächtigst du Berta?", 2, 1);
+        return true;
+    });
+    auto r = input("Anton, wie viel ist zwei plus zwei?");
+    r.history.push_back({"Anton", Text::same("Berta wirkt verdächtig.")});
+    const auto ticket = model.submit(r); std::optional<LanguageResult> result;
+    CHECK(until([&] { return model.take(ticket, result); }));
+    CHECK(result && result->understanding);
+    if (result && result->understanding) {
+        CHECK_EQ(result->understanding->intent, dialogue::Intent::Unknown);
+        CHECK_EQ(result->understanding->topic, kNoPlayer);
+        CHECK_EQ(result->understanding->addressed, 1);
+        CHECK(result->understanding->claims.empty());
+    }
+    CHECK_EQ(calls.load(), 2);
 }
 
 TEST(InterpretedAccusationsReachOnlyBotsWhoHeardTheOriginalMessage) {
@@ -103,7 +126,8 @@ TEST(ServerUsesInterpretedMeaningAndKeepsTheOriginalConversation) {
     options.languageTransport = [&](const std::string& payload, std::string& out) {
         eng::json::Value body, context;
         if (!eng::json::parse(payload, body) || !eng::json::parse(body.get("messages")->array[1].getString("content"), context)) return false;
-        if (payload.find("\"korrekt\"") != std::string::npos) out = envelope("{\"korrekt\":true}");
+        if (payload.find("\"korrekt\"") != std::string::npos || payload.find("\"frageart\"") != std::string::npos)
+            out = envelope("{\"frageart\":\"partie\",\"korrekt\":true}");
         else if (context.get("nachricht")) {
             interpreted = context.getString("nachricht").find("Visionen") != std::string::npos;
             out = normalized("Ich bin die Seherin.", -1, 1);
@@ -181,6 +205,20 @@ int liveUnderstanding(const std::filesystem::path& directory) {
     const bool followed = until([&] { return model.take(id, result); }, 10) && result && result->understanding &&
         result->understanding->topic == 2 && result->understanding->intent == dialogue::Intent::AskReason;
     passed += followed ? 1 : 0;
-    std::printf("%s: Nachfragen mit Pronomen\nSprachverständnis: %d/%zu\n", followed ? "OK" : "FEHLER", passed, cases.size() + 1);
-    return passed == static_cast<int>(cases.size() + 1) ? 0 : 1;
+    std::printf("%s: Nachfragen mit Pronomen\n", followed ? "OK" : "FEHLER");
+    for (const auto* text : {"Anton, wie viel ist zwei plus zwei?", "Anton, schreib mir ein kurzes Gedicht über den Mond."}) {
+        auto changed = input(text);
+        changed.history = {{"Spieler", Text::same("Warum verdächtigst du Berta?")},
+                           {"Anton", Text::same("Berta wurde von Clara beschuldigt, aber das ist kein Beweis.")},
+                           {"Spieler", Text::same("Welche Rolle hast du?")},
+                           {"Anton", Text::same("Meine Rolle behalte ich noch für mich.")}};
+        const auto ticket = model.submit(changed); result.reset();
+        const bool ready = until([&] { return model.take(ticket, result); }, 10);
+        const auto effective = result && result->understanding ? *result->understanding : dialogue::parse(text, changed.people, changed.speaker);
+        const bool good = ready && effective.intent == dialogue::Intent::Unknown && effective.claims.empty();
+        passed += good ? 1 : 0;
+        std::printf("%s: Themenwechsel: %s\n", good ? "OK" : "FEHLER", text);
+    }
+    std::printf("Sprachverständnis: %d/%zu\n", passed, cases.size() + 3);
+    return passed == static_cast<int>(cases.size() + 3) ? 0 : 1;
 }

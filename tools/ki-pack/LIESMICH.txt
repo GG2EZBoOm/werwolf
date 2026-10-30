@@ -19,6 +19,10 @@ unveraendert wieder. Zurueckgehaltene Seherpruefungen bleiben geheim.
 Ab 0.12.0 werden auch freie Spielernachrichten im Kontext eingeordnet. Bots
 reagieren auf Smalltalk und Nachfragen; taktische Antworten und Verdachtsgruende
 werden individuell umformuliert und separat auf Bedeutungstreue geprueft.
+Ab 0.12.1 laufen normale Gespraeche ohne feste Antwortvorgabe und ohne pauschale
+Satzsperren. Geschichten, Erklaerungen und Nachfragen haben einen eigenen freien
+Antwortweg mit mehr Kontext und einem Korrekturversuch bei beanstandeten Entwuerfen.
+Das kleine Modell und seine Pruefung koennen weiterhin sachliche Fehler uebersehen.
 Missverstaendnisse bleiben moeglich. Ein bereits installiertes KI-Paket funktioniert
 weiter; kein neuer Download noetig. Mitspieler nutzen auf Wunsch werwolf_client.exe
 ohne Modell; diese Client-Version kann selbst keine Spiele hosten.
