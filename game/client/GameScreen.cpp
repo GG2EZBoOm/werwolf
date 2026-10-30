@@ -41,6 +41,7 @@ Color promptColor(Interaction kind) {
     case Interaction::Reinforce: return theme::roleColor(Role::Blacksmith);
     case Interaction::HolyWater: return theme::roleColor(Role::Priest);
     case Interaction::Stab: return theme::roleColor(Role::SerialKiller);
+    case Interaction::Bite: return theme::roleColor(Role::Vampire);
     case Interaction::Douse:
     case Interaction::Ignite: return theme::roleColor(Role::Arsonist);
     case Interaction::DoorToggle: return Color::hex(0xC9B48C);
@@ -265,6 +266,15 @@ void App::buildPrompts(const GameView& v) {
         const uint8_t t = aim(kAttackRange + 0.3f, false, any);
         add(Interaction::Stab, "Klick", label(t, "Erstechen: {}", "Stab: {}", "Schleich dich an ein Opfer heran", "Sneak up on a victim"), t, t != kNoPlayer);
     }
+    if (v.can(AbilityBite)) {
+        const auto notClan = [&](const EntityState& e) {
+            const PlayerView* p = v.player(e.id);
+            return !p || !isVampireRole(p->role);
+        };
+        const uint8_t t = aim(kAttackRange + 0.3f, false, notClan);
+        add(Interaction::Bite, "Klick", label(t, "Beißen: {}", "Bite: {}", "Schleich dich lautlos an ein Opfer heran", "Sneak up on a victim silently"),
+            t, t != kNoPlayer);
+    }
     if (v.can(AbilityTrack)) {
         const uint8_t t = aim(kTrackRange, false, any);
         add(Interaction::Track, "E", label(t, "Fährte aufnehmen: {}", "Follow the trail: {}", "Schau jemanden an (Fährte)", "Look at someone (trail)"), t,
@@ -440,7 +450,7 @@ void App::updateMatch() {
     }
     const bool medium = (v.yourRole == Role::Medium || v.acting == Role::Medium) && v.phase == Phase::Night;
     const bool family = v.yourRole == Role::Sister || v.yourRole == Role::Brother;
-    const bool secretChat = isWolfRole(v.yourRole) || medium || family;
+    const bool secretChat = isWolfRole(v.yourRole) || isVampireRole(v.yourRole) || medium || family;
     if (in.pressed(eng::Key::Tab) && secretChat && alive) m_chatWolves = !m_chatWolves;
     if (!secretChat) m_chatWolves = false;
     const bool captured = m_window.isMouseCaptured();
@@ -551,7 +561,11 @@ void App::renderMatch3D() {
         pose.dead = kind == EntityCorpse;
         pose.ghost = kind == EntityGhost;
         pose.lantern = (flags & EntityLantern) != 0 && kind == EntityLiving && night > 0.3f;
+        pose.redEyes = (flags & EntityRedEyes) != 0 && kind == EntityLiving ? std::clamp(night * 1.4f - 0.2f, 0.0f, 1.0f) : 0.0f;
         m_characters.draw(m_renderer3d, characterLook(id), pose);
+        // ein Hauch von Rot im Gesicht – aufmerksame Augenzeugen erkennen so einen Vampir
+        if (pose.redEyes > 0.0f)
+            m_renderer3d.light({m.position + Vec3{0.0f, m_characters.headHeight(pose) - 0.2f, 0.0f}, 1.8f, {1.0f, 0.12f, 0.08f}, 0.7f * pose.redEyes});
         if (pose.lantern) m_renderer3d.light({m_characters.lanternPosition(pose), 6.5f, {1.0f, 0.62f, 0.28f}, 1.3f * night});
         if (transform > 0.02f && transform < 0.98f) {
             for (int i = 0; i < 14; ++i) {
@@ -569,7 +583,8 @@ void App::renderMatch3D() {
         uint8_t flags = 0;
         for (const EntityState& e : m_entities)
             if (e.id == v.you && e.kind == EntityLiving) flags = e.flags;
-        if (alive) drawFigure(v.you, m_player, m_myTransform, flags | (night > 0.3f && m_myTransform < 0.01f ? EntityLantern : 0), EntityLiving);
+        const bool lantern = night > 0.3f && m_myTransform < 0.01f && !isVampireRole(v.yourRole);
+        if (alive) drawFigure(v.you, m_player, m_myTransform, flags | (lantern ? EntityLantern : 0), EntityLiving);
         else drawFigure(v.you, m_player, 0.0f, 0, EntityGhost);
     }
     for (const auto& [key, f] : m_figures) drawFigure(static_cast<uint8_t>(key / 4), f.mover, f.transform, f.flags, f.kind);
@@ -685,6 +700,9 @@ void App::drawNameTags(const GameView& v) {
                 if (it->second.channel == ChatChannel::Wolves) {
                     bg = Color::hex(0x5A1A16, 0.94f * ba);
                     text = Color::hex(0xF8DCD8, ba);
+                } else if (it->second.channel == ChatChannel::Vampires) {
+                    bg = Color::hex(0x3E0F1E, 0.94f * ba);
+                    text = Color::hex(0xF2D6DF, ba);
                 } else if (it->second.channel == ChatChannel::Dead) {
                     bg = Color::hex(0x34405E, 0.85f * ba);
                     text = Color::hex(0xDCE3F2, ba);

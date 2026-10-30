@@ -117,9 +117,10 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
     m_doused = 0;
 
     std::vector<std::string> wolves;
-    bool neutral = false, littleGirl = false;
+    bool neutral = false, littleGirl = false, vampires = false;
     for (const Player& p : m_players) {
         if (isWolfRole(p.role)) wolves.push_back(p.name);
+        vampires |= isVampireRole(p.role);
         neutral |= roleFaction(p.role) == Faction::Neutral;
         littleGirl |= p.role == Role::LittleGirl;
     }
@@ -128,7 +129,9 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
                      "Welcome to the village! {} souls live here – one of them is a werewolf.", m_players.size())
                 : tx("Willkommen im Dorf! {} Seelen leben hier – {} davon sind Werwölfe.",
                      "Welcome to the village! {} souls live here – {} of them are werewolves.", m_players.size(), wolves.size()));
-    if (neutral) narrate({"Doch nicht jeder im Dorf verfolgt dieselben Ziele …", "But not everyone in the village shares the same goals …"});
+    if (vampires) narrate({"Und in den Schatten wartet ein Clan von Vampiren auf das erste Blut …",
+                           "And in the shadows a clan of vampires is waiting for the first blood …"});
+    else if (neutral) narrate({"Doch nicht jeder im Dorf verfolgt dieselben Ziele …", "But not everyone in the village shares the same goals …"});
     for (const Player& p : m_players) {
         if (p.role == Role::Mayor)
             narrate(tx("{} ist der Bürgermeister – seine Stimme zählt doppelt.", "{} is the mayor – their vote counts double.", p.name));
@@ -415,6 +418,9 @@ uint32_t Match::abilitiesFor(uint8_t id) const {
         if (night) a |= AbilityBreakDoor;
         if (night && !p->nightAbilityUsed) a |= AbilityStab;
         break;
+    case Role::Vampire:
+        if (night && m_vampireBites > 0) a |= AbilityBite; // keine Türen: ohne Einladung kommt ein Vampir nicht hinein
+        break;
     case Role::Arsonist:
         if (night && !p->nightAbilityUsed) {
             a |= AbilityDouse;
@@ -522,6 +528,17 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
         if (distTo(*t) > kAttackRange + kRangeTolerance) return tooFarAway;
         if (!visible(*t)) return blocked;
         return {};
+    case Interaction::Bite:
+        if (!(abilities & AbilityBite)) {
+            if (!isVampireRole(p->role) || m_phase != Phase::Night) return cannotAttack;
+            return {"Der Clan hat heute Nacht schon getrunken.", "The clan has already fed tonight."};
+        }
+        if (p->attackCooldown > 0.0f) return windingUp;
+        if (!t || !t->alive || t->id == id) return nobodyHere;
+        if (isVampireRole(t->role)) return {"Du beißt niemanden aus deinem Clan.", "You don't bite a member of your clan."};
+        if (distTo(*t) > kAttackRange + kRangeTolerance) return tooFarAway;
+        if (!visible(*t)) return blocked;
+        return {};
     case Interaction::Inspect:
         if (!(abilities & AbilityInspect)) return {"Deine Vision ist für heute Nacht verbraucht.", "Your vision is spent for tonight."};
         return nearOther(kInspectRange, {"Zu weit entfernt für eine Vision.", "Too far away for a vision."});
@@ -536,7 +553,7 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
         if (!(abilities & AbilityHeal)) return {"Dein Heiltrank ist verbraucht.", "Your healing potion is used up."};
         if (!t || t->alive || t->buried) return {"Hier liegt niemand, den du retten könntest.", "There is nobody here you could save."};
         if (!t->diedAtNight || t->deathDay != m_day ||
-            (t->deathCause != DeathCause::Wolves && t->deathCause != DeathCause::Knife))
+            (t->deathCause != DeathCause::Wolves && t->deathCause != DeathCause::Knife && t->deathCause != DeathCause::Vampire))
             return {"Für diese Seele kommt jede Hilfe zu spät.", "It is too late to help this soul."};
         if (distanceXZ(p->position, t->deathPosition) > kHealRange + kRangeTolerance) return closer;
         if (!hasLineOfSight(p->position, t->deathPosition)) return {"Du kommst nicht an die Person heran.", "You cannot reach that person."};
@@ -627,6 +644,8 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
         if (d.flags & DoorBroken) return {"Die Tür ist zerschmettert und lässt sich nicht mehr schließen.", "The door is smashed and can no longer be closed."};
         const bool inside = m_world->houseAt({p->position.x, p->position.z}, 0.3f) == targetId;
         if (!(d.flags & DoorOpen) && (d.flags & DoorLocked) && !inside) return {"Die Tür ist von innen verriegelt.", "The door is bolted from the inside."};
+        if (!(d.flags & DoorOpen) && !inside && isVampireRole(p->role) && m_phase == Phase::Night && p->house != targetId)
+            return {"Ohne Einladung kommst du nicht hinein.", "You cannot enter without an invitation."};
         if ((d.flags & DoorOpen) && doorwayOccupied(targetId)) return {"Jemand steht in der Tür.", "Someone is standing in the doorway."};
         return {};
     }
@@ -699,8 +718,9 @@ std::vector<EntityState> Match::entitiesFor(uint8_t viewer) const {
             e.flags = p.moveFlags;
             if (p.wolfForm()) e.flags |= EntityWolf;
             if (p.attackAnim > 0.0f) e.flags |= EntityAttack;
-            if (night && p.transform < 0.01f && p.role != Role::SerialKiller && p.role != Role::Arsonist)
+            if (night && p.transform < 0.01f && p.role != Role::SerialKiller && p.role != Role::Arsonist && !isVampireRole(p.role))
                 e.flags |= EntityLantern;
+            if (night && isVampireRole(p.role)) e.flags |= EntityRedEyes;
             out.push_back(e);
         } else {
             if (!p.buried) {
@@ -742,6 +762,7 @@ GameView Match::viewFor(uint8_t viewer) const {
     const bool over = m_phase == Phase::GameOver;
     const bool spectator = !me || !me->alive;
     const bool meWolf = me && isWolfRole(me->role);
+    const bool meVampire = me && isVampireRole(me->role);
     const bool showVotes = m_phase == Phase::Vote || m_phase == Phase::Execution;
     const bool seesEnchanted = spectator || over || (me && (me->role == Role::Piper || me->enchanted));
 
@@ -764,6 +785,7 @@ GameView Match::viewFor(uint8_t viewer) const {
             knowRole = true;
             if (p.role == Role::WhiteWolf) shown = Role::Werewolf; // tarnt sich im Rudel
         }
+        if (!knowRole && meVampire && isVampireRole(p.role)) knowRole = true;
         if (!knowRole && me)
             for (const SeerResult& r : me->seerResults)
                 if (r.player == p.id) {
@@ -797,6 +819,7 @@ GameView Match::viewFor(uint8_t viewer) const {
             v.poisonAvailable = m_poisonAvailable;
         }
         if (meWolf) v.packKillsLeft = m_packKills;
+        if (meVampire) v.packKillsLeft = m_vampireBites; // für den Clan: Bisse dieser Nacht
         if (me->effectiveRole() == Role::Tracker && m_phase == Phase::Night) v.tracked = me->trackTarget;
         if (me->role == Role::Arsonist) v.doused = m_doused;
         if (me->role == Role::Elder) v.shieldLeft = me->shield;
@@ -810,6 +833,7 @@ std::optional<ChatChannel> Match::chatChannel(uint8_t speaker, bool wantSecret) 
     if (m_phase == Phase::GameOver) return ChatChannel::Global;
     if (!p->alive) return ChatChannel::Dead;
     if (wantSecret && isWolfRole(p->role)) return ChatChannel::Wolves;
+    if (wantSecret && isVampireRole(p->role)) return ChatChannel::Vampires;
     if (wantSecret && p->effectiveRole() == Role::Medium && m_phase == Phase::Night) return ChatChannel::Dead;
     if (wantSecret && (p->role == Role::Sister || p->role == Role::Brother)) return ChatChannel::Family;
     if (isGatheringPhase(m_phase)) return ChatChannel::Global;
@@ -828,6 +852,7 @@ bool Match::canReadChannel(uint8_t listener, ChatChannel channel) const {
         return isWolfRole(l->role) || !l->alive || over || (l->effectiveRole() == Role::LittleGirl && night);
     case ChatChannel::Dead: return !l->alive || over || (l->effectiveRole() == Role::Medium && night);
     case ChatChannel::Family: return !l->alive || over || l->role == Role::Sister || l->role == Role::Brother;
+    case ChatChannel::Vampires: return isVampireRole(l->role) || !l->alive || over;
     }
     return false;
 }
@@ -914,6 +939,18 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
         narrate({"Ein erstickter Schrei hallt durch die Nacht …", "A muffled scream echoes through the night …"});
         kill(t->id, DeathCause::Knife, false, p->id);
         break;
+    case Interaction::Bite:
+        p->attackCooldown = 1.2f;
+        p->attackAnim = 0.4f;
+        if (m_vampireBites > 0) --m_vampireBites;
+        if (isProtected(t->id)) {
+            tell(p->id, {"Jemand wacht über dieses Opfer – zieh dich in die Schatten zurück!",
+                         "Someone is watching over this victim – retreat into the shadows!"});
+            notifyProtectors(t->id);
+            break;
+        }
+        kill(t->id, DeathCause::Vampire, false, p->id); // lautlos: kein Schrei weckt das Dorf
+        break;
     case Interaction::Inspect:
         p->nightAbilityUsed = true;
         if (std::none_of(p->seerResults.begin(), p->seerResults.end(), [&](const SeerResult& r) { return r.player == t->id; }))
@@ -973,14 +1010,18 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
     case Interaction::HolyWater: {
         p->holyWaterUsed = true;
         const bool night = m_phase == Phase::Night;
-        if (isWolfRole(t->role)) {
-            tell(p->id, tx("Das Weihwasser zischt auf der Haut von {} – ein Werwolf!", "The holy water hisses on the skin of {} – a werewolf!", t->name));
+        if (isEvilRole(t->role)) {
+            const bool vampire = isVampireRole(t->role);
+            const Text creature = vampire ? Text{"ein Vampir", "a vampire"} : Text{"ein Werwolf", "a werewolf"};
+            tell(p->id, tx("Das Weihwasser zischt auf der Haut von {} – {}!", "The holy water hisses on the skin of {} – {}!", t->name, creature));
             if (!night)
-                narrate(tx("{} besprengt {} mit Weihwasser – die Haut zischt und brennt! Ein Werwolf!",
-                           "{} sprinkles {} with holy water – the skin hisses and burns! A werewolf!", p->name, t->name));
+                narrate(tx("{} besprengt {} mit Weihwasser – die Haut zischt und brennt! {}!",
+                           "{} sprinkles {} with holy water – the skin hisses and burns! {}!", p->name, t->name,
+                           vampire ? Text{"Ein Vampir", "A vampire"} : Text{"Ein Werwolf", "A werewolf"}));
             kill(t->id, DeathCause::HolyWater, !night, p->id);
         } else {
-            tell(p->id, tx("Das Weihwasser perlt einfach ab – {} ist kein Werwolf.", "The holy water simply rolls off – {} is no werewolf.", t->name));
+            tell(p->id, tx("Das Weihwasser perlt einfach ab – {} ist weder Werwolf noch Vampir.",
+                           "The holy water simply rolls off – {} is neither werewolf nor vampire.", t->name));
             tell(t->id, tx("{} hat dich mit Weihwasser besprengt. Es perlt einfach ab.", "{} sprinkled you with holy water. It simply rolls off.", p->name));
         }
         break;
@@ -1290,7 +1331,13 @@ void Match::kill(uint8_t id, DeathCause cause, bool announceNow, uint8_t killer)
     case DeathCause::Knife: tell(p->id, {"Eine Klinge blitzt im Dunkeln … du wurdest erstochen.", "A blade flashes in the dark … you were stabbed."}); break;
     case DeathCause::Fire: tell(p->id, {"Rauch, Hitze, Flammen … du bist im Feuer umgekommen.", "Smoke, heat, flames … you died in the fire."}); break;
     case DeathCause::HolyWater:
-        tell(p->id, {"Das Weihwasser brennt wie Feuer – deine Wolfsgestalt zerfällt zu Asche.", "The holy water burns like fire – your wolf form crumbles to ash."});
+        if (isVampireRole(p->role))
+            tell(p->id, {"Das Weihwasser brennt wie Feuer – du zerfällst zu Staub.", "The holy water burns like fire – you crumble to dust."});
+        else
+            tell(p->id, {"Das Weihwasser brennt wie Feuer – deine Wolfsgestalt zerfällt zu Asche.", "The holy water burns like fire – your wolf form crumbles to ash."});
+        break;
+    case DeathCause::Vampire:
+        tell(p->id, {"Ein kalter Atem, ein Stich am Hals … ein Vampir hat dich ausgesaugt.", "A cold breath, a sting at your neck … a vampire has drained you."});
         break;
     case DeathCause::Rust:
         tell(p->id, {"Die Wunde von der rostigen Klinge des Ritters hat sich entzündet … du stirbst.",
@@ -1346,7 +1393,13 @@ void Match::announce(uint8_t id, DeathCause cause) {
         text = tx("{} wurde erstochen aufgefunden – ein Messer, keine Klauen!", "{} was found stabbed – a knife, not claws!", n);
         break;
     case DeathCause::HolyWater:
-        text = tx("{} wurde vom Weihwasser zu Asche verbrannt – ein Werwolf!", "{} was burned to ash by holy water – a werewolf!", n);
+        text = isVampireRole(p->role)
+            ? tx("{} ist vom Weihwasser zu Staub zerfallen – ein Vampir!", "{} crumbled to dust from holy water – a vampire!", n)
+            : tx("{} wurde vom Weihwasser zu Asche verbrannt – ein Werwolf!", "{} was burned to ash by holy water – a werewolf!", n);
+        break;
+    case DeathCause::Vampire:
+        text = tx("{} wurde blutleer aufgefunden – mit zwei feinen Bissspuren am Hals!",
+                  "{} was found drained of blood – with two fine bite marks on the neck!", n);
         break;
     case DeathCause::Rust:
         text = tx("{} ist an einer Blutvergiftung gestorben – die rostige Klinge des Ritters!",
@@ -1704,6 +1757,7 @@ void Match::enterNight() {
     for (const Player& p : m_players)
         if (p.alive && p.role == Role::BigBadWolf) bigBadWolf = true;
     m_packKills = static_cast<uint8_t>(1 + (m_wolfRage ? 1 : 0) + (bigBadWolf && !m_wolfDied ? 1 : 0));
+    m_vampireBites = 1;
     const uint8_t kills = m_packKills;
     m_wolfRage = false;
     m_nightDeaths.clear();
@@ -1822,12 +1876,13 @@ void Match::enterMorning() {
 Team Match::evaluateWinner() const {
     if (m_jesterWinner != kNoPlayer) return Team::Jester;
     if (m_angelWinner != kNoPlayer) return Team::Angel;
-    int alive = 0, aliveWolves = 0, wolvesTeam = 0, villageTeam = 0, killers = 0;
+    int alive = 0, aliveWolves = 0, wolvesTeam = 0, villageTeam = 0, killers = 0, vampires = 0;
     Team killerTeam = Team::None;
     for (const Player& p : m_players) {
         if (!p.alive) continue;
         ++alive;
         if (isWolfRole(p.role)) ++aliveWolves;
+        if (isVampireRole(p.role)) ++vampires;
         const Team team = teamOf(p.id);
         if (team == Team::Wolves) ++wolvesTeam;
         if (team == Team::Village) ++villageTeam;
@@ -1858,8 +1913,9 @@ Team Match::evaluateWinner() const {
     // Ein einzelgängerischer Mörder gewinnt, sobald ihm niemand mehr gefährlich werden kann
     if (killers == 1 && alive <= 2) return killerTeam;
     if (killers > 0) return Team::None;
-    if (aliveWolves == 0) return villageTeam > 0 ? Team::Village : Team::Nobody;
-    if (wolvesTeam > 0 && wolvesTeam >= alive - wolvesTeam) return Team::Wolves;
+    if (aliveWolves == 0 && vampires == 0) return villageTeam > 0 ? Team::Village : Team::Nobody;
+    if (aliveWolves == 0 && vampires >= alive - vampires) return Team::Vampires;
+    if (vampires == 0 && wolvesTeam > 0 && wolvesTeam >= alive - wolvesTeam) return Team::Wolves;
     return Team::None;
 }
 
@@ -1908,6 +1964,7 @@ bool Match::checkWin() {
         victory({"Der weiße Werwolf hat gesiegt! Er hat sogar sein eigenes Rudel verraten.", "The white werewolf has won! It even betrayed its own pack."});
         break;
     case Team::Sectarian: victory({"Der Sektierer hat gesiegt! Nur seine Hälfte des Dorfes ist übrig.", "The sectarian has won! Only their half of the village is left."}); break;
+    case Team::Vampires: victory({"Die Vampire haben gesiegt! Das Dorf gehört jetzt den Schatten.", "The vampires have won! The village now belongs to the shadows."}); break;
     default: victory({"Niemand hat überlebt. Stille legt sich über das Dorf.", "Nobody survived. Silence falls over the village."}); break;
     }
     std::vector<Text> roles;

@@ -61,6 +61,7 @@ public:
     bool otherSeer(uint8_t speaker) const;                // someone else claims the seer as well
     bool liar(uint8_t speaker) const { return m_liars.contains(speaker); }
     int confirmed(uint8_t speaker) const;
+    int seerChecks(uint8_t speaker) const; // how many people the speaker claims to have checked as the seer
     // First-hand verdict on a speaker's report, e.g. one about the listener itself.
     void judge(uint8_t speaker, bool truthful);
     void support(uint8_t speaker); // someone else vouched for the speaker's report

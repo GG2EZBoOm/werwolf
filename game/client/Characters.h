@@ -39,6 +39,7 @@ struct CharacterPose {
     float attack = 0.0f;    // 0..1 Prankenhieb
     float time = 0.0f;
     bool lantern = false;   // trägt nachts eine Laterne
+    float redEyes = 0.0f;   // Vampir: Augen glühen nachts rot (0..1)
     bool ghost = false;     // Geist eines Verstorbenen (nur für andere Tote sichtbar)
 };
 

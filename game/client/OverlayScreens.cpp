@@ -33,6 +33,18 @@ std::vector<std::pair<std::string, Color>> App::roleStatusLines(const GameView& 
         lines.push_back({m_chatWolves ? L("Chat: Rudel (Tab wechselt)", "Chat: pack (Tab switches)") : L("Chat: Nähe (Tab: Rudel)", "Chat: nearby (Tab: pack)"),
                          theme::faint});
     }
+    if (isVampireRole(role)) {
+        std::string clan;
+        for (const PlayerView& p : v.players)
+            if (isVampireRole(p.role) && p.id != v.you && p.alive) clan += (clan.empty() ? "" : ", ") + p.name;
+        lines.push_back({clan.empty() ? std::string(L("Du jagst allein.", "You hunt alone.")) : Lf("Clan: {}", "Clan: {}", clan),
+                         theme::roleColor(Role::Vampire)});
+        if (v.phase == Phase::Night)
+            lines.push_back({v.packKillsLeft ? L("Der Clan dürstet noch.", "The clan still thirsts.") : L("Der Clan ist gesättigt.", "The clan is sated."),
+                             theme::muted});
+        lines.push_back({m_chatWolves ? L("Chat: Clan (Tab wechselt)", "Chat: clan (Tab switches)") : L("Chat: Nähe (Tab: Clan)", "Chat: nearby (Tab: clan)"),
+                         theme::faint});
+    }
     if (v.loverPartner != kNoPlayer) {
         const PlayerView* p = v.player(v.loverPartner);
         lines.push_back({Lf("♥ Verliebt in {}", "♥ In love with {}", p ? p->name : std::string("?")), theme::roleColor(Role::Cupid)});

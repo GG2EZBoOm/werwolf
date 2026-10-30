@@ -199,6 +199,7 @@ private:
     Team m_winner = Team::None;
 
     uint8_t m_packKills = 0;
+    uint8_t m_vampireBites = 0; // Bisse, die der Vampirclan heute Nacht noch hat
     bool m_wolfRage = false;  // Wolfsjunges ist gestorben: nächste Nacht ein Opfer mehr
     bool m_wolfDied = false;  // für den großen bösen Wolf
     bool m_healAvailable = false;

@@ -93,10 +93,10 @@ uint8_t Bot::strongestSuspect(const Match& match, float threshold) const {
     const auto view = match.viewFor(m_id);
     for (const auto& player : view.players) {
         const uint8_t id = player.id;
-        const float value = !isWolfRole(view.yourRole) && isWolfRole(player.role)
+        const float value = !isEvilRole(view.yourRole) && isEvilRole(player.role)
             ? std::max(8.0f, suspicion(match, id)) : suspicion(match, id);
-        if (isWolfRole(view.yourRole) && isWolfRole(player.role)) continue;
-        if (player.role != Role::Unknown && !isWolfRole(player.role)) continue;
+        if (ally(view, player.role)) continue;
+        if (player.role != Role::Unknown && !isEvilRole(player.role)) continue;
         if (player.alive && id != m_id && value > strongest) {
             strongest = value;
             suspect = id;
@@ -178,14 +178,16 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
             const Match::Player* right = seated[(i + 1) % n];
             if (!isWolfRole(left->role) && !isWolfRole(right->role)) continue;
             for (const Match::Player* s : {left, right})
-                if (s->id != m_id && !isWolfRole(view.yourRole)) m_suspicion[s->id] += 1.5f;
+                if (s->id != m_id && !isEvilRole(view.yourRole)) m_suspicion[s->id] += 1.5f;
         }
     } else if (view.phase == Phase::Night) {
         // Vorsichtige schließen sich eher ein; erst ein Moment des Zögerns, dann los
         const float roll = m_rng.uniform(0.0f, 1.0f);
         m_goHome = roll < 0.25f + 0.4f * m_personality.caution + 0.35f * m_feelings.fear;
         m_staysOut = roll >= std::min(0.99f, 0.775f + 0.15f * m_personality.caution + 0.2f * m_feelings.fear);
-        if (!isWolfRole(view.yourRole)) m_hesitate = m_rng.uniform(0.5f, 2.5f) * (0.6f + m_personality.caution);
+        if (!isEvilRole(view.yourRole)) m_hesitate = m_rng.uniform(0.5f, 2.5f) * (0.6f + m_personality.caution);
+        m_shouted = false;
+        m_fleeFrom = kNoPlayer;
         const float a = m_rng.uniform(0.0f, 2.0f * eng::kPi);
         m_target = {std::cos(a) * m_rng.uniform(3.0f, 6.5f), std::sin(a) * m_rng.uniform(3.0f, 6.5f)};
         if (m_staysOut) chooseWanderTarget(match);
@@ -195,12 +197,12 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
 }
 
 uint8_t Bot::chooseCaptain(const Match& match, const GameView& view) {
-    const bool wolf = isWolfRole(view.yourRole);
+    const bool wolf = isEvilRole(view.yourRole);
     std::vector<uint8_t> trusted, others;
     for (const Match::Player& p : match.players()) {
         if (!p.alive || p.id == m_id) continue;
         const PlayerView* pv = view.player(p.id);
-        if (wolf && pv && isWolfRole(pv->role)) trusted.push_back(p.id); // das Rudel hält zusammen
+        if (wolf && pv && ally(view, pv->role)) trusted.push_back(p.id); // das Rudel hält zusammen
         else if (!wolf && suspicion(match, p.id) <= 0.5f) trusted.push_back(p.id);
         else others.push_back(p.id);
     }
@@ -213,7 +215,7 @@ uint8_t Bot::chooseCaptain(const Match& match, const GameView& view) {
 }
 
 uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
-    const bool wolf = isWolfRole(view.yourRole);
+    const bool wolf = isEvilRole(view.yourRole);
     std::vector<uint8_t> candidates;
     for (const Match::Player& p : match.players())
         if (p.alive && p.id != m_id) candidates.push_back(p.id);
@@ -222,7 +224,7 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
     // bekannte Werwölfe (Seherin) zuerst
     for (const SeerResult& r : view.seerResults) {
         const Match::Player* p = match.find(r.player);
-        if (p && p->alive && isWolfRole(r.role) && !wolf) return r.player;
+        if (p && p->alive && isEvilRole(r.role) && !wolf) return r.player;
     }
     // stärkster Verdacht aus Beobachtungen und Gesprächen
     const uint8_t suspect = strongestSuspect(match, 1.0f / m_personality.boldness);
@@ -244,7 +246,7 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
     for (const auto& [id, count] : tally) {
         const PlayerView* t = view.player(id);
         if (!t || !t->alive || id == m_id) continue;
-        if (wolf && isWolfRole(t->role)) continue;
+        if (wolf && ally(view, t->role)) continue;
         if (!wolf && suspicion(match, id) < -0.25f) continue; // nicht hinter den Wölfen her gegen eine glaubwürdige Seherin
         if (count > best) {
             best = count;
@@ -256,8 +258,8 @@ uint8_t Bot::chooseVote(const Match& match, const GameView& view) {
     for (uint8_t id : candidates) {
         const PlayerView* t = view.player(id);
         if (!t) continue;
-        if (wolf && isWolfRole(t->role)) continue;
-        if (!wolf && t->role != Role::Unknown && !isWolfRole(t->role)) continue;
+        if (wolf && ally(view, t->role)) continue;
+        if (!wolf && t->role != Role::Unknown && !isEvilRole(t->role)) continue;
         options.push_back(id);
     }
     // Prefer a neutral candidate over somebody credibly defended, without treating an alibi as proof.
@@ -318,6 +320,15 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 m_wolfWitness[seen] = view.day;
             }
         }
+        // Rot glühende Augen in der Dunkelheit: aus der Nähe erkennt man, wer der Vampir ist
+        for (const EntityState& p : match.entitiesFor(m_id)) {
+            if (p.id == m_id || p.kind != EntityLiving || !(p.flags & EntityRedEyes) || isVampireRole(me->role) ||
+                m_vampireWitness.contains(p.id)) continue;
+            const Vec3 pos{p.x, 0, p.z};
+            if (distanceXZ(pos, me->position) > 6.0f || !match.hasLineOfSight(pos, me->position) || !m_rng.chance(0.006f)) continue;
+            m_suspicion[p.id] += 4.0f;
+            m_vampireWitness[p.id] = view.day;
+        }
         // Ein Wolf in Gestalt der Bestie merkt, wer ihn gesehen hat – und holt sich diesen Zeugen zuerst
         if (me->wolfForm())
             for (const Match::Player& p : match.players()) {
@@ -359,7 +370,7 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 m_claimedSeer = true;
                 uint8_t mate = kNoPlayer;
                 for (const auto& p : view.players)
-                    if (p.alive && p.id != m_id && isWolfRole(p.role) && m_dialogue.suspicion(p.id, view.day) > 1.0f &&
+                    if (p.alive && p.id != m_id && ally(view, p.role) && m_dialogue.suspicion(p.id, view.day) > 1.0f &&
                         p.id != sacrificeTarget(match)) mate = p.id;
                 if (const Match::Player* m = match.find(mate); m && !first) {
                     speak(say, tx("Ich habe {} geprüft: kein Werwolf.", "I checked {}: not a werewolf.", m->name), false,
@@ -384,9 +395,11 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 if (view.yourRole == Role::Seer) {
                     for (const SeerResult& r : view.seerResults) {
                         const PlayerView* p = view.player(r.player);
-                        if (p && p->alive && isWolfRole(r.role) && shouldReveal(match, r.player) && m_rng.chance(0.7f)) {
-                            speak(say, tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", p->name), false,
-                                  {Evidence{Evidence::Kind::Seer, r.player, 2.4f}});
+                        if (p && p->alive && isEvilRole(r.role) && shouldReveal(match, r.player) && m_rng.chance(0.7f)) {
+                            speak(say,
+                                  isVampireRole(r.role) ? tx("Ich bin die Seherin! {} ist ein Vampir!", "I'm the seer! {} is a vampire!", p->name)
+                                                        : tx("Ich bin die Seherin! {} ist ein Werwolf!", "I'm the seer! {} is a werewolf!", p->name),
+                                  false, {Evidence{Evidence::Kind::Seer, r.player, 2.4f}});
                             spoke = true;
                             break;
                         }
@@ -493,6 +506,94 @@ void Bot::goHome(Match& match, const GameView& view, const Match::Player& me, Ve
     if (match.checkInteraction(m_id, Interaction::DoorToggle, door).empty()) match.interact(m_id, Interaction::DoorToggle, door);
 }
 
+bool Bot::flee(Match& match, const GameView& view, const Match::Player& me, const SayFn& say, Vec2& wish, float& speed) {
+    const World& w = match.world();
+    const Vec2 pos = position();
+    // die nächste Bestie in Sichtweite
+    const Match::Player* seen = nullptr;
+    float nearest = 16.0f;
+    for (const EntityState& e : match.entitiesFor(m_id)) {
+        const bool vampireNear = (e.flags & EntityRedEyes) && !isVampireRole(me.role);
+        if (e.id == m_id || e.kind != EntityLiving || !((e.flags & EntityWolf) || e.transform >= 0.5f || vampireNear)) continue;
+        const Vec3 at{e.x, 0, e.z};
+        const float d = distanceXZ(at, me.position);
+        if (vampireNear && !(e.flags & EntityWolf) && (d > 7.0f || !m_vampireWitness.contains(e.id))) continue; // nur wer die Augen bemerkt hat
+        if (d < nearest && match.hasLineOfSight(at, me.position)) {
+            nearest = d;
+            seen = match.find(e.id);
+        }
+    }
+    if (seen) {
+        m_fleeFrom = seen->id;
+        m_fleeUntil = match.clock() + 6.0;
+        m_feelings.fear = std::min(1.0f, m_feelings.fear + 0.002f);
+        if (!m_shouted) {
+            m_shouted = true;
+            static const std::array<Text, 3> shouts = {{{"Hilfe! Ein Werwolf!", "Help! A werewolf!"},
+                {"Lauft! Da ist ein Werwolf!", "Run! There's a werewolf!"},
+                {"Ein Werwolf! Alle in die Häuser!", "A werewolf! Everyone inside!"}}};
+            if (m_rng.chance(std::min(0.9f, 0.6f * m_personality.talk + 0.3f * m_feelings.fear))) {
+                Speech alarm;
+                alarm.topic = seen->id;
+                alarm.alarm = true;
+                speak(say, shouts[static_cast<size_t>(m_rng.range(0, static_cast<int>(shouts.size()) - 1))], false, alarm);
+            }
+        }
+    }
+    const Match::Player* beast = match.find(m_fleeFrom);
+    if (!beast || !beast->alive || match.clock() > m_fleeUntil) {
+        m_fleeFrom = kNoPlayer;
+        return false;
+    }
+    const Vec2 from{beast->position.x, beast->position.z};
+    speed = kSprintSpeed;
+    m_hesitate = 0.0f;
+    m_idle = 0.0f;
+    // Schon drinnen? Tür zu – von innen verriegelt sie sich – und nach hinten
+    if (const int inside = w.houseAt(pos, 0.15f); inside >= 0 && static_cast<size_t>(inside) < match.doors().size()) {
+        const uint8_t door = static_cast<uint8_t>(inside);
+        const DoorState& d = match.doors()[door];
+        if ((d.flags & DoorOpen) && !(d.flags & DoorBroken) && match.checkInteraction(m_id, Interaction::DoorToggle, door).empty())
+            match.interact(m_id, Interaction::DoorToggle, door);
+        const House& h = w.houses()[door];
+        m_target = w.houseToWorld(inside, {0.0f, -h.depth * 0.5f * 0.4f});
+        m_goHome = inside == me.house;
+        navigate(match, view, m_target, 0.6f, wish, false);
+        return true;
+    }
+    // Ein Haus, das ich vor der Bestie erreiche? Das eigene ist am vertrautesten
+    int refuge = -1;
+    float best = 1e9f;
+    for (size_t i = 0; i < w.houses().size() && i < match.doors().size(); ++i) {
+        const DoorState& d = match.doors()[i];
+        if ((d.flags & (DoorBroken | DoorBurnt | DoorBurning)) || (!(d.flags & DoorOpen) && (d.flags & DoorLocked))) continue;
+        const Vec2 door{w.houses()[i].door.x, w.houses()[i].door.z};
+        const float mine = (door - pos).length();
+        const float theirs = (door - from).length();
+        // nur eine Tür, die man klar vor der Bestie erreicht – und nicht in ihre Richtung
+        if (mine > 30.0f || mine / kSprintSpeed + 0.5f > theirs / kWolfSpeed) continue;
+        const Vec2 toDoor = (door - pos).normalized(), toBeast = (from - pos).normalized();
+        if (mine > 1.0f && toDoor.x * toBeast.x + toDoor.y * toBeast.y > 0.3f) continue;
+        const float score = static_cast<int>(i) == me.house ? mine * 0.75f : mine;
+        if (score < best) {
+            best = score;
+            refuge = static_cast<int>(i);
+        }
+    }
+    if (refuge >= 0) {
+        const House& h = w.houses()[static_cast<size_t>(refuge)];
+        m_target = w.houseToWorld(refuge, {0.0f, -h.depth * 0.5f * 0.4f});
+        navigate(match, view, m_target, 0.6f, wish, false);
+        return true;
+    }
+    // Kein Haus erreichbar: weg von der Bestie
+    Vec2 away = pos - from;
+    away = away.length() > 0.01f ? away.normalized() : Vec2{1.0f, 0.0f};
+    m_target = w.resolveCollision(pos + away * 12.0f, 0.6f);
+    navigate(match, view, m_target, 0.5f, wish, false);
+    return true;
+}
+
 void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Vec2& wish, float& speed) {
     const Match::Player& me = *match.find(m_id);
     const World& w = match.world();
@@ -504,7 +605,7 @@ void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Ve
         if (m_shotDelay > 3.0f) {
             uint8_t target = kNoPlayer;
             for (const SeerResult& r : view.seerResults)
-                if (isWolfRole(r.role) && match.checkInteraction(m_id, Interaction::HunterShot, r.player).empty()) target = r.player;
+                if (isEvilRole(r.role) && match.checkInteraction(m_id, Interaction::HunterShot, r.player).empty()) target = r.player;
             if (target == kNoPlayer) {
                 const uint8_t suspect = strongestSuspect(match, 1.0f);
                 if (suspect != kNoPlayer && match.checkInteraction(m_id, Interaction::HunterShot, suspect).empty()) target = suspect;
@@ -636,7 +737,7 @@ bool Bot::dayRole(Match& match, const GameView& view, const Match::Player& me, V
         if (const Match::Player* t = match.find(suspect)) {
             if (match.checkInteraction(m_id, Interaction::HolyWater, suspect).empty()) {
                 match.interact(m_id, Interaction::HolyWater, suspect);
-                if (!isWolfRole(t->role)) m_suspicion[suspect] = 0.0f;
+                if (!isEvilRole(t->role)) m_suspicion[suspect] = 0.0f;
                 return false;
             }
             navigate(match, view, {t->position.x, t->position.z}, 1.5f, wish, false);
@@ -648,10 +749,14 @@ bool Bot::dayRole(Match& match, const GameView& view, const Match::Player& me, V
 
 bool Bot::hunt(Match& match, const GameView& view, const Match::Player& me, Vec2& wish, float& speed) {
     const bool killer = me.role == Role::SerialKiller;
-    const Interaction strike = killer ? Interaction::Stab : Interaction::Attack;
+    const bool vampire = isVampireRole(me.role);
+    const Interaction strike = killer ? Interaction::Stab : vampire ? Interaction::Bite : Interaction::Attack;
     const bool betray = view.can(AbilityBetray);
     const bool feed = killer || view.can(AbilityAttack);
-    auto prey = [&](const Match::Player& p) { return killer || (isWolfRole(p.role) ? betray : feed); };
+    auto prey = [&](const Match::Player& p) {
+        if (vampire) return !isVampireRole(p.role);
+        return killer || (isWolfRole(p.role) ? betray : feed);
+    };
     // Beute: möglichst allein und nicht hinter verriegelten Türen
     if (m_quarry == kNoPlayer || !match.find(m_quarry)->alive || m_spared.count(m_quarry)) {
         m_quarry = kNoPlayer;
@@ -662,8 +767,9 @@ bool Bot::hunt(Match& match, const GameView& view, const Match::Player& me, Vec2
             for (const Match::Player& o : match.players())
                 if (o.alive && o.id != p.id && o.id != m_id && distanceXZ(o.position, p.position) < 8.0f) ++company;
             float score = distanceXZ(p.position, me.position) + static_cast<float>(company) * 25.0f;
+            if (!vampire && isVampireRole(p.role)) score += 30.0f; // kaltes Blut reizt einen Werwolf kaum
             // Wölfe holen sich gezielt, wer ihnen gefährlich wird: eine Seherin oder lautstarke Ankläger
-            if (!killer && !isWolfRole(p.role)) {
+            if (!killer && !ally(view, p.role)) {
                 const auto threat = m_suspicion.find(p.id);
                 score -= std::clamp(threat == m_suspicion.end() ? 0.0f : threat->second, 0.0f, 6.0f) * 12.0f;
                 if (m_dialogue.claimedRole(p.id) == Role::Seer) score -= 40.0f;
@@ -671,6 +777,7 @@ bool Bot::hunt(Match& match, const GameView& view, const Match::Player& me, Vec2
             const int h = match.world().houseAt({p.position.x, p.position.z});
             if (h >= 0 && static_cast<size_t>(h) < match.doors().size()) {
                 const DoorState& d = match.doors()[static_cast<size_t>(h)];
+                if (!doorPassable(d) && vampire && h != me.house) continue; // ohne Einladung kein Weg hinein
                 if (!doorPassable(d)) score += (d.flags & DoorReinforced) ? 45.0f : 20.0f;
             }
             if (score < bestScore) {
@@ -682,8 +789,8 @@ bool Bot::hunt(Match& match, const GameView& view, const Match::Player& me, Vec2
     const Match::Player* q = match.find(m_quarry);
     if (!q) return false;
     const Vec2 qp{q->position.x, q->position.z};
-    speed = killer ? kSprintSpeed : kWolfSpeed;
-    const Nav nav = navigate(match, view, qp, 0.0f, wish, true);
+    speed = killer || vampire ? kSprintSpeed : kWolfSpeed;
+    const Nav nav = navigate(match, view, qp, 0.0f, wish, !vampire);
     if (nav == Nav::Blocked) {
         m_spared.insert(m_quarry);
         m_quarry = kNoPlayer;
@@ -696,7 +803,7 @@ bool Bot::hunt(Match& match, const GameView& view, const Match::Player& me, Vec2
         match.interact(m_id, kind, m_quarry);
         const Match::Player* after = match.find(m_quarry);
         if (!killer && after && after->alive && match.packKillsLeft() == killsBefore) m_spared.insert(m_quarry);
-        if (killer && after && after->alive) m_spared.insert(m_quarry);
+        if ((killer || vampire) && after && after->alive) m_spared.insert(m_quarry);
         m_quarry = kNoPlayer;
     }
     return true;
@@ -742,6 +849,18 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
 
     if (me.role == Role::SerialKiller && view.can(AbilityStab) && m_phaseTime > 12.0f) {
         if (hunt(match, view, me, wish, speed)) return;
+    }
+    if (isVampireRole(me.role) && view.can(AbilityBite) && m_phaseTime > 8.0f) {
+        const uint8_t before = m_quarry;
+        if (hunt(match, view, me, wish, speed)) {
+            if (const Match::Player* q = match.find(m_quarry); q && m_quarry != before && m_rng.chance(0.35f * m_personality.talk)) {
+                static const std::array<Text, 3> lines = {{{"Ich hole mir {name}.", "I'll take {name}."},
+                    {"{name} hat die Tür offen gelassen …", "{name} left the door open …"},
+                    {"Leise jetzt. {name} ist allein.", "Quiet now. {name} is alone."}}};
+                speak(say, fill(lines[static_cast<size_t>(m_rng.range(0, 2))], q->name), true);
+            }
+            return;
+        }
     }
 
     // Dieb und Flötenspieler müssen nah an ihr Ziel heran
@@ -869,9 +988,12 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
         }
     }
 
+    // Wer eine Bestie sieht (oder einen Hilferuf hört), rennt um sein Leben
+    if (!isWolfRole(me.role) && flee(match, view, me, say, wish, speed)) return;
+
     // Krach an einer Tür: wer draußen ist oder gleich nebenan wohnt, läuft hin und sieht nach
     const int inside = w.houseAt(pos);
-    if (!isWolfRole(me.role) && !isNeutralKillerRole(me.role) && m_feelings.fear < 0.55f) {
+    if (!isEvilRole(me.role) && !isNeutralKillerRole(me.role) && m_feelings.fear < 0.55f) {
         for (size_t i = 0; i < match.doors().size(); ++i) {
             const DoorState& d = match.doors()[i];
             if (doorPassable(d) || d.health >= 100 || static_cast<int>(i) == inside) continue;

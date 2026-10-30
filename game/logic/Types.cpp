@@ -36,6 +36,7 @@ const char* roleName(Role role, Lang lang) {
     case Role::WolfCub: return t("Wolfsjunges", "Wolf Cub");
     case Role::Jester: return t("Narr", "Jester");
     case Role::SerialKiller: return t("Serienmörder", "Serial Killer");
+    case Role::Vampire: return t("Vampir", "Vampire");
     case Role::Arsonist: return t("Brandstifter", "Arsonist");
     case Role::Thief: return t("Dieb", "Thief");
     case Role::Scapegoat: return t("Sündenbock", "Scapegoat");
@@ -84,6 +85,7 @@ Text roleWithArticle(Role role) {
     case Role::WolfCub: return {"das Wolfsjunge", "the wolf cub"};
     case Role::Jester: return {"der Narr", "the jester"};
     case Role::SerialKiller: return {"der Serienmörder", "the serial killer"};
+    case Role::Vampire: return {"ein Vampir", "a vampire"};
     case Role::Arsonist: return {"der Brandstifter", "the arsonist"};
     case Role::Thief: return {"der Dieb", "the thief"};
     case Role::Scapegoat: return {"der Sündenbock", "the scapegoat"};
@@ -190,6 +192,15 @@ const char* roleDescription(Role role, Lang lang) {
                  "können dir nichts anhaben. Gewinne als Letzter.",
                  "You fight alone. Every night you kill with your knife (left click) without transforming. Werewolves "
                  "cannot harm you. Be the last one standing.");
+    case Role::Vampire:
+        return t("Du gehörst zum Clan der Vampire und kennst deine Gefährten. Nachts beißt euer Clan lautlos ein Opfer "
+                 "(Linksklick) – man findet es blutleer. Durch geschlossene Türen kommt ihr nicht, und im Dunkeln glühen "
+                 "eure Augen schwach rot. Werwölfe sind eure Feinde: Ihr gewinnt, wenn kein Werwolf mehr lebt und ihr "
+                 "mindestens so viele seid wie alle anderen.",
+                 "You belong to the vampire clan and know your companions. At night your clan silently bites one victim "
+                 "(left click) – it is found drained of blood. You cannot pass closed doors, and in the dark your eyes "
+                 "glow a faint red. Werewolves are your enemies: you win once no werewolf is left and you are at least "
+                 "as many as everyone else.");
     case Role::Arsonist:
         return t("Du kämpfst allein. Nachts tränkst du Häuser mit Öl (E an der Tür) und zündest alle auf einmal an (F) "
                  "– wer drinnen ist, verbrennt. Gewinne als Letzter.",
@@ -296,6 +307,7 @@ const char* roleIcon(Role role) {
     case Role::WolfCub: return "☽";
     case Role::Jester: return "♣";
     case Role::SerialKiller: return "⚔";
+    case Role::Vampire: return "⚰";
     case Role::Arsonist: return "♨";
     case Role::Thief: return "✂";
     case Role::Scapegoat: return "♈";
@@ -325,6 +337,10 @@ bool isWolfRole(Role role) {
            role == Role::WhiteWolf;
 }
 
+bool isVampireRole(Role role) { return role == Role::Vampire; }
+
+bool isEvilRole(Role role) { return isWolfRole(role) || isVampireRole(role); }
+
 Faction roleFaction(Role role) {
     switch (role) {
     case Role::WhiteWolf:
@@ -333,7 +349,8 @@ Faction roleFaction(Role role) {
     case Role::Sectarian:
     case Role::Jester:
     case Role::SerialKiller:
-    case Role::Arsonist: return Faction::Neutral;
+    case Role::Arsonist:
+    case Role::Vampire: return Faction::Neutral;
     default: return isWolfRole(role) ? Faction::Wolves : Faction::Village;
     }
 }
@@ -343,6 +360,7 @@ Team roleTeam(Role role) {
     case Role::WhiteWolf: return Team::WhiteWolf;
     case Role::Jester: return Team::Jester;
     case Role::SerialKiller: return Team::Killer;
+    case Role::Vampire: return Team::Vampires;
     case Role::Arsonist: return Team::Arsonist;
     case Role::Piper: return Team::Piper;
     case Role::Angel: return Team::Angel;
@@ -377,6 +395,7 @@ const char* teamName(Team team, Lang lang) {
     case Team::Angel: return t("Engel (allein)", "Angel (alone)");
     case Team::WhiteWolf: return t("Weißer Werwolf (allein)", "White Werewolf (alone)");
     case Team::Sectarian: return t("Sektierer (allein)", "Sectarian (alone)");
+    case Team::Vampires: return t("Vampire", "Vampires");
     default: return "";
     }
 }
@@ -404,6 +423,7 @@ const char* channelName(ChatChannel channel, Lang lang) {
     case ChatChannel::Wolves: return t("Rudel", "Pack");
     case ChatChannel::Dead: return t("Geister", "Ghosts");
     case ChatChannel::Family: return t("Geschwister", "Siblings");
+    case ChatChannel::Vampires: return t("Clan", "Clan");
     }
     return "";
 }
@@ -454,6 +474,8 @@ bool Settings::read(eng::ByteReader& r) {
     return r.ok();
 }
 
+int autoVampireCount(int players) { return players >= 10 ? 2 : 1; }
+
 int autoWolfCount(int players) {
     if (players <= 6) return 1;
     if (players <= 10) return 2;
@@ -474,6 +496,10 @@ std::vector<Role> buildRoleList(const Settings& settings, int players, Text* err
     if (wolves * 2 >= players)
         return fail(tx("Zu viele Werwölfe für {} Spieler – es müssen weniger als die Hälfte sein.",
                        "Too many werewolves for {} players – they must be fewer than half.", players));
+    const int vampires = settings.has(Role::Vampire) ? autoVampireCount(players) : 0;
+    if ((wolves + vampires) * 2 >= players)
+        return fail(tx("Zu wenige Spieler für Werwölfe und Vampire – zusammen müssen sie weniger als die Hälfte der {} sein.",
+                       "Too few players for werewolves and vampires – together they must be fewer than half of the {}.", players));
 
     // Besondere Wölfe ersetzen normale Werwölfe
     std::vector<Role> roles;
@@ -482,11 +508,12 @@ std::vector<Role> buildRoleList(const Settings& settings, int players, Text* err
         if (settings.has(r)) wolfVariants.push_back(r);
     for (int i = 0; i < wolves; ++i)
         roles.push_back(static_cast<size_t>(i) < wolfVariants.size() ? wolfVariants[static_cast<size_t>(i)] : Role::Werewolf);
+    for (int i = 0; i < vampires; ++i) roles.push_back(Role::Vampire);
 
     // Weitere Sonderrollen in fester Reihenfolge, solange Plätze frei sind
     for (int r = 0; r < static_cast<int>(Role::Count) && static_cast<int>(roles.size()) < players; ++r) {
         const Role role = static_cast<Role>(r);
-        if (!isOptionalRole(role) || isWolfRole(role) || !settings.has(role)) continue;
+        if (!isOptionalRole(role) || isEvilRole(role) || !settings.has(role)) continue;
         // Geschwister gibt es nur vollständig
         const int cards = roleCardCount(role);
         if (static_cast<int>(roles.size()) + cards > players) continue;

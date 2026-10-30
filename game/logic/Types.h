@@ -60,12 +60,15 @@ enum class Role : uint8_t {
     Jester,         // Narr: gewinnt, wenn er hingerichtet wird
     SerialKiller,   // Serienmörder: tötet nachts mit dem Messer, gewinnt allein
     Arsonist,       // Brandstifter: tränkt Häuser mit Öl und zündet sie an
+    // Vampire
+    Vampire,        // Vampir: eigener Clan, beißt nachts lautlos, kommt durch keine geschlossene Tür
     Count
 };
 
 enum class Faction : uint8_t { Village, Wolves, Neutral };
 
-enum class Team : uint8_t { None = 0, Village, Wolves, Lovers, Nobody, Jester, Killer, Arsonist, Piper, Angel, WhiteWolf, Sectarian };
+enum class Team : uint8_t { None = 0, Village, Wolves, Lovers, Nobody, Jester, Killer, Arsonist, Piper, Angel, WhiteWolf, Sectarian,
+                            Vampires };
 
 enum class Phase : uint8_t {
     Lobby = 0,
@@ -78,11 +81,11 @@ enum class Phase : uint8_t {
     GameOver
 };
 
-enum class ChatChannel : uint8_t { Global = 0, Nearby, Wolves, Dead, Family };
+enum class ChatChannel : uint8_t { Global = 0, Nearby, Wolves, Dead, Family, Vampires };
 
 enum class NoticeKind : uint8_t { Info = 0, Narration, Death, Private, Warning, Victory };
 
-enum class DeathCause : uint8_t { Wolves, Poison, Grief, Vote, Hunter, Left, Fire, Knife, HolyWater, Rust, Scapegoat };
+enum class DeathCause : uint8_t { Wolves, Poison, Grief, Vote, Hunter, Left, Fire, Knife, HolyWater, Rust, Scapegoat, Vampire };
 
 // Was ein Spieler tun möchte (E, F, Q, Linksklick, R ...)
 enum class Interaction : uint8_t {
@@ -114,6 +117,7 @@ enum class Interaction : uint8_t {
     ChooseSide, // Wolfshund (Ziel 0 = Dorf, 1 = Rudel)
     Mark,       // Rabe
     NameSuccessor, // sterbender Hauptmann
+    Bite,       // Vampir saugt ein Opfer aus
 };
 
 enum AbilityBits : uint32_t {
@@ -145,6 +149,7 @@ enum AbilityBits : uint32_t {
     AbilityMark = 1u << 25,
     AbilityNameSuccessor = 1u << 26,
     AbilityBetray = 1u << 27, // Weißer Werwolf darf einen Werwolf reißen
+    AbilityBite = 1u << 28,   // Vampir beißt (einmal je Nacht für den ganzen Clan)
 };
 
 // Reichweiten in Metern
@@ -182,6 +187,9 @@ const char* roleIcon(Role role);
 Faction roleFaction(Role role);
 Team roleTeam(Role role);
 bool isWolfRole(Role role);
+bool isVampireRole(Role role);
+// Werwolf oder Vampir: eine Gefahr fürs Dorf (die Seherin nennt beide "böse")
+bool isEvilRole(Role role);
 // Rollen, die in der Lobby einzeln zugeschaltet werden können
 bool isOptionalRole(Role role);
 // Rollen, die allen Mitspielern bekannt sind
@@ -215,6 +223,7 @@ struct Settings {
 };
 
 int autoWolfCount(int players);
+int autoVampireCount(int players); // wenn Vampire zugeschaltet sind
 std::vector<Role> buildRoleList(const Settings& settings, int players, Text* error = nullptr);
 
 struct SeerResult {
@@ -289,6 +298,7 @@ enum EntityFlags : uint8_t {
     EntitySprint = 2,
     EntityAttack = 4,    // holt gerade zum Hieb aus
     EntityLantern = 8,   // trägt eine Laterne
+    EntityRedEyes = 16,  // Vampir: nachts glühen die Augen schwach rot
 };
 
 struct EntityState {

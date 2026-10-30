@@ -85,12 +85,18 @@ Text Bot::styled(const Text& line, Personality::Style style) {
 
 // --- Täuschung der Wölfe -----------------------------------------------------
 
+bool Bot::ally(const GameView& view, Role other) const {
+    if (isWolfRole(view.yourRole)) return isWolfRole(other);
+    if (isVampireRole(view.yourRole)) return isVampireRole(other);
+    return false;
+}
+
 bool Bot::packSpeaker(const Match& match) const {
     const auto view = match.viewFor(m_id);
-    if (!isWolfRole(view.yourRole)) return false;
+    if (!isEvilRole(view.yourRole)) return false;
     for (const auto& p : match.players()) {
         const auto* known = view.player(p.id);
-        if (p.alive && p.bot && p.id < m_id && known && isWolfRole(known->role)) return false;
+        if (p.alive && p.bot && p.id < m_id && known && ally(view, known->role)) return false;
     }
     return true;
 }
@@ -99,17 +105,19 @@ bool Bot::packClaimedSeer(const Match& match) const {
     if (m_claimedSeer) return true;
     const auto view = match.viewFor(m_id);
     for (const auto& p : view.players)
-        if (p.alive && p.id != m_id && isWolfRole(p.role) && m_dialogue.claimedRole(p.id) == Role::Seer) return true;
+        if (p.alive && p.id != m_id && ally(view, p.role) && m_dialogue.claimedRole(p.id) == Role::Seer) return true;
     return false;
 }
 
 bool Bot::wouldCounterclaim(const Match& match, const dialogue::Message& message, uint8_t speaker) const {
-    if (!message.seerReport || !packSpeaker(match) || packClaimedSeer(match) || sacrificeTarget(match) != kNoPlayer) return false;
+    // only with a "result" a seer could actually have by now
+    if (!message.seerReport || !packSpeaker(match) || packClaimedSeer(match) || sacrificeTarget(match) != kNoPlayer ||
+        nightsSoFar(match) < 1) return false;
     const auto view = match.viewFor(m_id);
-    if (const auto* from = view.player(speaker); from && isWolfRole(from->role)) return false;
+    if (const auto* from = view.player(speaker); from && ally(view, from->role)) return false;
     const bool exposesPack = std::any_of(message.claims.begin(), message.claims.end(), [&](const dialogue::Claim& c) {
         const auto* p = view.player(c.target);
-        return c.fact && c.weight > 0 && (c.target == m_id || (p && isWolfRole(p->role)));
+        return c.fact && c.weight > 0 && (c.target == m_id || (p && ally(view, p->role)));
     });
     if (!exposesPack) return false;
     // Nicht jeder Wolf traut sich: je nach Mut, für jeden Bot und Tag anders
@@ -165,11 +173,11 @@ void Bot::observe(float dt, const Match& match, const GameView& view) {
 void Bot::review(const Match& match, const GameView& view) {
     const auto* me = match.find(m_id);
     if (!me) return;
-    const bool wolf = isWolfRole(view.yourRole);
+    const bool wolf = isEvilRole(view.yourRole);
     const double now = match.clock();
     auto knownWolf = [&](uint8_t id) {
         const auto* p = view.player(id);
-        return p && isWolfRole(p->role);
+        return p && ally(view, p->role);
     };
     if (view.phase == Phase::Night) {
         m_aliveAtNight.clear();
@@ -221,7 +229,7 @@ void Bot::review(const Match& match, const GameView& view) {
         const auto* known = view.player(p.id);
         if (p.alive || p.deathCause != DeathCause::Vote || m_reviewed.contains(p.id) || !known || known->role == Role::Unknown) continue;
         m_reviewed.insert(p.id);
-        const bool wasWolf = isWolfRole(known->role);
+        const bool wasWolf = isEvilRole(known->role);
         const auto votes = m_votes[p.deathDay];
         const bool votedFor = votes.contains(m_id) && votes.at(m_id) == p.id;
         std::vector<uint8_t> voters;

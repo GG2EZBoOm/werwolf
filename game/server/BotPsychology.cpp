@@ -68,7 +68,7 @@ void Bot::updateFeelings(float dt, const Match& match, const GameView& view) {
     m_feelings.stress = std::max(0.0f, m_feelings.stress - dt * 0.012f);
     for (auto& [id, resentment] : m_resentment) resentment = std::max(0.0f, resentment - dt * 0.0002f);
     if (!me->alive || view.phase == Phase::GameOver) return;
-    const bool wolf = isWolfRole(view.yourRole);
+    const bool wolf = isEvilRole(view.yourRole);
     const auto visible = match.entitiesFor(m_id);
     // Quiet time together strengthens a friendship slowly; hostile people do not become friends by standing nearby.
     if (view.phase == Phase::Day)
@@ -165,7 +165,7 @@ bool Bot::shouldReveal(const Match& match, uint8_t target) const {
     for (const auto& result : view.seerResults) {
         const auto* p = view.player(result.player);
         if (!p || !p->alive || (target != kNoPlayer && target != result.player)) continue;
-        if (isWolfRole(result.role)) return view.phase == Phase::Vote || m_phaseTime >= 2.0f + 3.0f * m_personality.caution;
+        if (isEvilRole(result.role)) return view.phase == Phase::Vote || m_phaseTime >= 2.0f + 3.0f * m_personality.caution;
         if (votesFor(view, result.player) >= 2) return true; // save a checked innocent from execution
     }
     return false;
@@ -173,17 +173,17 @@ bool Bot::shouldReveal(const Match& match, uint8_t target) const {
 
 uint8_t Bot::sacrificeTarget(const Match& match) const {
     const auto view = match.viewFor(m_id);
-    if (!isWolfRole(view.yourRole) || !publicDiscussion(view.phase) || view.election) return kNoPlayer;
+    if (!isEvilRole(view.yourRole) || !publicDiscussion(view.phase) || view.election) return kNoPlayer;
     int wolves = 0, alive = 0;
-    for (const auto& p : view.players) if (p.alive) { ++alive; if (isWolfRole(p.role)) ++wolves; }
+    for (const auto& p : view.players) if (p.alive) { ++alive; if (ally(view, p.role)) ++wolves; }
     if (wolves < 2 || alive - wolves <= wolves + 1) return kNoPlayer; // preserve an imminent pack win
     uint8_t target = kNoPlayer;
     float best = 0;
     for (const auto& p : view.players) {
-        if (!p.alive || p.id == m_id || !isWolfRole(p.role)) continue;
+        if (!p.alive || p.id == m_id || !ally(view, p.role)) continue;
         int outsideVotes = 0;
         for (const auto& voter : view.players)
-            if (voter.alive && voter.vote == p.id && !isWolfRole(voter.role)) ++outsideVotes;
+            if (voter.alive && voter.vote == p.id && !ally(view, voter.role)) ++outsideVotes;
         const float evidence = m_dialogue.suspicion(p.id, view.day);
         if (outsideVotes < 2 || (outsideVotes < 3 && evidence < 2.0f)) continue;
         if (outsideVotes < votesFor(view, m_id)) continue; // saving myself is not a credibility sacrifice
@@ -216,7 +216,7 @@ void Bot::roleplay(const Match& match, const SayFn& say) {
         for (const auto& r : view.seerResults) {
             const auto* p = view.player(r.player);
             if (!p || !p->alive || m_sharedResults.contains(r.player) || !shouldReveal(match, r.player)) continue;
-            if (target == kNoPlayer || isWolfRole(r.role)) target = r.player;
+            if (target == kNoPlayer || isEvilRole(r.role)) target = r.player;
         }
         if (target != kNoPlayer) line = explain(match, target, &speech.evidence);
         else if (!m_seerRevealed && (m_feelings.stress >= 0.65f || votesFor(view, m_id) >= 2)) {

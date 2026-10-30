@@ -45,6 +45,7 @@ inline Color roleColor(Role role) {
     case Role::WolfCub: return Color::hex(0xE07A6E);
     case Role::Jester: return Color::hex(0xC77DDB);
     case Role::SerialKiller: return Color::hex(0x8A9099);
+    case Role::Vampire: return Color::hex(0xB0203A);
     case Role::Arsonist: return Color::hex(0xF07A2A);
     case Role::Thief: return Color::hex(0x8F8A6E);
     case Role::Scapegoat: return Color::hex(0xB5A27E);

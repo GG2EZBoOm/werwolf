@@ -35,6 +35,7 @@ public:
         std::optional<Evidence> evidence;
         bool reply = false;          // auf Antworten antworten Bots nicht, sonst reden sie endlos weiter
         uint8_t topic = kNoPlayer;   // worum es geht: wer es gerade gehört hat, muss es nicht wiederholen
+        bool alarm = false;          // "Hilfe, ein Werwolf!": wer es hört, flieht vor topic
     };
 
     // Wie ein Bot spielt und schreibt. Jeder Bot im Spiel bekommt eigene Züge; neutral ist der Standard.
@@ -50,6 +51,9 @@ public:
     };
     // Schreibstil: förmlich unverändert, locker ("hab Anna geprüft"), knapp (höchstens zwei Sätze)
     static Text styled(const Text& line, Personality::Style style);
+    // Nächte, in denen eine Seherin bisher prüfen konnte: tagsüber Tag − 1, nachts auch die laufende.
+    // Vor der ersten Nacht kann niemand ein Prüfergebnis haben.
+    static int nightsSoFar(const Match& match);
 
     Bot(uint8_t id, uint64_t seed, const Personality& personality = {});
     uint8_t id() const { return m_id; }
@@ -78,6 +82,8 @@ private:
     // Jagd der Werwölfe und des Serienmörders; true, solange gejagt wird
     bool hunt(Match& match, const GameView& view, const Match::Player& me, Vec2& wish, float& speed);
     void goHome(Match& match, const GameView& view, const Match::Player& me, Vec2& wish);
+    // Flucht vor einer Bestie: ins nächste Haus, das man vor ihr erreicht, und verriegeln – sonst weg von ihr
+    bool flee(Match& match, const GameView& view, const Match::Player& me, const SayFn& say, Vec2& wish, float& speed);
     // Läuft zum Ziel und kümmert sich um Türen auf dem Weg
     Nav navigate(Match& match, const GameView& view, Vec2 target, float stopDist, Vec2& wish, bool breakDoors);
     uint8_t nearestPlayer(const Match& match, Vec3 from, bool (*filter)(const Match::Player&), float maxDist) const;
@@ -91,6 +97,8 @@ private:
     Text react(const Match& match, uint8_t speaker, const Evidence& heard, std::optional<Evidence>* evidence) const;
     Text explain(const Match& match, uint8_t target, std::optional<Evidence>* evidence = nullptr) const;
     bool knowsFirstHand(const Match& match, const Evidence& heard) const;
+    // Gehört other zum eigenen Rudel oder Clan? (nur für Wölfe und Vampire wahr)
+    bool ally(const GameView& view, Role other) const;
     // Kann der Bot eine Rollen- oder Seherangabe über target selbst prüfen? +1 wahr, -1 gelogen, 0 unbekannt
     int verdict(const Match& match, const dialogue::Message& message, uint8_t target) const;
     bool repeats(uint8_t speaker, const dialogue::Message& message) const;
@@ -150,6 +158,7 @@ private:
     std::map<uint8_t, float> m_suspicion; // wen der Bot für einen Werwolf hält
     std::map<uint8_t, int> m_seenAsWolf;  // als Bestie beobachtet (Nacht-Nummer)
     std::map<uint8_t, int> m_wolfWitness; // tatsächlich erkannt, nicht nur im Sichtfeld
+    std::map<uint8_t, int> m_vampireWitness; // nachts mit rot glühenden Augen erkannt
     dialogue::Memory m_dialogue;
     struct Topic { uint8_t player = kNoPlayer; double time = 0; };
     std::map<uint8_t, Topic> m_topics;
@@ -218,6 +227,9 @@ private:
     uint8_t m_sacrificed = kNoPlayer;
     double m_roleSpeakAfter = 0;
     int m_roleHintDay = -1;
+    uint8_t m_fleeFrom = kNoPlayer;       // vor wem der Bot gerade flieht
+    double m_fleeUntil = 0;
+    bool m_shouted = false;               // diese Nacht schon um Hilfe gerufen
 };
 
 // Verteilt eine Chatnachricht an alle Bots, die sie hören; höchstens einer antwortet.

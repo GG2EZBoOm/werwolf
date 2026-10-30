@@ -175,6 +175,8 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
 * **Nacht** – dunkel; wer lebt, trägt eine Laterne. Jeder hat ein eigenes **Haus** (auf der Karte
   markiert) und kann sich darin einschließen. Werwölfe verwandeln sich (R), reißen ein Opfer pro Nacht
   und brechen dafür auch Türen auf – das Krachen hört man in der Nachbarschaft. Sonderrollen handeln nachts.
+  Wer eine Bestie sieht, flieht: Bots rufen um Hilfe, rennen in ein Haus, das sie vor ihr erreichen, und
+  verriegeln die Tür – oder laufen von ihr weg.
 * **Morgen** – die Toten der Nacht werden verkündet; Leichen liegen, wo sie gefallen sind.
 
 Tote werden zu **Geistern**: sie schweben unsichtbar umher, sehen alle Rollen, lesen den Rudel-Chat
@@ -196,7 +198,7 @@ mit und sprechen im Geisterchat.
 | Medium       | spricht nachts mit den Toten (Tab)                                             |
 | Fährtenleser | folgt nachts einer Person (E), sieht sie durch Wände und erfährt morgens ihre Spur |
 | Schmied      | beschlägt oder repariert tagsüber eine Tür (E) – sie hält doppelt so lange      |
-| Pfarrer      | einmal im Spiel Weihwasser (E): ein Werwolf verbrennt                           |
+| Pfarrer      | einmal im Spiel Weihwasser (E): ein Werwolf verbrennt, ein Vampir zerfällt zu Staub |
 | Bürgermeister | allen bekannt, Stimme zählt doppelt                                           |
 | Dorfdepp     | überlebt die erste Hinrichtung, darf danach nicht mehr abstimmen                |
 | Verfluchter  | wird zum Werwolf, wenn ihn ein Werwolf angreift                                 |
@@ -205,6 +207,7 @@ mit und sprechen im Geisterchat.
 | Narr         | gewinnt allein, wenn das Dorf ihn hinrichtet                                    |
 | Serienmörder | tötet jede Nacht mit dem Messer (Linksklick), Werwölfe können ihm nichts anhaben |
 | Brandstifter | tränkt Häuser mit Öl (E an der Tür) und zündet alle auf einmal an (F)           |
+| Vampir       | eigener Clan (1, ab 10 Spielern 2) mit geheimem Chat (Tab): beißt nachts lautlos ein Opfer (Linksklick), das blutleer mit Bissspuren gefunden wird; kommt durch keine geschlossene Tür, die Augen glühen nachts schwach rot. Gewinnt, wenn kein Werwolf mehr lebt und der Clan gleichauf mit dem Rest ist |
 | Dieb         | stiehlt in der ersten Nacht die Rolle eines Spielers in der Nähe (E)             |
 | Sündenbock   | stirbt bei Gleichstand in der Abstimmung                                        |
 | Fuchs        | wittert nachts, ob bei einer Person oder in ihrer Nähe ein Werwolf ist (E); ohne Fund verliert er die Gabe |

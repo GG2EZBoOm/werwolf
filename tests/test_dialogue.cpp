@@ -552,10 +552,13 @@ TEST(NamedBotsConfirmOrRefuteTheSeer) {
     CHECK(v.heard(2, "Du lügst"));           // the wolf denies
     CHECK(v.heard(1, "Anna") || v.heard(3, "Anna") || v.heard(4, "Anna") || v.heard(5, "Anna")); // the room reacts, too
     for (const auto& s : v.said) CHECK(s.second.de.find("Verdacht gegen Spieler") == std::string::npos);
-    v.said.clear();
-    v.human("Ann ist die Hexe");
-    v.advance(6.0f);
-    CHECK(v.heard(3, "Spieler, stimmt, ich bin die Hexe"));
+    // After one night the seer knows one result; a second one now would be impossible, so this is a fresh game.
+    Village witch(5, {Role::Seer, Role::Villager, Role::Werewolf, Role::Witch, Role::Villager, Role::Villager});
+    phase(witch.match, Phase::Assembly);
+    witch.advance(0.5f);
+    witch.human("ich bin seher, ich hab Ann gecheckt, Ann ist die Hexe");
+    witch.advance(6.0f);
+    CHECK(witch.heard(3, "Spieler, stimmt, ich bin die Hexe"));
     // In the default village Anton is the real seer and Berta a villager: a false claim is called out.
     Village fake(5);
     phase(fake.match, Phase::Assembly);
@@ -672,6 +675,105 @@ TEST(BotsTurnToWhoeverSpeaks) {
     const auto* human = v.match.find(0);
     const float want = std::atan2(human->position.x - anton->position.x, human->position.z - anton->position.z);
     CHECK(std::abs(wrapAngle(want - anton->yaw)) < 0.4f);
+}
+
+TEST(VillagersFleeFromAWerewolf) {
+    int escaped = 0, shouted = 0, runs = 0;
+    for (uint64_t seed = 1; seed <= 8; ++seed) {
+        Village v(seed);
+        phase(v.match, Phase::Night);
+        v.advance(0.5f);
+        const Vec3 annStart = world().ground(4, 9), annaStart = world().ground(6, 19);
+        v.match.teleport(3, annStart);
+        v.match.teleport(2, annaStart);
+        CHECK(v.match.hasLineOfSight(annStart, annaStart));
+        CHECK(v.match.interact(2, Interaction::Transform, 1).empty());
+        v.advance(5.0f); // the transformation takes a moment, then Ann runs
+        ++runs;
+        const auto* ann = v.match.find(3);
+        const bool inside = world().houseAt({ann->position.x, ann->position.z}) >= 0;
+        escaped += ann->alive && (inside || distanceXZ(ann->position, annStart) > 6.0f);
+        shouted += v.heard(3, "Werwolf");
+    }
+    std::printf("    Ann ran from the werewolf in %d of %d nights and cried for help in %d\n", escaped, runs, shouted);
+    CHECK(escaped * 4 >= runs * 3);
+    CHECK(shouted > 0);
+}
+
+TEST(VampireBotsLieHuntAndAreFeared) {
+    CHECK(weight(parseLine("Anna ist ein Vampir"), 2) > 1.5f);
+    CHECK_EQ(weight(parseLine("ich bin seher, Anna ist eine Vampirin"), 2), kSeerWolf);
+    // a vampire named by the seer denies it instead of confirming
+    {
+        Village v(3, {Role::Seer, Role::Villager, Role::Vampire, Role::Villager, Role::Villager, Role::Villager});
+        phase(v.match, Phase::Assembly);
+        v.advance(0.5f);
+        v.human("ich bin seher, ich hab Anna gecheckt, sie ist ein Vampir");
+        v.advance(8.0f);
+        CHECK(!v.heard(2, "stimmt, ich") && !v.heard(2, "Stimmt, ich"));
+        CHECK(v.heard(2, "lügst") || v.heard(2, "stimmt nicht") || v.heard(2, "Seherin"));
+    }
+    // and at night the clan feeds
+    int bitten = 0;
+    for (uint64_t seed = 1; seed <= 6; ++seed) {
+        Village v(seed, {Role::Villager, Role::Villager, Role::Vampire, Role::Villager, Role::Villager, Role::Villager});
+        phase(v.match, Phase::Night);
+        v.advance(60.0f);
+        for (const auto& p : v.match.players()) bitten += !p.alive && p.deathCause == DeathCause::Vampire;
+    }
+    std::printf("    The vampire bot found a victim in %d of 6 nights\n", bitten);
+    CHECK(bitten >= 3);
+}
+
+TEST(NoSeerResultsBeforeTheFirstNight) {
+    // Day 1 with a captain's election: the village gathers before anyone could have checked anyone.
+    Match m;
+    Settings settings;
+    settings.captain = true;
+    settings.discussionSeconds = 60;
+    const std::vector<Match::Seat> seats = {{0, "Spieler", false}, {1, "Anton", true}, {2, "Anna", false},
+        {3, "Ann", false}, {4, "Berta", false}, {5, "Jörg", false}};
+    Text error;
+    CHECK(m.startWithRoles(seats, {Role::Seer, Role::Villager, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager},
+                           settings, world(), 42, error));
+    phase(m, Phase::Assembly);
+    CHECK_EQ(m.day(), 1);
+    Bot bot(1, 55);
+    std::vector<Text> replies;
+    const Bot::SayFn say = [&](uint8_t, const Text& text, bool) { replies.push_back(text); };
+    auto advance = [&](float seconds) {
+        for (float t = 0; t < seconds; t += 0.1f) { m.update(0.1f); bot.update(0.1f, m, say); }
+    };
+    bot.update(0.01f, m, say);
+    advance(1.0f);
+    bot.hear(m, 0, Text::same("ich bin seher, ich hab Anna gecheckt, sie ist ein Werwolf"), ChatChannel::Global, true);
+    advance(6.0f);
+    CHECK(std::any_of(replies.begin(), replies.end(), [](const Text& t) { return t.de.find("noch gar keine Nacht") != std::string::npos; }));
+    // just claiming the role is fine on day 1 – only results are impossible
+    CHECK_EQ(Bot::nightsSoFar(m), 0);
+
+    // Whoever is not named in a seer's report takes up to ~6 s to react, longer than ask() waits.
+    auto reply = [](Conversation& c, const std::string& text) {
+        c.advance(5.1f);
+        c.replies.clear();
+        c.hear(text);
+        c.advance(7.0f);
+        CHECK(!c.replies.empty());
+        return c.replies.empty() ? Text{} : c.replies.front();
+    };
+    // after one night: one result is plausible, two are not
+    Conversation one;
+    CHECK(reply(one, "ich bin seher, ich hab Anna gecheckt, sie ist ein Werwolf").de.find("Nacht") == std::string::npos);
+    Conversation two;
+    CHECK(reply(two, "ich bin seher, Anna ist ein Werwolf und Berta ist gut").de.find("erst eine Nacht") != std::string::npos);
+
+    // day 3: two nights, so two results are fine – a third one is not
+    Conversation later;
+    phase(later.match, Phase::Night);
+    phase(later.match, Phase::Assembly);
+    CHECK_EQ(Bot::nightsSoFar(later.match), 2);
+    CHECK(reply(later, "ich bin seher, Anna ist ein Werwolf und Berta ist gut").de.find("Nacht") == std::string::npos);
+    CHECK(reply(later, "Ann ist auch gut").de.find("erst 2 Nächte") != std::string::npos);
 }
 
 int main() {

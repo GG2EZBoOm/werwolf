@@ -322,7 +322,7 @@ void App::drawLobby() {
         s.takeTop(chipH + 8.0f);
     };
     roleGrid(L("Das Dorf", "The village"), [](Role role) { return roleFaction(role) == Faction::Village; });
-    roleGrid(L("Wölfe und Einzelgänger", "Wolves and loners"), [](Role role) { return roleFaction(role) != Faction::Village; });
+    roleGrid(L("Wölfe, Vampire und Einzelgänger", "Wolves, vampires and loners"), [](Role role) { return roleFaction(role) != Faction::Village; });
 
     // Ablauf der Tage
     struct TimeStep {

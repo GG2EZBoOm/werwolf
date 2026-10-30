@@ -169,8 +169,9 @@ void CharacterRenderer::drawHuman(eng::Renderer3D& r, const CharacterLook& look,
 
     const Mat4 head = torso * T(0, 0.62f, 0) * Ry(std::sin(pose.time * 0.7f) * 0.08f * (1.0f - walk));
     part(m_cube, head * T(0, 0.19f, 0) * S(0.33f, 0.36f, 0.32f), look.skin);
-    part(m_cube, head * T(0.08f, 0.22f, 0.163f) * S(0.05f, 0.05f, 0.02f), Color::hex(0x1A1410));
-    part(m_cube, head * T(-0.08f, 0.22f, 0.163f) * S(0.05f, 0.05f, 0.02f), Color::hex(0x1A1410));
+    const Color eyes = pose.redEyes > 0.0f ? eng::lerp(Color::hex(0x1A1410), Color::hex(0xFF2A1A), pose.redEyes) : Color::hex(0x1A1410);
+    part(m_cube, head * T(0.08f, 0.22f, 0.163f) * S(0.05f, 0.05f, 0.02f), eyes, 1.5f * pose.redEyes);
+    part(m_cube, head * T(-0.08f, 0.22f, 0.163f) * S(0.05f, 0.05f, 0.02f), eyes, 1.5f * pose.redEyes);
     part(m_cube, head * T(0, 0.16f, 0.175f) * S(0.06f, 0.08f, 0.05f), shade(look.skin, 0.93f));
     part(m_cube, head * T(0, 0.33f, -0.02f) * S(0.35f, 0.1f, 0.35f), look.hair);
     part(m_cube, head * T(0, 0.2f, -0.155f) * S(0.35f, 0.3f, 0.05f), look.hair);

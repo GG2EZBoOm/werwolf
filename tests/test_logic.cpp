@@ -888,6 +888,90 @@ TEST(BotsSpielenEchtzeitPartienZuEnde) {
     CHECK(chapelVisits > 0);
 }
 
+TEST(VampirclanBeisstLautlos) {
+    Settings s = quickSettings();
+    s.set(Role::Vampire, true);
+    auto vampires = [](const std::vector<Role>& roles) { return std::count(roles.begin(), roles.end(), Role::Vampire); };
+    CHECK_EQ(vampires(buildRoleList(s, 8)), 1);
+    CHECK_EQ(vampires(buildRoleList(s, 12)), 2);
+    CHECK(isEvilRole(Role::Vampire) && !isWolfRole(Role::Vampire));
+    CHECK(roleTeam(Role::Vampire) == Team::Vampires);
+
+    Match m = makeMatch({W, Role::Vampire, Role::Vampire, Role::Seer, V, V, V, V});
+    CHECK(m.viewFor(1).player(2)->role == Role::Vampire);   // der Clan kennt sich
+    CHECK(m.viewFor(1).player(0)->role == Role::Unknown);   // die Wölfe bleiben ihm verborgen
+    CHECK(m.viewFor(4).player(1)->role == Role::Unknown);
+    CHECK(m.chatChannel(1, true) == ChatChannel::Vampires);
+    CHECK(m.canHear(2, 1, ChatChannel::Vampires));
+    CHECK(!m.canHear(4, 1, ChatChannel::Vampires));
+    CHECK(!m.canHear(0, 1, ChatChannel::Vampires));
+    runUntil(m, Phase::Night);
+    CHECK(m.viewFor(1).can(AbilityBite));
+    bool redEyes = false, lantern = false;
+    for (const auto& e : m.entitiesFor(4))
+        if (e.id == 1) {
+            redEyes = e.flags & EntityRedEyes;
+            lantern = e.flags & EntityLantern;
+        }
+    CHECK(redEyes);
+    CHECK(!lantern);
+    m.takeNotices();
+    placeNear(m, 1, 2);
+    CHECK(!m.interact(1, Interaction::Bite, 2).empty()); // nicht den eigenen Clan
+    placeNear(m, 1, 4);
+    CHECK(m.interact(1, Interaction::Bite, 4).empty());
+    CHECK(!alive(m, 4));
+    CHECK(!m.viewFor(2).can(AbilityBite)); // ein Biss je Nacht für den ganzen Clan
+    // die Seherin erkennt den Vampir
+    placeNear(m, 3, 2);
+    CHECK(m.interact(3, Interaction::Inspect, 2).empty());
+    CHECK(m.viewFor(3).player(2)->role == Role::Vampire);
+    runUntil(m, Phase::Day);
+    const auto notices = m.takeNotices();
+    CHECK(std::any_of(notices.begin(), notices.end(), [](const Notice& n) { return n.text.de.find("Bissspuren") != std::string::npos; }));
+}
+
+TEST(VampirBrauchtEineEinladung) {
+    Match m = makeMatch({W, Role::Vampire, V, V, V, V});
+    runUntil(m, Phase::Night);
+    const uint8_t house = m.find(2)->house;
+    const auto& door = testWorld().houses()[house].door;
+    m.teleport(2, testWorld().ground(door.x, door.z));
+    CHECK(m.interact(2, Interaction::DoorToggle, house).empty()); // Tür zu, von außen: nicht verriegelt
+    m.teleport(1, testWorld().ground(door.x, door.z));
+    CHECK(!m.interact(1, Interaction::DoorToggle, house).empty()); // ohne Einladung nicht hinein
+    m.teleport(0, testWorld().ground(door.x, door.z));
+    CHECK(m.interact(0, Interaction::DoorToggle, house).empty()); // ein Werwolf in Menschengestalt schon
+    const uint8_t own = m.find(1)->house;
+    if (own != house) {
+        const auto& ownDoor = testWorld().houses()[own].door;
+        m.teleport(1, testWorld().ground(ownDoor.x, ownDoor.z));
+        CHECK(m.interact(1, Interaction::DoorToggle, own).empty()); // die eigene Tür natürlich
+    }
+}
+
+TEST(VampireGewinnenErstOhneWoelfe) {
+    {
+        Match m = makeMatch({W, Role::Vampire, Role::Priest, V, V, V});
+        placeNear(m, 2, 1);
+        CHECK(m.interact(2, Interaction::HolyWater, 1).empty()); // Weihwasser vernichtet auch Vampire
+        CHECK(!alive(m, 1));
+        CHECK(m.winner() == Team::None); // der Werwolf lebt noch
+    }
+    {
+        Match m = makeMatch({W, Role::Vampire, Role::Priest, V, V});
+        placeNear(m, 2, 0);
+        CHECK(m.interact(2, Interaction::HolyWater, 0).empty());
+        CHECK(m.winner() == Team::None); // ohne Wölfe, aber mit Vampir: noch nicht vorbei
+        runUntil(m, Phase::Night);
+        placeNear(m, 1, 3);
+        CHECK(m.interact(1, Interaction::Bite, 3).empty());
+        runUntil(m, Phase::Day);
+        voteOut(m, 4);
+        CHECK(m.winner() == Team::Vampires); // Vampir gegen Pfarrer: gleichauf
+    }
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

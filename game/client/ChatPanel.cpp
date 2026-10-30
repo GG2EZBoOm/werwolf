@@ -17,6 +17,7 @@ std::string chatPrefix(const LogEntry& e) {
     case ChatChannel::Wolves: return std::string(L("[Rudel] ", "[Pack] ")) + name + ": ";
     case ChatChannel::Dead: return std::string(L("[Geist] ", "[Ghost] ")) + name + ": ";
     case ChatChannel::Family: return std::string(L("[Geschwister] ", "[Siblings] ")) + name + ": ";
+    case ChatChannel::Vampires: return std::string(L("[Clan] ", "[Clan] ")) + name + ": ";
     default: return name + ": ";
     }
 }
@@ -41,6 +42,7 @@ void App::drawChat(const Rect& area, bool compact) {
         if (v.phase == Phase::GameOver) channel = ChatChannel::Global;
         else if (!alive) channel = ChatChannel::Dead;
         else if (m_chatWolves && isWolfRole(v.yourRole)) channel = ChatChannel::Wolves;
+        else if (m_chatWolves && isVampireRole(v.yourRole)) channel = ChatChannel::Vampires;
         else if (m_chatWolves && (v.acting == Role::Medium || v.yourRole == Role::Medium) && v.phase == Phase::Night)
             channel = ChatChannel::Dead;
         else if (m_chatWolves && (v.yourRole == Role::Sister || v.yourRole == Role::Brother)) channel = ChatChannel::Family;
@@ -93,6 +95,9 @@ void App::drawChat(const Rect& area, bool compact) {
             if (e.channel == ChatChannel::Wolves) {
                 nameColor = theme::blood;
                 textColor = Color::hex(0xF0C8C3);
+            } else if (e.channel == ChatChannel::Vampires) {
+                nameColor = theme::roleColor(Role::Vampire);
+                textColor = Color::hex(0xEBC9D3);
             } else if (e.channel == ChatChannel::Dead) {
                 nameColor = theme::ghost;
                 textColor = Color::hex(0xB8C3D8);
@@ -137,12 +142,13 @@ void App::drawChat(const Rect& area, bool compact) {
     case ChatChannel::Wolves: placeholder = L("Flüstere deinem Rudel zu …", "Whisper to your pack …"); break;
     case ChatChannel::Dead: placeholder = L("Nur die Toten hören dich …", "Only the dead hear you …"); break;
     case ChatChannel::Family: placeholder = L("Nur deine Geschwister hören dich …", "Only your siblings hear you …"); break;
+    case ChatChannel::Vampires: placeholder = L("Flüstere deinem Clan zu …", "Whisper to your clan …"); break;
     }
     if (compact && !focused) placeholder = "Enter: " + placeholder;
     const bool submitted = m_ui.textInput("chat", input, m_chatInput, placeholder, proto::kMaxChatLength, true);
     if (submitted && m_time != m_chatFocusTime) {
         if (!m_chatInput.empty()) {
-            m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves || channel == ChatChannel::Family ||
+            m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves || channel == ChatChannel::Family || channel == ChatChannel::Vampires ||
                                             (alive && channel == ChatChannel::Dead));
             m_chatInput.clear();
             m_chatScroll = 0.0f;

@@ -83,7 +83,8 @@ void identify(Tokens& tokens, const std::vector<Person>& people) {
 
 // "Böse" is game slang for the wolf team, like "evil" in English lobbies.
 const std::initializer_list<std::string_view> kWolfWords = {
-    "wolf", "werwolf", "werewolf", "woelfe", "werwoelfe", "wolves", "werewolves", "boese", "evil"};
+    "wolf", "werwolf", "werewolf", "woelfe", "werwoelfe", "wolves", "werewolves", "boese", "evil",
+    "vampir", "vampirin", "vampire", "vampiren", "vampires"};
 
 Role roleIn(const Tokens& t) {
     if (has(t, {"seherin", "seher", "seer"})) return Role::Seer;
@@ -277,6 +278,12 @@ bool Memory::otherSeer(uint8_t speaker) const {
     return std::any_of(m_roles.begin(), m_roles.end(), [&](const auto& r) { return r.first != speaker && r.second == Role::Seer; });
 }
 
+int Memory::seerChecks(uint8_t speaker) const {
+    int checks = 0;
+    for (const auto& [key, r] : m_reports) checks += key.first == speaker && r.seer && r.weight != 0.0f;
+    return checks;
+}
+
 int Memory::confirmed(uint8_t speaker) const {
     const auto it = m_confirmed.find(speaker);
     return it == m_confirmed.end() ? 0 : it->second;
@@ -374,7 +381,7 @@ void Memory::observeRevealed(const GameView& view) {
         if (e.checked || !target || target->alive || target->role == Role::Unknown) continue;
         e.checked = true;
         if (std::abs(e.weight) < 1.5f) continue;
-        const bool correct = (e.weight > 0) == isWolfRole(target->role);
+        const bool correct = (e.weight > 0) == isEvilRole(target->role);
         const float old = credibility(key.first);
         m_credibility[key.first] = std::clamp(old + (correct ? 0.1f : -0.25f), std::min(0.3f, old), std::max(1.2f, old));
     }
@@ -383,9 +390,9 @@ void Memory::observeRevealed(const GameView& view) {
         if (r.checked || !target || target->alive || target->role == Role::Unknown) continue;
         r.checked = true;
         // "Dorfbewohner" is often meant as "on the village's side"
-        const bool match = r.role == Role::Villager ? !isWolfRole(target->role)
+        const bool match = r.role == Role::Villager ? !isEvilRole(target->role)
                          : r.role != Role::Unknown  ? r.role == target->role
-                                                    : (r.weight > 0) == isWolfRole(target->role);
+                                                    : (r.weight > 0) == isEvilRole(target->role);
         if (match) {
             ++m_confirmed[key.first];
             m_credibility[key.first] = std::min(1.5f, credibility(key.first) + 0.3f);
