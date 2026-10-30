@@ -241,8 +241,30 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         const bool reportsRole = named != Role::Unknown && targets.size() == 1 && targets.front() != speaker && !negative &&
             has(clause, {"ist", "war", "is", "was"}) && !has(clause, {"sagt", "sagte", "says", "said", "laut", "angeblich"});
         if (reportsRole) result.roleReports.push_back({targets.front(), named});
-        const bool good = defend || reportsRole || has(clause, {"gut", "good", "dorfi"});
-        float weight = wolf ? 1.8f : suspect ? 1.1f : good ? -1.0f : vote ? 0.8f : 0.0f;
+        const bool withMe = (has(clause, {"mir", "uns", "me", "us"}) || (me && has(clause, {"bei", "mit", "with", "zusammen", "together"}))) &&
+            has(clause, {"war", "waren", "was", "were", "blieb", "blieben", "stayed"}) &&
+            (has(clause, {"ganze", "ganzen", "durchgehend", "immer", "all", "whole", "entire"}) || result.exclusiveAlibi);
+        const bool good = defend || reportsRole || withMe || has(clause, {"gut", "good", "dorfi"});
+        // "ich habe Anna heute Nacht bei der Leiche gesehen", "Anna war beim Haus von Berta": verdächtig ist,
+        // wer gesehen wurde – nicht das Opfer, das nach "von"/"bei" oder vor "Leiche"/"Haus" steht
+        const bool sawThere = has(clause, {"gesehen", "saw", "seen", "gesichtet", "war", "was", "stand", "stood", "schlich", "sneaking", "lurking"}) &&
+            has(clause, {"leiche", "tatort", "haus", "huette", "tuer", "naehe", "body", "corpse", "scene", "house", "door", "near", "nearby"});
+        if (sawThere && !wolf && !suspect && !good && !vote && !negative && !has(clause, {"mir", "uns", "me", "us", "zusammen", "together"})) {
+            std::vector<uint8_t> seen;
+            for (size_t i = 0; i < clause.size(); ++i) {
+                if (clause[i].person == kNoPlayer || clause[i].person == speaker) continue;
+                const bool victim = (i > 0 && has(Tokens{clause[i - 1]}, {"von", "of", "bei", "beim", "near", "by", "vor"})) ||
+                    (i + 1 < clause.size() && has(Tokens{clause[i + 1]}, {"leiche", "haus", "huette", "tuer", "body", "corpse", "house", "door"}));
+                if (!victim) seen.push_back(clause[i].person);
+            }
+            if (seen.empty() && you && !asksWho && listener != kNoPlayer) seen.push_back(listener); // "ich hab dich dort gesehen"
+            if (!seen.empty()) {
+                targets = seen;
+                result.topic = seen.front();
+                result.sighting = true;
+            }
+        }
+        float weight = wolf ? 1.8f : suspect ? 1.1f : good ? -1.0f : vote ? 0.8f : result.sighting && sawThere ? 1.0f : 0.0f;
         if (negative) weight = -weight;
         const bool hedged = has(clause, {"vielleicht", "maybe", "eventuell", "glaube", "think", "vermute"});
         if (hedged) weight *= 0.55f;
@@ -406,6 +428,17 @@ uint8_t Memory::source(uint8_t target, int day) const {
 }
 
 void Memory::observeRevealed(const GameView& view) {
+    for (auto it = m_roles.begin(); it != m_roles.end();) {
+        const PlayerView* p = view.player(it->first);
+        const bool honest = !p || p->alive || p->role == Role::Unknown ||
+            (it->second == Role::Villager ? !isEvilRole(p->role) : it->second == p->role);
+        if (honest) {
+            ++it;
+            continue;
+        }
+        judge(it->first, false);
+        it = m_roles.erase(it);
+    }
     for (auto& [key, e] : m_claims) {
         const PlayerView* target = view.player(key.second);
         if (e.checked || !target || target->alive || target->role == Role::Unknown) continue;

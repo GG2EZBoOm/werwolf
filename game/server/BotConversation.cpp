@@ -514,6 +514,13 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
     }
     for (const auto& c : message.claims) {
         if (c.target == m_id && c.weight > 0) {
+            if (message.sighting) {
+                const std::array<Text, 3> lines = {{{"Ich war nur auf dem Heimweg.", "I was just on my way home."},
+                    {"Da war ich, ja – aber ich habe niemandem etwas getan.", "I was there, yes – but I didn't hurt anyone."},
+                    {"Dann hast du auch gesehen, dass ich keine Bestie war. Wer war denn noch da?",
+                     "Then you also saw I wasn't a beast. Who else was there?"}}};
+                return lines[static_cast<size_t>(m_id + match.day()) % lines.size()];
+            }
             if (relationship(speaker) < -0.55f)
                 return {"Schon wieder du! Deine ständigen Beschuldigungen machen mich wütend. Ich traue dir nicht mehr. Zeig endlich Beweise!",
                         "You again! Your constant accusations make me angry. I don't trust you any more. Show some evidence!"};

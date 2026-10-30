@@ -111,6 +111,8 @@ Bots reagieren auf deutsche und englische Spielernachrichten, zum Beispiel:
   Mitgezählt werden nur ausdrücklich genannte Prüfungen („gecheckt“, „geprüft“), keine bloßen Meinungen.
 - `Emil verhält sich komisch`, `Berta raus!`, `wir voten alle Berta`, `Anton du bist sus` – auch Umgangssprache
   zählt als Verdacht oder Stimme; wer schon tot ist, wird als tot erkannt.
+- `Ich habe Anna heute Nacht bei der Leiche gesehen`, `Anna war beim Haus von Berta` – verdächtig ist, wer gesehen
+  wurde, nicht das Opfer. `Anna war die ganze Nacht bei mir` gibt Anna dagegen ein Alibi.
 
 Ein passender Bot antwortet nach kurzer Bedenkzeit. Mehrere Fragen an denselben Bot beantwortet er
 nacheinander, statt sie zu übergehen. Namen werden unabhängig von Großschreibung erkannt;
@@ -126,10 +128,16 @@ Eigene Seherprüfungen haben Vorrang, Gerüchte werden nicht als eigene Augenzeu
 Jeder Bot hat eine eigene Persönlichkeit: gesprächig oder still, gutgläubig oder skeptisch, vorschnell oder
 vorsichtig, Mitläufer oder Einzelgänger – und schreibt förmlich, locker („hab Berta geprüft“) oder knapp.
 Bots ziehen Schlüsse aus dem Spielverlauf („Berta hat für Clara gestimmt, und Clara war unschuldig“, wer einen
-entlarvten Wolf verteidigt hat, wer nachts beim Haus eines Opfers zu sehen war), reagieren auf Tote und Urteile
-und können sich nachts auch einmal irren. Wölfe täuschen: Sie geben sich als Seherin aus, drehen eine
-Beschuldigung um und holen sich nachts bevorzugt die Seherin, lautstarke Ankläger oder Zeugen. Wer sich erst nach
-einer Beschuldigung als Seherin meldet, wirkt allerdings verdächtig. In der Welt drehen sich Bots zu dem, der
+entlarvten Wolf verteidigt hat), reagieren auf Tote und Urteile und können sich nachts auch einmal irren.
+Nachts merken sie sich, wann und wo sie wen in Menschengestalt gesehen haben. Wer ungefähr zur Tatzeit dort war,
+wo jemand starb, ist stark verdächtig, wer irgendwann in der Nacht dort oder beim Haus des Opfers war, weniger.
+Wer im selben Augenblick woanders stand als die Bestie, war es nicht. Wer die ganze Nacht in der Nähe eines
+Bots war, während anderswo gemordet wurde, bekommt am Morgen ein Alibi. Werwolf oder Vampir ist er damit nur
+vermutlich nicht, denn ein Rudelgefährte kann gemordet haben. Wölfe täuschen: Sie geben sich als Seherin aus,
+drehen eine Beschuldigung um, geben einem bedrängten Gefährten ein falsches Alibi und holen sich nachts
+bevorzugt die Seherin, lautstarke Ankläger oder Zeugen. Wer sich erst nach einer Beschuldigung als Seherin
+meldet, wirkt allerdings verdächtig. Wer als falsche Seherin entlarvt und hingerichtet wurde, zählt danach
+nicht mehr als zweite Seherin. In der Welt drehen sich Bots zu dem, der
 spricht, gehen tagsüber mit Vertrauten mit, halten Abstand zu Verdächtigen, sehen sich morgens den Fundort an und
 zögern nachts, bevor sie losgehen.
 

@@ -39,6 +39,7 @@ struct Message {
     bool toAll = false;        // to the whole round: "möchte jemand …", "welche Rollen habt ihr?"
     bool protectOffer = false; // "ich passe auf dich auf", "Seherin, ich beschütze dich"
     bool seerWord = false;     // mentions the seer at all
+    bool sighting = false;     // "ich habe Anna heute Nacht bei der Leiche gesehen"
     bool correction = false;
     bool exclusiveAlibi = false;
 };

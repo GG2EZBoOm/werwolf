@@ -202,7 +202,14 @@ private:
     int m_fakeReportDay = -1;
     // Verlauf: Stimmen je Tag, nachts gesehene Personen, schon ausgewertete Tote
     std::map<int, std::map<uint8_t, uint8_t>> m_votes;
-    std::map<uint8_t, std::vector<Vec2>> m_sightings; // diese Nacht: wo jemand (in Menschengestalt) zu sehen war
+    struct Sight {
+        Vec2 at;
+        double clock = 0.0;
+    };
+    std::map<uint8_t, std::vector<Sight>> m_sightings; // diese Nacht: wann und wo jemand (in Menschengestalt) zu sehen war
+    std::vector<Sight> m_beastSights;                   // … und wann und wo eine Bestie zu sehen war
+    int m_nightSamples = 0;                             // wie oft der Bot sich nachts umgesehen hat
+    std::map<uint8_t, int> m_company;                   // … und wie oft dabei jemand (in Menschengestalt) bei ihm war
     float m_sightTimer = 0.0f;
     std::set<uint8_t> m_aliveAtNight;
     std::set<uint8_t> m_reviewed;

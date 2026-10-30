@@ -1307,6 +1307,7 @@ void Match::kill(uint8_t id, DeathCause cause, bool announceNow, uint8_t killer)
     p->deathPosition = p->position;
     p->deathYaw = p->yaw;
     p->deathDay = m_day;
+    p->deathClock = m_clock;
     p->diedAtNight = m_phase == Phase::Night;
     p->deathCause = cause;
     p->buried = false;

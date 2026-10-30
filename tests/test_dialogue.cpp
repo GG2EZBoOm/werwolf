@@ -540,6 +540,19 @@ TEST(SeerReportsAreCheckedAgainstRevealedRoles) {
     liar.observeRevealed(view);
     CHECK(liar.liar(0));
     CHECK(liar.suspicion(0, 1) > 2.0f);
+    // a "seer" executed and revealed as a werewolf lied – and is no longer a rival to the real one
+    Memory rival;
+    rival.remember(2, parseLine("ich bin seher"), 1);
+    CHECK(rival.otherSeer(0));
+    GameView executed;
+    PlayerView anna;
+    anna.id = 2;
+    anna.alive = false;
+    anna.role = Role::Werewolf;
+    executed.players.push_back(anna);
+    rival.observeRevealed(executed);
+    CHECK(!rival.otherSeer(0));
+    CHECK(rival.liar(2));
 }
 
 TEST(NamedBotsConfirmOrRefuteTheSeer) {
@@ -1001,6 +1014,125 @@ TEST(TheProtectorGuardsAKnownSeerAndTheWolvesHuntHer) {
         }
     std::printf("    The seer was killed in %d of 8 nights after whispering to the wolf, %d of 8 otherwise\n", toldTheWolf, keptQuiet);
     CHECK(toldTheWolf > keptQuiet);
+}
+
+namespace {
+// An open spot far from the fire and the houses: a victim, someone right beside them and a watcher 6 m away.
+std::optional<std::array<Vec3, 3>> openSpot(std::optional<Vec2> awayFrom = {}) {
+    const Match probe = matchWith();
+    for (int r = 20; r <= 64; r += 4)
+        for (int a = 0; a < 24; ++a) {
+            const float angle = static_cast<float>(a) * 0.2618f;
+            const Vec2 c{static_cast<float>(r) * std::cos(angle), static_cast<float>(r) * std::sin(angle)};
+            if (awayFrom && (c - *awayFrom).length() < 30.0f) continue;
+            const std::array<Vec2, 3> spots = {c, c + Vec2{1.0f, 0.0f}, c + Vec2{0.0f, 6.0f}};
+            bool clear = true;
+            for (Vec2 s : spots)
+                clear = clear && world().houseAt(s, 1.0f) < 0 && (world().resolveCollision(s, 0.6f) - s).length() < 0.01f;
+            for (const House& h : world().houses()) clear = clear && (Vec2{h.door.x, h.door.z} - c).length() > 12.0f;
+            const std::array<Vec3, 3> at = {world().ground(spots[0].x, spots[0].y), world().ground(spots[1].x, spots[1].y),
+                                            world().ground(spots[2].x, spots[2].y)};
+            if (clear && probe.hasLineOfSight(at[2], at[0]) && probe.hasLineOfSight(at[2], at[1])) return at;
+        }
+    return std::nullopt;
+}
+
+// Plays through the morning into the assembly, so the bots review the night and speak.
+void toTheAssembly(Village& v) {
+    phase(v.match, Phase::Morning);
+    v.advance(1.0f);
+    phase(v.match, Phase::Day);
+    v.advance(1.0f);
+    phase(v.match, Phase::Assembly);
+    v.advance(20.0f);
+}
+}
+
+TEST(SeenNearTheBodyMeansSuspicious) {
+    // what a person reports: whoever was seen there is suspicious – not the victim, and not an alibi
+    CHECK(parseLine("Ich habe Anna heute Nacht bei der Leiche gesehen").sighting);
+    CHECK(weight(parseLine("Ich habe Anna heute Nacht bei der Leiche gesehen"), 2) > 0.5f);
+    const auto house = parseLine("Ich habe Anna heute Nacht beim Haus von Berta gesehen");
+    CHECK(weight(house, 2) > 0.5f);
+    CHECK_EQ(weight(house, 4), 0.0f);
+    CHECK_EQ(house.topic, 2);
+    CHECK(weight(parseLine("Anna war heute Nacht in der Nähe von Bertas Haus"), 2) > 0.5f);
+    CHECK_EQ(weight(parseLine("Ich habe Anna nicht beim Haus gesehen"), 2), 0.0f);
+    CHECK(weight(parseLine("Anna war die ganze Nacht bei mir im Haus"), 2) <= 0.0f);
+    CHECK_EQ(weight(parseLine("Ich war heute Nacht zuhause"), 0), 0.0f);
+    // the accused bot explains itself
+    Conversation accused;
+    const Text reply = accused.ask("Anton, ich habe dich heute Nacht bei der Leiche gesehen");
+    CHECK(reply.de.find("Heimweg") != std::string::npos || reply.de.find("niemandem") != std::string::npos ||
+          reply.de.find("Bestie") != std::string::npos);
+
+    // what a bot sees: Anton watches the human stab Ann far from the houses and the fire, and tells the village
+    // in the morning
+    const auto spot = openSpot();
+    CHECK(spot.has_value());
+    if (!spot) return;
+    const auto [victim, killer, watcher] = *spot;
+    int told = 0, games = 0;
+    for (uint64_t seed = 1; seed <= 5; ++seed) {
+        Village v(seed, {Role::SerialKiller, Role::Villager, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager});
+        phase(v.match, Phase::Night);
+        auto hold = [&](float seconds) {
+            for (float t = 0; t < seconds; t += 0.1f) {
+                v.match.teleport(0, killer);
+                if (v.match.find(3)->alive) v.match.teleport(3, victim);
+                v.match.teleport(1, watcher);
+                v.match.update(0.1f);
+                for (Bot& b : v.bots) b.update(0.1f, v.match, v.say);
+            }
+        };
+        hold(3.0f);
+        CHECK(v.match.interact(0, Interaction::Stab, 3).empty());
+        hold(2.0f);
+        CHECK(!v.match.find(3)->alive);
+        toTheAssembly(v);
+        ++games;
+        told += v.heard(1, "Spieler heute Nacht ungefähr zur Tatzeit dort gesehen, wo Ann gestorben ist");
+    }
+    std::printf("    The watcher reported the killer seen at the time of the killing in %d of %d games\n", told, games);
+    CHECK(told * 5 >= games * 4);
+}
+
+TEST(WhoeverSpentTheNightBesideABotHasAnAlibi) {
+    CHECK(weight(parseLine("Anna war die ganze Nacht bei mir"), 2) < 0.0f);
+    CHECK(weight(parseLine("Ich war die ganze Nacht mit Anna zusammen"), 2) < 0.0f);
+    CHECK_EQ(weight(parseLine("Ich war heute Nacht bei Anna"), 2), 0.0f); // dropping by is no alibi
+
+    // Anton spends the night with Berta while the human stabs Ann far away: in the morning he vouches for her
+    const auto murder = openSpot();
+    CHECK(murder.has_value());
+    if (!murder) return;
+    const auto company = openSpot(Vec2{(*murder)[0].x, (*murder)[0].z});
+    CHECK(company.has_value());
+    if (!company) return;
+    int vouched = 0, games = 0;
+    for (uint64_t seed = 1; seed <= 5; ++seed) {
+        Village v(seed, {Role::SerialKiller, Role::Villager, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager});
+        phase(v.match, Phase::Night);
+        auto hold = [&](float seconds) {
+            for (float t = 0; t < seconds; t += 0.1f) {
+                v.match.teleport(0, (*murder)[1]);
+                if (v.match.find(3)->alive) v.match.teleport(3, (*murder)[0]);
+                v.match.teleport(1, (*company)[2]);
+                v.match.teleport(4, (*company)[0]);
+                v.match.update(0.1f);
+                for (Bot& b : v.bots) b.update(0.1f, v.match, v.say);
+            }
+        };
+        hold(20.0f);
+        if (!v.match.interact(0, Interaction::Stab, 3).empty()) continue; // the wolf got there first
+        hold(20.0f);
+        toTheAssembly(v);
+        ++games;
+        vouched += v.heard(1, "Berta war heute Nacht die ganze Zeit in meiner Nähe");
+    }
+    std::printf("    Anton gave Berta an alibi in %d of %d games\n", vouched, games);
+    CHECK(games >= 3);
+    CHECK(vouched * 5 >= games * 3);
 }
 
 int main() {

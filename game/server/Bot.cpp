@@ -313,8 +313,8 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                     for (const auto& [other, positions] : m_sightings) {
                         const Match::Player* o = match.find(other);
                         if (other == p.id || !o || !o->alive) continue;
-                        for (Vec2 at : positions)
-                            if (const float d = (at - Vec2{p.x, p.z}).length(); d < nearest) { nearest = d; seen = other; }
+                        for (const Sight& s : positions)
+                            if (const float d = (s.at - Vec2{p.x, p.z}).length(); d < nearest) { nearest = d; seen = other; }
                     }
                 }
                 m_suspicion[seen] += 5.0f;

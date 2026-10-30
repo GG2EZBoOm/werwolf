@@ -77,6 +77,7 @@ public:
         Vec3 deathPosition;
         float deathYaw = 0.0f;
         int deathDay = 0;
+        double deathClock = 0.0; // Spieluhr beim Tod: wer zur Tatzeit beim Opfer war, ist verdächtig
         bool diedAtNight = false;
         DeathCause deathCause = DeathCause::Wolves;
         bool buried = false;

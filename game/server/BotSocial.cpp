@@ -347,12 +347,19 @@ void Bot::observe(float dt, const Match& match, const GameView& view) {
     m_sightTimer -= dt;
     if (m_sightTimer > 0.0f) return;
     m_sightTimer = 1.0f;
+    ++m_nightSamples;
     for (const EntityState& e : match.entitiesFor(m_id)) {
-        if (e.id == m_id || e.kind != EntityLiving || e.transform >= 0.3f) continue; // die Bestie ist der Augenzeugenfall
+        if (e.id == m_id || e.kind != EntityLiving) continue;
         const Vec3 pos{e.x, 0, e.z};
         if (distanceXZ(pos, me->position) > 14.0f || !match.hasLineOfSight(pos, me->position)) continue;
+        // die Bestie ist der Augenzeugenfall, ein Vampir mit glühenden Augen eine unbekannte Gestalt – man merkt sich nur, wo sie war
+        if (e.transform >= 0.3f || (e.flags & EntityRedEyes)) {
+            if (m_beastSights.size() < 400) m_beastSights.push_back({{e.x, e.z}, match.clock()});
+            continue;
+        }
         auto& seen = m_sightings[e.id];
-        if (seen.size() < 200) seen.push_back({e.x, e.z});
+        if (seen.size() < 400) seen.push_back({{e.x, e.z}, match.clock()});
+        if (distanceXZ(pos, me->position) <= 10.0f) ++m_company[e.id];
     }
 }
 
@@ -370,6 +377,9 @@ void Bot::review(const Match& match, const GameView& view) {
         for (const auto& p : match.players())
             if (p.alive) m_aliveAtNight.insert(p.id);
         m_sightings.clear();
+        m_beastSights.clear();
+        m_company.clear();
+        m_nightSamples = 0;
     }
 
     // Wer ist seit Einbruch der Nacht gestorben? Entsetzen und, falls gesehen, ein Verdacht
@@ -389,24 +399,91 @@ void Bot::review(const Match& match, const GameView& view) {
                 const Text& line = variant(lines, m_salt, id);
                 plan(Phase::Day, view.day, now + m_rng.uniform(2.0f, 9.0f), tx(line.de, line.en, victim->name), {}, id);
             }
-            // Nachts beim Haus des Opfers gesehen – nur verdächtig, wenn es dort auch gestorben ist.
+            // Nachts dort gesehen, wo das Opfer starb (oder bei seinem Haus, wenn es davor starb) – um die Tatzeit
+            // wiegt das schwer, irgendwann in der Nacht nur wenig. Gift, Kummer und Ähnliches haben keinen Tatort.
             // Am Lagerfeuer stehen alle; wer dort war, beweist nichts.
-            if (victim->house == kNoPlayer || victim->house >= match.world().houses().size()) continue;
-            const auto& doorPos = match.world().houses()[victim->house].door;
-            const Vec2 door{doorPos.x, doorPos.z};
-            if ((Vec2{victim->deathPosition.x, victim->deathPosition.z} - door).length() > 10.0f) continue;
-            for (const auto& [seen, positions] : m_sightings) {
-                const auto* p = match.find(seen);
-                if (reported || !p || !p->alive || seen == id || seen == m_id || (wolf && knownWolf(seen))) continue;
-                const bool near = std::any_of(positions.begin(), positions.end(), [&](Vec2 at) { return (at - door).length() < 7.0f; });
-                if (!near) continue;
-                reported = true;
-                if (!wolf) m_suspicion[seen] += 1.2f;
-                plan(Phase::Assembly, view.day, 0,
-                     tx("Ich habe {} heute Nacht beim Haus von {} gesehen.", "I saw {} near {}'s house last night.", p->name, victim->name),
-                     Evidence{Evidence::Kind::Sighting, seen, 1.2f}, seen, id);
+            if (reported || (victim->deathCause != DeathCause::Wolves && victim->deathCause != DeathCause::Vampire &&
+                             victim->deathCause != DeathCause::Knife && victim->deathCause != DeathCause::Fire)) continue;
+            const Vec2 body{victim->deathPosition.x, victim->deathPosition.z};
+            const Vec3 fire = match.world().bonfire();
+            if ((body - Vec2{fire.x, fire.z}).length() < 12.0f) continue;
+            std::optional<Vec2> door;
+            if (victim->house != kNoPlayer && victim->house < match.world().houses().size()) {
+                const auto& d = match.world().houses()[victim->house].door;
+                if ((body - Vec2{d.x, d.z}).length() <= 10.0f) door = Vec2{d.x, d.z};
             }
+            uint8_t suspect = kNoPlayer;
+            bool atTheTime = false;
+            for (const auto& [seen, sights] : m_sightings) {
+                const auto* p = match.find(seen);
+                if (!p || !p->alive || seen == id || seen == m_id || (wolf && knownWolf(seen))) continue;
+                for (const Sight& s : sights) {
+                    if ((s.at - body).length() >= 7.0f && !(door && (s.at - *door).length() < 7.0f)) continue;
+                    const bool inTime = std::abs(s.clock - victim->deathClock) < 40.0;
+                    // wer im selben Augenblick woanders stand als die Bestie, kann sie nicht gewesen sein
+                    const bool besideTheBeast = std::any_of(m_beastSights.begin(), m_beastSights.end(), [&](const Sight& b) {
+                        return std::abs(b.clock - s.clock) < 1.5 && (b.at - s.at).length() > 3.0f;
+                    });
+                    if (inTime && besideTheBeast) continue;
+                    if (suspect == kNoPlayer || (inTime && !atTheTime)) {
+                        suspect = seen;
+                        atTheTime = inTime;
+                    }
+                }
+            }
+            const auto* p = match.find(suspect);
+            if (!p) continue;
+            reported = true;
+            const float weight = atTheTime ? 2.0f : 1.0f;
+            if (!wolf) m_suspicion[suspect] += weight;
+            plan(Phase::Assembly, view.day, 0,
+                 atTheTime ? tx("Ich habe {} heute Nacht ungefähr zur Tatzeit dort gesehen, wo {} gestorben ist.",
+                                "I saw {} last night around the time of the killing, right where {} died.", p->name, victim->name)
+                 : door    ? tx("Ich habe {} heute Nacht beim Haus von {} gesehen.", "I saw {} near {}'s house last night.", p->name, victim->name)
+                           : tx("Ich habe {} heute Nacht in der Nähe der Stelle gesehen, wo {} gestorben ist.",
+                                "I saw {} last night near the spot where {} died.", p->name, victim->name),
+                 Evidence{Evidence::Kind::Sighting, suspect, weight}, suspect, id);
         }
+    }
+
+    // Wer die ganze Nacht in Menschengestalt bei mir war, während anderswo gemordet wurde, war vermutlich nicht die
+    // Bestie. Ein Wolf nutzt das auch zum Lügen: Er gibt einem bedrängten Gefährten ein falsches Alibi.
+    if (view.phase == Phase::Day && me->alive && m_nightSamples > 0) {
+        std::vector<const Match::Player*> victims;
+        for (uint8_t id : m_aliveAtNight)
+            if (const auto* v = match.find(id); v && !v->alive && v->diedAtNight &&
+                (v->deathCause == DeathCause::Wolves || v->deathCause == DeathCause::Vampire || v->deathCause == DeathCause::Knife))
+                victims.push_back(v);
+        auto atTheBody = [&](uint8_t id) {
+            const auto it = m_sightings.find(id);
+            if (it == m_sightings.end()) return false;
+            return std::any_of(victims.begin(), victims.end(), [&](const Match::Player* v) {
+                return std::any_of(it->second.begin(), it->second.end(), [&](const Sight& s) {
+                    return std::abs(s.clock - v->deathClock) < 40.0 && distanceXZ(Vec3{s.at.x, 0, s.at.y}, v->deathPosition) < 7.0f;
+                });
+            });
+        };
+        uint8_t alibi = kNoPlayer;
+        int best = 0;
+        if (!victims.empty() && m_nightSamples >= 30)
+            for (const auto& [id, together] : m_company) {
+                const auto* p = match.find(id);
+                if (!p || !p->alive || id == m_id || m_wolfWitness.contains(id) || atTheBody(id)) continue;
+                if (together * 100 < m_nightSamples * 85 || together <= best) continue;
+                alibi = id;
+                best = together;
+            }
+        if (wolf && alibi == kNoPlayer && !victims.empty() && m_rng.chance(0.35f * m_personality.boldness))
+            for (const auto& p : match.players())
+                if (p.alive && p.id != m_id && knownWolf(p.id) && m_dialogue.suspicion(p.id, view.day) > 1.0f) alibi = p.id;
+        if (const auto* p = match.find(alibi)) {
+            if (!wolf) m_suspicion[alibi] -= 2.5f;
+            plan(Phase::Assembly, view.day, 0,
+                 tx("{} war heute Nacht die ganze Zeit in meiner Nähe. Die Bestie kann das nicht gewesen sein.",
+                    "{} was near me the whole night. That can't have been the beast.", p->name),
+                 Evidence{Evidence::Kind::Sighting, alibi, -1.5f}, alibi);
+        }
+        m_nightSamples = 0; // nur einmal je Morgen
     }
 
     // Hingerichtete: Reaktion und Schlüsse aus den Stimmen
