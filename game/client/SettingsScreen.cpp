@@ -62,10 +62,16 @@ bool App::drawSettings(const Rect& area) {
     const bool english = language() == Lang::English;
     // Lesebändchen als Reiter, die oben über das Blatt hängen
     const char* tabs[] = {L("Grafik", "Graphics"), L("Steuerung", "Controls"), L("Oberfläche", "Interface"), L("Ton", "Sound"), "Bots"};
+#ifdef WERWOLF_CLIENT_ONLY
+    constexpr int tabCount = 4;
+    m_settingsTab = std::min(m_settingsTab, 3);
+#else
+    constexpr int tabCount = 5;
+#endif
     const Color ribbons[] = {Color::hex(0x7A1F18), Color::hex(0x2F4A35), Color::hex(0x2E3D5C), Color::hex(0x69502F), Color::hex(0x503854)};
     m_kit.paper(area, 7070u);
-    const float tabWidth = std::min(132.0f, (area.w - 60.0f) / 5.0f);
-    for (int i = 0; i < 5; ++i) {
+    const float tabWidth = std::min(132.0f, (area.w - 60.0f) / static_cast<float>(tabCount));
+    for (int i = 0; i < tabCount; ++i) {
         const Rect tr{area.x + 30.0f + static_cast<float>(i) * tabWidth, area.y - 8.0f, tabWidth - 4.0f, 40.0f};
         if (m_kit.inkTab(std::string("settings/tab/") + std::to_string(i), tr, tabs[i], m_settingsTab == i, ribbons[i])) m_settingsTab = i;
     }
@@ -196,10 +202,12 @@ bool App::drawSettings(const Rect& area) {
               L("Zeigt in Discord, dass du Werwolf spielst, und erlaubt Freunden, per Einladung beizutreten.",
                 "Shows in Discord that you are playing Werewolf and lets friends join via an invite."),
               m_config.discord);
+#ifndef WERWOLF_CLIENT_ONLY
         onOff("settings/upnp", L("Router-Freigabe (UPnP)", "Router port (UPnP)"),
               L("Gibt beim Hosten den Port automatisch im Router frei, damit Freunde über das Internet beitreten können.",
                 "Opens the port in your router automatically when hosting, so friends can join over the internet."),
               m_config.upnp);
+#endif
         break;
     }
     case 3: {
@@ -230,6 +238,7 @@ bool App::drawSettings(const Rect& area) {
         if (!m_audioReady) r.text(m_fonts.paperItalic, {inner.x, inner.y + 8.0f}, L("Kein Audiogerät verfügbar.", "No audio device available."), inkRed);
         break;
     }
+#ifndef WERWOLF_CLIENT_ONLY
     case 4: {
         onOff("settings/localai", L("Lokale Bot-KI", "Local bot AI"),
               L("Gilt ab dem nächsten Hosten. Nur der Host braucht das Sprachpaket.", "Applies next time you host. Only the host needs the language pack."),
@@ -254,6 +263,7 @@ bool App::drawSettings(const Rect& area) {
             ShellExecuteW(nullptr, L"open", L"https://github.com/GG2EZBoOm/werwolf/releases/latest", nullptr, nullptr, SW_SHOWNORMAL);
         break;
     }
+#endif
     default: break;
     }
 

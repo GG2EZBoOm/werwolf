@@ -70,9 +70,9 @@ public:
     void update(float dt, Match& match, const SayFn& say);
     // Der Bot hört eine Chatnachricht und passt seinen Verdacht an.
     void hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel = ChatChannel::Global,
-              bool reply = true, const Speech* speech = nullptr);
+              bool reply = true, const Speech* speech = nullptr, const dialogue::Message* interpreted = nullptr);
     int replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
-                      const Speech* speech = nullptr) const;
+                      const Speech* speech = nullptr, const dialogue::Message* interpreted = nullptr) const;
     // Was der Bot gerade sagt; nur während seines say()-Aufrufs gesetzt.
     const Speech* speaking() const { return m_speaking ? &*m_speaking : nullptr; }
     void setLanguageModel(LocalLanguage* language) { m_language = language; }
@@ -121,7 +121,7 @@ private:
     bool ally(const GameView& view, Role other) const;
     // Kann der Bot eine Rollen- oder Seherangabe über target selbst prüfen? +1 wahr, -1 gelogen, 0 unbekannt
     int verdict(const Match& match, const dialogue::Message& message, uint8_t target) const;
-    bool repeats(uint8_t speaker, const dialogue::Message& message) const;
+    bool repeats(uint8_t speaker, const Text& message) const;
     void speak(const SayFn& say, const Text& text, bool secret, Speech speech = {});
     void updateConversation(float dt, const Match& match, const SayFn& say);
     void rememberDialogue(const Match& match, uint8_t speaker, ChatChannel channel, const dialogue::Message& message);
@@ -199,6 +199,7 @@ private:
         uint64_t languageTicket = 0;
         double languageDeadline = 0;
         std::vector<std::pair<Text, std::optional<Evidence>>> languageReasons;
+        Text question;
     };
     std::deque<Reply> m_replies;          // angesprochene Fragen warten, statt verloren zu gehen
     std::optional<Reply> m_lastReply;     // zuletzt gegebene Antwort (gegen Wiederholungen)
@@ -292,6 +293,6 @@ private:
 
 // Verteilt eine Chatnachricht an alle Bots, die sie hören; höchstens einer antwortet.
 void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
-                 eng::Rng& rng);
+                 eng::Rng& rng, const dialogue::Message* interpreted = nullptr, const std::vector<uint8_t>* recipients = nullptr);
 
 } // namespace ww

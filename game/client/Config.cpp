@@ -9,7 +9,13 @@
 
 namespace ww {
 
-std::filesystem::path Config::path() { return eng::paths::userDataDir("Werwolf") / "config.txt"; }
+std::filesystem::path Config::path() {
+#ifdef WERWOLF_CLIENT_ONLY
+    return eng::paths::userDataDir("Werwolf") / "config-client.txt";
+#else
+    return eng::paths::userDataDir("Werwolf") / "config.txt";
+#endif
+}
 
 void Config::load() {
     std::ifstream in(path());

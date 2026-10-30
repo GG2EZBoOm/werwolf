@@ -4,6 +4,14 @@
 
 **[Spiel herunterladen: werwolf.exe](https://github.com/GG2EZBoOm/werwolf/releases/latest/download/werwolf.exe)**
 
+**[Nur mitspielen: werwolf_client.exe](https://github.com/GG2EZBoOm/werwolf/releases/latest/download/werwolf_client.exe)**
+
+Die Client-Version kann bestehenden Spielen beitreten, aber keinen lokalen Server starten.
+Sie enthält keine Bot-KI-Laufzeit und benötigt kein Sprachmodell. Die KI läuft beim Host;
+auch ihre individuellen Antworten erreichen alle Mitspieler. Musik, Grafik und Spielumfang
+beim Beitreten sind gleich. Der Client verwendet einen eigenen Updatekanal und bleibt bei
+Updates eine Client-Version. Zum Hosten die normale `werwolf.exe` verwenden.
+
 Die EXE in einen eigenen Ordner speichern und starten. Musik und Sounds sind bereits enthalten;
 zum Spielen ist kein Visual Studio erforderlich. Der integrierte Auto-Updater lädt neue Versionen.
 
@@ -34,6 +42,11 @@ Voraussetzung: Visual Studio 2022/2026 mit dem Workload „Desktopentwicklung mi
 ```
 
 Die Programme landen in `build\<preset>\bin\`:
+
+Für den zusätzlichen Client nach Einrichtung der MSVC-Umgebung:
+`cmake -S . -B build/client-only -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DWERWOLF_CLIENT_ONLY=ON -DWERWOLF_BUILD_TESTS=OFF`
+und `cmake --build build/client-only --target werwolf`.
+Die EXE liegt anschließend unter `build/client-only/bin/werwolf_client.exe`.
 
 | Programm             | Zweck                                                     |
 | -------------------- | --------------------------------------------------------- |
@@ -172,21 +185,31 @@ eigene Sichtungen, gehörte Beschuldigungen und Entlastungen, widersprüchliche 
 Gewicht. Wiederholungen vervielfachen keinen Beweis; Korrekturen ersetzen die alte Aussage. Dieses
 Gedächtnis bleibt auch erhalten, wenn die ursprüngliche Nachricht aus dem kurzen Chatverlauf fällt.
 
-Bei Fragen wie „Warum verdächtigst du Berta?“ wählt das Modell einen passenden erlaubten Grund aus.
-Das Spiel übernimmt dessen genauen Wortlaut auf Deutsch und Englisch, damit Quelle und Unsicherheit
-erhalten bleiben: Eine gehörte Beschuldigung wird dadurch nicht zur eigenen Beobachtung. Ändert sich
-das Wissen während der Antwortberechnung, wird ein inzwischen veralteter Grund verworfen.
+Ab **0.12.0** deutet die KI zuerst frei geschriebene Spielernachrichten im gehörten Gesprächskontext:
+Umgangssprache, Nachfragen mit Pronomen, indirekte Beschuldigungen und Entlastungen, Korrekturen,
+Rollenangaben und Alibis. Beispielsweise wird „Berta kommt mir nicht koscher vor“ als Verdacht
+eingeordnet. Fragen, Zitate, Bedingungen und Scherze sollen keine eigenen Beweise erzeugen;
+ausdrücklich markierte Scherze werden zusätzlich regelbasiert aus dem Verdachtsgedächtnis gehalten.
+Die Auswertung einer Nachricht wird einmal durchgeführt und an die Bots verteilt, die sie gehört haben.
+
+Bots können auch auf Smalltalk, Gefühle, Witze, allgemeine Fragen und Gesprächsnachfragen eingehen.
+Unterschiedliche Nachfragen werden nicht mehr allein wegen gleicher Frageart als Wiederholung verworfen.
+Bei Verdachtsfragen wählt die KI einen erlaubten Grund und formuliert ihn individuell; auch Rollenhinweise,
+Ausflüchte und taktische Antworten dürfen sinngleich umformuliert werden. Die Spielentscheidung bleibt
+vorgegeben. Namen und Belegzuordnung werden technisch erhalten, weitere Bedeutungstreue wird in
+einer separaten lokalen Modellabfrage geprüft. Veraltete Gründe werden vor dem Sprechen verworfen.
 
 Außerdem erhält das Modell den gehörten Verlauf desselben Chatkanals, Stimmung, Beziehung zum Sprecher
 und die erlaubte Antwortabsicht. Geheime Rollentabellen, zurückgehaltene Seherprüfungen und unhörbare
-Gespräche werden nicht übergeben. Enthüllungen und taktische Aussagen bleiben durch die Spiellogik
+Gespräche werden nicht übergeben. Enthüllungen und die Bedeutung taktischer Aussagen bleiben durch die Spiellogik
 vorgegeben. Abstimmung, Fähigkeiten und Bewegung bleiben regelbasiert; das Modell entscheidet nicht
 eigenständig über Aktionen. Der im Prompt angegebene Verdacht bezieht sich auf offenlegbare Hinweise,
 nicht auf geheimes Rollenwissen oder die Jagdprioritäten eines Wolfs.
-Freie Gespräche gehen auf den Wortlaut ein, können aber weiterhin unpassend formuliert sein.
+Die KI ist kein fehlerfreies Sprachverständnis: Mehrdeutigkeit, Ironie und freie Formulierungen können
+weiterhin missverstanden werden. Auch die Bedeutungsprüfung ist modellbasiert, kein formaler Beweis.
 
 Antworten entstehen auf einem Hintergrundthread; eine begrenzte Warteschlange, ein Zeitlimit von sieben
-Sekunden und die Prüfung von Phase, Kanal und lebenden Gesprächspartnern verhindern blockiertes oder
+Sekunden je Auswertungs-/Antwortauftrag und die Prüfung von Phase, Kanal und lebenden Gesprächspartnern verhindern blockiertes oder
 verspätetes Chatten. Bei Ausfällen oder verworfenen Modellantworten greift der bisherige Dialog.
 Deutsch und Englisch werden gemeinsam erzeugt. Ohne installiertes Paket startet kein KI-Prozess.
 
@@ -326,10 +349,15 @@ Das Repository muss **öffentlich** sein, damit das Spiel die Dateien ohne Anmel
 
 1. Version in `CMakeLists.txt` erhöhen (`project(Werwolf VERSION 0.3.0 …)`).
 2. `.\tools\make_release.ps1 -Notes "Was ist neu"` ausführen – baut das Spiel und legt
-   `werwolf.exe`, `werwolf_server.exe` und `update.json` in `dist\<version>\` ab.
-3. Auf GitHub ein Release mit dem Tag `v<version>` anlegen und die drei Dateien als Assets hochladen.
+   `werwolf.exe`, `werwolf_server.exe`, `werwolf_client.exe`, `update.json` und
+   `update-client.json` in `dist\<version>\` ab.
+3. Auf GitHub ein Release mit dem Tag `v<version>` anlegen und diese fünf Dateien als Assets hochladen.
+   Das optionale KI-Installationspaket mit `.\tools\make_ki_pack.ps1` erzeugen und ebenfalls anhängen.
 
 Spieler mit älterer Version bekommen das Update beim nächsten Start automatisch.
+Die zusätzliche Client-Version nutzt `update-client.json`, die ausschließlich `werwolf_client.exe`
+enthält. Ein Manifest der Vollversion wird von diesem Client abgelehnt. Beide EXEs möglichst in
+getrennten Ordnern aufbewahren; der Client verwendet `config-client.txt` für seine Einstellungen.
 
 ## Architektur
 

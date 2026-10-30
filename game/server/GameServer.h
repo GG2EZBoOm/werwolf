@@ -23,6 +23,7 @@ struct ServerOptions {
     float timeScale = 1.0f; // > 1 beschleunigt alle Phasen (für Tests)
     bool logChat = true;
     LocalLanguage::Options language;
+    LocalLanguage::Transport languageTransport; // optional in-process transport for integration tests
 };
 
 // Autoritativer Spielserver: Lobby, Verbindungen, Chat und die laufende Echtzeit-Runde.
@@ -85,6 +86,9 @@ private:
     void resetIfEmpty();
 
     void chatFrom(uint8_t memberId, Text text, bool wolves);
+    void queueBotChat(uint8_t speaker, const Text& text, ChatChannel channel);
+    void processBotChat(double now);
+    void clearBotChat();
     void deliverNotice(const Notice& notice);
     void broadcastNotice(NoticeKind kind, const Text& text);
     void sendNotice(Member& m, NoticeKind kind, const Text& text);
@@ -114,6 +118,21 @@ private:
     std::unique_ptr<Match> m_match;
     std::unique_ptr<LocalLanguage> m_language;
     std::vector<Bot> m_bots;
+    struct HeardChat {
+        uint8_t speaker;
+        Text text;
+        ChatChannel channel;
+        int day;
+        std::vector<uint8_t> audience;
+    };
+    struct PendingChat {
+        HeardChat line;
+        Phase phase;
+        uint64_t ticket;
+        double deadline;
+    };
+    std::deque<HeardChat> m_languageHistory;
+    std::deque<PendingChat> m_languageChats;
     uint8_t m_host = kNoPlayer;
     bool m_dirty = true;
     bool m_lobbyRequested = false;

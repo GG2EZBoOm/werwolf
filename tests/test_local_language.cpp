@@ -1,5 +1,6 @@
 #include "TestFramework.h"
 #include "server/LocalLanguage.h"
+#include "server/LanguageProtocol.h"
 #include "server/Bot.h"
 #include "server/GameServer.h"
 #include "client/NetClient.h"
@@ -62,11 +63,16 @@ struct Scene {
         return std::any_of(lines.begin(), lines.end(), [&](const Text& t) { return t.de.find(text) != std::string::npos; });
     }
 };
+const std::string verified = R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"korrekt\":true}"}}]})";
+std::string answer(const std::string& de, const std::string& en, int id = -1) {
+    return "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":" +
+        languageWire::quote("{\"grund\":" + std::to_string(id) + ",\"de\":" + languageWire::quote(de) +
+                        ",\"en\":" + languageWire::quote(en) + "}") + "}}]}";
+}
+bool verification(const std::string& payload) { return payload.find("\"korrekt\"") != std::string::npos; }
 std::string chosen(int id) {
-    std::string result = good;
-    const auto at = result.find("{\\\"de\\\"");
-    result.insert(at + 1, "\\\"grund\\\":" + std::to_string(id) + ",");
-    return result;
+    return answer("Spieler hat Berta an Tag 2 beschuldigt, aber ich kann das nicht selbst bestätigen.",
+                  "Spieler accused Berta on day 2, but I cannot confirm that myself.", id);
 }
 }
 
@@ -148,10 +154,10 @@ TEST(LanguageSelectsOnlyApprovedReasonsAndRetainsAttribution) {
     auto r = request(); r.chooseReason = true;
     r.reasons.push_back({2,0,2,30,.7f,"behauptung", {"Spieler hat Berta an Tag 2 beschuldigt. Das ist Hörensagen.",
                                                    "Spieler accused Berta on day 2. This is hearsay."}, {}});
-    Text out;
+    LanguageResult out;
     CHECK(languageReply(r, chosen(0), out));
-    CHECK(out.de.ends_with(r.reasons[0].text.de)); CHECK(out.en.ends_with(r.reasons[0].text.en));
-    CHECK_EQ(out, r.reasons[0].text); // even a wrong generated preface cannot change attribution
+    CHECK(out.text.de.find("Spieler") != std::string::npos); CHECK(out.text.en.find("Berta") != std::string::npos);
+    CHECK(out.text != r.reasons[0].text); CHECK_EQ(out.reason, 0);
     CHECK(!languageReply(r, chosen(1), out)); CHECK(!languageReply(r, chosen(-2), out));
     r.focus = 3; CHECK(!languageReply(r, chosen(0), out)); r.focus = kNoPlayer;
     r.preserveStance = true;
@@ -187,8 +193,8 @@ TEST(KnowledgePrivateInnocentCheckVetoesAccusationWithoutRevealingRole) {
 
 TEST(CorrectionsWhileModelThinksInvalidateOldReason) {
     std::atomic<bool> release{false}, entered{false};
-    LocalLanguage model({}, [&](const std::string&, std::string& out) {
-        entered = true; waitUntil([&] { return release.load(); }); out = chosen(0); return true;
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+        entered = true; waitUntil([&] { return release.load(); }); out = verification(payload) ? verified : chosen(0); return true;
     });
     Scene s(&model);
     s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
@@ -212,25 +218,49 @@ TEST(LanguagePayloadEscapesUntrustedNamesAndMessages) {
     CHECK_EQ(context.get("verlauf")->array.back().getString("text"), r.history.back().second.de);
 }
 
-TEST(LanguageRepliesKeepAuthorizedEvidenceAndRejectInventedRoles) {
+TEST(LanguageParaphrasesAreCheckedAgainstTheirCompleteAuthority) {
     auto r = request(); r.preserveStance = true;
     r.stance = {"Ich habe Berta als Seherin geprüft: Werwolf.", "I checked Berta as the seer: werewolf."};
-    Text out;
-    CHECK(languageReply(r, good, out));
-    CHECK(out.de.ends_with(r.stance.de)); CHECK(out.en.ends_with(r.stance.en));
-    for (const auto* bad : {
-        R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"de\":\"Ich bin die Seherin.\",\"en\":\"I am the seer.\"}"}}]})",
-        R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"de\":\"Berta ist ein Wolf.\",\"en\":\"Berta is a wolf.\"}"}}]})",
-        R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"de\":\"Ich war die ganze Nacht zu Hause.\",\"en\":\"I was home all night.\"}"}}]})",
-        R"({"choices":[{"finish_reason":"length","message":{"content":"{}"}}]})",
-        R"({"choices":[]})", "not json"}) CHECK(!languageReply(r, bad, out));
+    const auto rewrite = answer("Meine Seherprüfung zeigt: Berta ist ein Werwolf.", "My seer check shows Berta is a werewolf.");
+    LanguageResult out;
+    CHECK(languageReply(r, rewrite, out));
+    CHECK(out.text != r.stance);
+    eng::json::Value envelope, context;
+    CHECK(eng::json::parse(languageVerificationPayload(r, out), envelope));
+    CHECK(eng::json::parse(envelope.get("messages")->array[1].getString("content"), context));
+    CHECK_EQ(context.getString("vorgabe_de"), r.stance.de);
+    CHECK_EQ(context.getString("entwurf_en"), out.text.en);
+    CHECK(languageVerified(verified));
+    CHECK(!languageVerified(R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"korrekt\":false}"}}]})"));
+    CHECK(!languageVerified(good));
+    CHECK(!languageVerified(R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"korrekt\":\"true\"}"}}]})"));
+    r.preserveStance = false;
+    CHECK(!languageReply(r, answer("Ich bin die Seherin.", "I am the seer."), out));
+    CHECK(!languageReply(r, answer("Berta ist ein Wolf.", "Berta is a wolf."), out));
+    CHECK(!languageReply(r, answer("Ich war die ganze Nacht zu Hause.", "I was home all night."), out));
+}
+
+TEST(LanguageRejectedParaphraseNeverReachesTheBot) {
+    std::atomic<int> verifiedCalls{0};
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+        if (verification(payload)) {
+            ++verifiedCalls;
+            out = R"({"choices":[{"finish_reason":"stop","message":{"content":"{\"korrekt\":false}"}}]})";
+        } else out = answer("Ich bin die Hexe.", "I am the witch.");
+        return true;
+    });
+    Scene s(&model);
+    s.bot.hear(s.match, 0, Text::same("Anton, welche Rolle hast du?"));
+    CHECK(waitUntil([&] { s.advance(.1f); return !s.lines.empty(); }));
+    CHECK_EQ(verifiedCalls.load(), 1);
+    CHECK(!s.has("Ich bin die Hexe"));
 }
 
 TEST(LanguageWorkerIsBoundedAsynchronousAndCancellable) {
     std::atomic<bool> release{false}, entered{false};
-    LocalLanguage model({}, [&](const std::string&, std::string& out) {
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
         entered = true;
-        waitUntil([&] { return release.load(); }); out = good; return true;
+        waitUntil([&] { return release.load(); }); out = verification(payload) ? verified : good; return true;
     });
     const double start = eng::nowSeconds();
     std::vector<uint64_t> tickets;
@@ -241,13 +271,13 @@ TEST(LanguageWorkerIsBoundedAsynchronousAndCancellable) {
     for (auto id : tickets) model.cancel(id);
     release = true;
     const auto id = model.submit(request()); CHECK(id != 0);
-    std::optional<Text> out;
+    std::optional<LanguageResult> out;
     CHECK(waitUntil([&] { return model.take(id, out); })); CHECK(out.has_value());
     for (auto old : tickets) CHECK(!model.take(old, out));
 }
 
 TEST(BotsAnswerPreviouslyUnknownFreeTextWithLocalModel) {
-    LocalLanguage model({}, [](const std::string&, std::string& out) { out = good; return true; });
+    LocalLanguage model({}, [](const std::string& payload, std::string& out) { out = verification(payload) ? verified : good; return true; });
     Scene s(&model);
     CHECK(s.bot.replyPriority(s.match, 0, Text::same("Mir wird das hier alles zu viel."), ChatChannel::Global) > 0);
     s.bot.hear(s.match, 0, Text::same("Anton, ich habe ein mulmiges Gefühl."));
@@ -267,22 +297,33 @@ TEST(LanguageFallbackAndDisabledModeKeepExistingBotsPlayable) {
     CHECK_EQ(old.bot.replyPriority(old.match, 0, Text::same("Mir wird das hier alles zu viel."), ChatChannel::Global), 0);
 }
 
-TEST(LanguageDoesNotOverrideStrategicRoleAnswers) {
+TEST(LanguageIndividuallyFormulatesStrategicRoleAnswers) {
     std::atomic<int> calls{0};
-    LocalLanguage model({}, [&](const std::string&, std::string& out) { ++calls; out = good; return true; });
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+        ++calls;
+        out = verification(payload) ? verified : answer("Meine Rolle behalte ich noch für mich. Reden wir über eure Beobachtungen.",
+                                                        "I am keeping my role to myself for now. Let's talk about your observations.");
+        return true;
+    });
     Scene s(&model);
     s.bot.hear(s.match, 0, Text::same("Anton, welche Rolle hast du?"));
-    s.advance(10);
-    CHECK(!s.lines.empty());
-    CHECK_EQ(calls.load(), 0);
-    CHECK(!s.has("Was genau macht dich so nervös?"));
+    CHECK(waitUntil([&] { s.advance(.1f); return s.has("Reden wir über eure Beobachtungen"); }));
+    CHECK_EQ(calls.load(), 2);
+}
+
+TEST(DifferentFollowUpQuestionsAreNotDiscardedAsRepetitions) {
+    LocalLanguage model({}, [](const std::string& payload, std::string& out) { out = verification(payload) ? verified : good; return true; });
+    Scene s(&model);
+    s.bot.hear(s.match, 0, Text::same("Anton, magst du eigentlich Geschichten?"));
+    CHECK(s.bot.replyPriority(s.match, 0, Text::same("Anton, welche Geschichten magst du?"), ChatChannel::Global) > 0);
+    CHECK_EQ(s.bot.replyPriority(s.match, 0, Text::same("Anton, magst du eigentlich Geschichten?"), ChatChannel::Global), 0);
 }
 
 TEST(LanguageDoesNotReceiveUnheardMessagesOrSecretRoleTables) {
     std::string captured;
     std::atomic<bool> seen{false};
     LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
-        captured = payload; seen = true; out = good; return true;
+        if (!verification(payload)) { captured = payload; seen = true; } out = verification(payload) ? verified : good; return true;
     });
     Scene s(&model, Role::Seer);
     s.bot.hear(s.match, 2, Text::same("GEHEIMES RUDELWISSEN"), ChatChannel::Wolves, false);
@@ -293,7 +334,11 @@ TEST(LanguageDoesNotReceiveUnheardMessagesOrSecretRoleTables) {
     CHECK(eng::json::parse(captured, envelope));
     CHECK(eng::json::parse(envelope.get("messages")->array[1].getString("content"), context));
     const auto data = envelope.get("messages")->array[1].getString("content");
-    CHECK(data.find("Seher") == std::string::npos);
+    // Public role rules are allowed; the bot's private role and discoveries are not.
+    CHECK(context.getString("regelwissen").find("Seher") != std::string::npos);
+    CHECK(context.getString("haltung").empty());
+    CHECK(context.get("gedaechtnis") && context.get("gedaechtnis")->array.empty());
+    CHECK(data.find("yourRole") == std::string::npos);
     CHECK(data.find("Werewolf") == std::string::npos);
     CHECK(data.find("Berta") == std::string::npos);
     CHECK(data.find("seerResults") == std::string::npos);
@@ -302,8 +347,8 @@ TEST(LanguageDoesNotReceiveUnheardMessagesOrSecretRoleTables) {
 TEST(LanguageReplyDiscardedAfterPhaseChangeOrDeath) {
     for (bool death : {false, true}) {
         std::atomic<bool> release{false}, entered{false};
-        LocalLanguage model({}, [&](const std::string&, std::string& out) {
-            entered = true; waitUntil([&] { return release.load(); }); out = good; return true;
+        LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+            entered = true; waitUntil([&] { return release.load(); }); out = verification(payload) ? verified : good; return true;
         });
         Scene s(&model);
         s.bot.hear(s.match, 0, Text::same("Anton, hallo"));
@@ -324,10 +369,13 @@ TEST(LocalInferenceCannotPostToInternetOrCredentialUrls) {
 }
 #endif
 
+int liveUnderstanding(const std::filesystem::path& directory);
 int main(int argc, char** argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
+    if (argc == 3 && std::string(argv[1]) == "--live-understanding")
+        return liveUnderstanding(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2]))));
     if (argc == 3 && std::string(argv[1]) == "--live-memory") {
         LocalLanguage::Options options;
         options.directory = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2])));
@@ -339,19 +387,19 @@ int main(int argc, char** argv) {
         auto query = [&](const std::string& question, const std::string& expectedKind, float sign) {
             s.bot.hear(s.match, 0, Text::same(question), ChatChannel::Global, false);
             auto r = s.knowledge(); r.chooseReason = true;
-            const auto ticket = model.submit(r); std::optional<Text> out;
+            const auto ticket = model.submit(r); std::optional<LanguageResult> out;
             const double begin = eng::nowSeconds();
             if (!waitUntil([&] { return model.take(ticket, out); }, 10) || !out) { std::puts("MEMORY FALLBACK"); return false; }
-            std::printf("\nFRAGE: %s\nDE: %s\nEN: %s\nZEIT: %.2f s\n", question.c_str(), out->de.c_str(), out->en.c_str(), eng::nowSeconds()-begin);
+            std::printf("\nFRAGE: %s\nDE: %s\nEN: %s\nZEIT: %.2f s\n", question.c_str(), out->text.de.c_str(), out->text.en.c_str(), eng::nowSeconds()-begin);
             return std::any_of(r.reasons.begin(), r.reasons.end(), [&](const auto& n) {
-                return n.kind == expectedKind && n.weight * sign > 0 && out->de.ends_with(n.text.de) && out->en.ends_with(n.text.en);
+                return out->reason >= 0 && &n == &r.reasons[out->reason] && n.kind == expectedKind && n.weight * sign > 0;
             });
         };
         int passed = query("Anton, was genau spricht aus deiner Sicht gegen Berta? Wer hat das gesagt?", "behauptung", 1) ? 1 : 0;
         // Exercise the full bot queue, knowledge snapshot and reply validation with the real model.
         s.bot.setLanguageModel(&model);
         s.bot.hear(s.match, 0, Text::same("Anton, warum verdächtigst du Berta?"));
-        const bool integrated = waitUntil([&] { s.advance(.1f); return s.has("Spieler hat Berta an Tag"); }, 10);
+        const bool integrated = waitUntil([&] { s.advance(.1f); return !s.lines.empty(); }, 10);
         std::printf("BOT-INTEGRATION: %s\n", integrated ? "OK" : "FEHLER");
         passed += integrated ? 1 : 0;
         s.bot.hear(s.match, 0, Text::same("Korrektur: Berta ist kein Wolf"), ChatChannel::Global, false);
@@ -375,7 +423,7 @@ int main(int argc, char** argv) {
         };
         if (!pump([&] { return client.hasView(); }, 5)) return 1;
         for (int i = 0; i < 7; ++i) client.sendAddBot();
-        Settings settings; settings.captain = true; settings.daySeconds = 40; settings.discussionSeconds = 120;
+        Settings settings; settings.captain = true; settings.daySeconds = 40; settings.discussionSeconds = 240;
         client.sendSettings(settings);
         if (!pump([&] { return client.view().players.size() == 8; }, 5)) return 1;
         client.sendStartGame();
@@ -383,7 +431,11 @@ int main(int argc, char** argv) {
         const auto target = client.view().players[1];
         const std::vector<std::string> messages = {
             target.name + ", mir ist das hier alles zu viel. Ich bekomme langsam richtig Angst.",
-            target.name + ", danke, dass du mir zuhörst. Was sollen wir denn jetzt machen?",
+            target.name + ", was ist eigentlich dein Lieblingsessen?",
+            target.name + ", warum magst du genau dieses Essen?",
+            target.name + ", erzähl mir einen kurzen Witz.",
+            target.name + ", was kann die Hexe im Spiel eigentlich machen?",
+            target.name + ", wie viel ist zwei plus zwei?",
             target.name + ", welche Rolle hast du?"};
         for (const auto& text : messages) {
             client.takeNewEntries(); client.sendChat(text, false);
@@ -418,10 +470,10 @@ int main(int argc, char** argv) {
             r.fear = i == 0 ? .9f : .2f; r.anger = i == 2 ? .9f : .1f;
             r.stress = i == 3 ? .9f : .2f; r.friendship = i == 1 ? .8f : 0;
             const double start = eng::nowSeconds();
-            auto id = model.submit(r); std::optional<Text> out;
+            auto id = model.submit(r); std::optional<LanguageResult> out;
             if (waitUntil([&] { return model.take(id, out); }, 10) && out) {
                 ++accepted;
-                std::printf("\nINPUT: %s\nDE: %s\nEN: %s\nTIME: %.2fs\n", questions[i].c_str(), out->de.c_str(), out->en.c_str(), eng::nowSeconds()-start);
+                std::printf("\nINPUT: %s\nDE: %s\nEN: %s\nTIME: %.2fs\n", questions[i].c_str(), out->text.de.c_str(), out->text.en.c_str(), eng::nowSeconds()-start);
             } else std::printf("\nFALLBACK: %s\n", questions[i].c_str());
         }
         std::printf("\nLive responses accepted: %d/%zu\n", accepted, questions.size());

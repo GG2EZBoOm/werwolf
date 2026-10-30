@@ -254,6 +254,30 @@ TEST(KompletterUpdateDurchlauf) {
     std::printf("    Meldung bei 404: %s\n", missing.status().c_str());
 }
 
+TEST(ClientUpdateBleibtClientUndLehntVollversionAb) {
+    TestHttpServer server;
+    CHECK(server.start());
+    const std::string payload(1000, 'C');
+    server.files["/client.exe"] = payload;
+    server.files["/client.json"] = manifestFor("2.0.0", "werwolf_client.exe", server.url("/client.exe"), payload);
+    server.files["/full.json"] = manifestFor("2.0.0", "werwolf.exe", server.url("/client.exe"), payload);
+    const fs::path dir = tempDir("client-edition");
+    writeFile(dir / "werwolf_client.exe", "alter Client");
+    update::Version current; update::Version::parse("1.0.0", current);
+    Updater wrong;
+    wrong.start(server.url("/full.json"), current, dir, "werwolf_client.exe");
+    CHECK(waitFor(wrong, 5)); CHECK(wrong.state() == Updater::State::Failed);
+    CHECK(!fs::exists(dir / "werwolf.exe"));
+    CHECK_EQ(readFile(dir / "werwolf_client.exe"), "alter Client");
+    Updater client;
+    client.start(server.url("/client.json"), current, dir, "werwolf_client.exe");
+    CHECK(waitFor(client, 5)); CHECK(client.state() == Updater::State::ReadyToInstall);
+    std::string error;
+    CHECK(client.install(error));
+    CHECK_EQ(readFile(dir / "werwolf_client.exe"), payload);
+    CHECK(!fs::exists(dir / "werwolf.exe"));
+}
+
 int main() {
     SetConsoleOutputCP(CP_UTF8);
     return test::runAll();

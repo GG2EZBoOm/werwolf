@@ -39,6 +39,11 @@ constexpr MenuEntry kMenu[] = {
     {"Einstellungen", "Settings", "Grafik, Ton, Steuerung, Sprache und Oberfläche.", "Graphics, sound, controls, language and interface.", 0.032f},
     {"Das Feuer löschen", "Put out the fire", "Das Spiel beenden.", "Quit the game.", -0.026f},
 };
+#ifdef WERWOLF_CLIENT_ONLY
+constexpr int kFirstMenuEntry = 1;
+#else
+constexpr int kFirstMenuEntry = 0;
+#endif
 
 // Ein paar Zeilen Dorfgeflüster für Lade- und Wartebildschirme
 constexpr std::pair<const char*, const char*> kLore[] = {
@@ -125,10 +130,11 @@ void App::drawMenu() {
 
     // --- Zettel als Menüpunkte -----------------------------------------------------------
     const bool typing = m_ui.anyFocused();
-    const int count = static_cast<int>(std::size(kMenu));
+    const int count = static_cast<int>(std::size(kMenu)) - kFirstMenuEntry;
+    m_menuFocus = std::max(m_menuFocus, kFirstMenuEntry);
     if (!typing && m_menuPage == MenuPage::None) {
-        if (in.pressed(eng::Key::Down)) m_menuFocus = (m_menuFocus + 1) % count;
-        if (in.pressed(eng::Key::Up)) m_menuFocus = (m_menuFocus + count - 1) % count;
+        if (in.pressed(eng::Key::Down)) m_menuFocus = kFirstMenuEntry + (m_menuFocus - kFirstMenuEntry + 1) % count;
+        if (in.pressed(eng::Key::Up)) m_menuFocus = kFirstMenuEntry + (m_menuFocus - kFirstMenuEntry + count - 1) % count;
     }
     if (in.pressed(eng::Key::Escape) && !typing) m_menuPage = MenuPage::None;
 
@@ -136,16 +142,17 @@ void App::drawMenu() {
     const float slipY = head.bottom() + 34.0f;
     const float slipH = 56.0f, slipGap = std::min(14.0f, (board.bottom() - 110.0f - slipY - slipH * count) / (count - 1));
     for (int i = 0; i < count; ++i) {
+        const int entry = i + kFirstMenuEntry;
         const float delay = 0.8f + static_cast<float>(i) * 0.12f;
         const float appear = eng::smoothstep(delay, delay + 0.55f, since);
         if (appear <= 0.01f) continue;
         const Rect rc{board.x + 34.0f + (i % 2 == 0 ? 0.0f : 14.0f), slipY + static_cast<float>(i) * (slipH + slipGap), board.w - 82.0f, slipH};
-        const bool selected = m_menuFocus == i || (m_menuPage == MenuPage::Host && i == 0) || (m_menuPage == MenuPage::Join && i == 1) ||
-                              (m_menuPage == MenuPage::Settings && i == 3);
-        if (m_kit.slip(std::string("menu/slip/") + std::to_string(i), rc, english ? kMenu[i].labelEn : kMenu[i].label, kMenu[i].angle, selected,
+        const bool selected = m_menuFocus == entry || (m_menuPage == MenuPage::Host && entry == 0) || (m_menuPage == MenuPage::Join && entry == 1) ||
+                              (m_menuPage == MenuPage::Settings && entry == 3);
+        if (m_kit.slip(std::string("menu/slip/") + std::to_string(entry), rc, english ? kMenu[entry].labelEn : kMenu[entry].label, kMenu[entry].angle, selected,
                        300u + static_cast<uint32_t>(i) * 17u, appear))
-            activated = i;
-        if (m_ui.hovered(rc)) m_menuFocus = i;
+            activated = entry;
+        if (m_ui.hovered(rc)) m_menuFocus = entry;
     }
     if (!typing && m_menuPage == MenuPage::None && in.pressed(eng::Key::Enter)) {
         activated = m_menuFocus;
@@ -153,7 +160,9 @@ void App::drawMenu() {
     }
 
     switch (activated) {
+#ifndef WERWOLF_CLIENT_ONLY
     case 0: m_menuPage = m_menuPage == MenuPage::Host ? MenuPage::None : MenuPage::Host; break;
+#endif
     case 1: m_menuPage = m_menuPage == MenuPage::Join ? MenuPage::None : MenuPage::Join; break;
     case 2: enterSandbox(); break;
     case 3: m_menuPage = m_menuPage == MenuPage::Settings ? MenuPage::None : MenuPage::Settings; break;
@@ -210,7 +219,11 @@ void App::drawMenu() {
     }
 
     drawFooterHints(m_menuPage != MenuPage::None);
+#ifdef WERWOLF_CLIENT_ONLY
+    r.text(m_fonts.small, {board.x + 6.0f, H - 40.0f}, Lf("Version {} · Client · nur beitreten", "Version {} · Client · join only", versionString()), smoke);
+#else
     r.text(m_fonts.small, {board.x + 6.0f, H - 40.0f}, Lf("Version {} · eigene C++-Engine", "Version {} · custom C++ engine", versionString()), smoke);
+#endif
     m_kit.fade(1.0f - eng::smoothstep(0.0f, 0.9f, since));
 }
 

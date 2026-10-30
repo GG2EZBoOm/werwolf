@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <variant>
 
 namespace ww {
 
@@ -24,7 +25,7 @@ struct LanguageRequest {
         double time = 0;
         float weight = 0;
         std::string kind;
-        Text text; // approved wording; the model selects an ID instead of inventing evidence
+        Text text; // authorized meaning; paraphrases are checked against this source
         std::optional<Bot::Evidence> evidence;
     };
     struct Assessment {
@@ -47,9 +48,28 @@ struct LanguageRequest {
     bool chooseReason = false;
 };
 
+struct UnderstandingRequest {
+    uint8_t speaker = kNoPlayer;
+    std::vector<dialogue::Person> people;
+    std::vector<std::pair<std::string, Text>> history; // only conversations every recipient actually heard
+    Text message;
+};
+
+struct LanguageResult {
+    Text text;
+    int reason = -1; // provenance survives paraphrasing; never recover it by matching output wording
+    std::optional<dialogue::Message> understanding;
+};
+
 std::string languagePayload(const LanguageRequest& request);
-// Reject malformed output, invented role claims/evidence and overlong messages.
-bool languageReply(const LanguageRequest& request, const std::string& response, Text& result);
+// Parse and structurally check a candidate. The worker also verifies its meaning before publication.
+bool languageReply(const LanguageRequest& request, const std::string& response, LanguageResult& result);
+std::string languageVerificationPayload(const LanguageRequest& request, const LanguageResult& candidate);
+std::string languageRephrasePayload(const LanguageRequest& request, int reason = -1);
+bool languageVerified(const std::string& response);
+std::string understandingPayload(const UnderstandingRequest& request);
+bool understandingReply(const UnderstandingRequest& request, const std::string& response, dialogue::Message& result);
+std::string understandingVerificationPayload(const UnderstandingRequest& request, const std::string& response);
 
 class LocalLanguage {
 public:
@@ -66,13 +86,16 @@ public:
     LocalLanguage& operator=(const LocalLanguage&) = delete;
     bool available() const { return m_ready.load(); }
     uint64_t submit(LanguageRequest request);
+    uint64_t submit(UnderstandingRequest request);
     // A completed request may contain no result (fallback). Never blocks the game loop.
-    bool take(uint64_t ticket, std::optional<Text>& result);
+    bool take(uint64_t ticket, std::optional<LanguageResult>& result);
     void cancel(uint64_t ticket);
     static std::filesystem::path packDirectory();
     static bool installed();
 private:
-    struct Job { uint64_t id; LanguageRequest request; double deadline; };
+    using Request = std::variant<LanguageRequest, UnderstandingRequest>;
+    uint64_t enqueue(Request request);
+    struct Job { uint64_t id; Request request; double deadline; };
     void run();
     Options m_options;
     Transport m_transport;
@@ -80,7 +103,7 @@ private:
     std::mutex m_mutex;
     std::condition_variable m_wake;
     std::deque<Job> m_queue;
-    std::map<uint64_t, std::optional<Text>> m_results;
+    std::map<uint64_t, std::optional<LanguageResult>> m_results;
     std::set<uint64_t> m_active;
     uint64_t m_next = 1;
     std::thread m_worker;

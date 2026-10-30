@@ -142,7 +142,11 @@ void App::startUpdateCheck() {
     }
     update::Version current;
     update::Version::parse(WERWOLF_VERSION, current);
+#ifdef WERWOLF_CLIENT_ONLY
+    m_updater.start(url, current, exeDir, "werwolf_client.exe");
+#else
     m_updater.start(url, current, exeDir);
+#endif
     m_updateShownSince = eng::nowSeconds();
     m_updateDoneAt = -1.0;
     m_screen = Screen::Updating;
@@ -280,6 +284,16 @@ void App::parseCommandLine() {
         else eng::log::warn("Unbekannte Option: {}", a);
     }
     LocalFree(argv);
+#ifdef WERWOLF_CLIENT_ONLY
+    if (m_dev.autoHost || m_menuPage == MenuPage::Host) {
+        m_dev.autoHost = false;
+        m_menuPage = MenuPage::Join;
+        m_menuNotice = L("Diese Client-Version tritt bestehenden Spielen bei. Zum Hosten brauchst du die Vollversion.",
+                         "This client joins existing games. Hosting requires the full version.");
+        eng::log::info("Client-Version: lokales Hosten ist nicht enthalten");
+    }
+    m_dev.settingsTab = std::min(m_dev.settingsTab, 3);
+#endif
 }
 
 void App::runDevAutomation() {
@@ -435,7 +449,7 @@ void App::shutdown() {
     m_audioDevice.stop();
     m_updater.cancel();
     m_net.disconnect();
-    m_server.stop();
+    stopHostedServer();
     m_hostNet.stop();
     m_discord.shutdown();
     m_config.name = eng::utf8::sanitize(m_nameInput, proto::kMaxNameLength);
@@ -629,7 +643,7 @@ void App::updateSession() {
             m_menuError = m_net.error();
             m_screen = Screen::Menu;
             if (m_hosting) {
-                m_server.stop();
+                stopHostedServer();
                 m_hosting = false;
             }
         }
@@ -723,6 +737,10 @@ bool parsePort(const std::string& text, uint16_t& port) {
 } // namespace
 
 void App::hostGame() {
+#ifdef WERWOLF_CLIENT_ONLY
+    m_menuPage = MenuPage::Join;
+    m_menuError = L("Diese Version kann nur beitreten.", "This version can only join games.");
+#else
     const std::string name = eng::utf8::sanitize(m_nameInput, proto::kMaxNameLength);
     uint16_t port = 0;
     if (name.empty()) {
@@ -759,6 +777,13 @@ void App::hostGame() {
     m_net.connect("127.0.0.1", port, name);
     m_menuError.clear();
     m_screen = Screen::Connecting;
+#endif
+}
+
+void App::stopHostedServer() {
+#ifndef WERWOLF_CLIENT_ONLY
+    m_server.stop();
+#endif
 }
 
 void App::joinGame() {
@@ -834,7 +859,7 @@ void App::reconnect() {
 void App::leaveSession() {
     m_net.disconnect();
     if (m_hosting) {
-        m_server.stop();
+        stopHostedServer();
         m_hosting = false;
     }
     m_hostNet.stop();

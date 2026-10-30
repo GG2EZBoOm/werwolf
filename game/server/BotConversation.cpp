@@ -9,7 +9,7 @@ namespace ww {
 namespace {
 
 bool secretChannel(ChatChannel channel) {
-    return channel == ChatChannel::Wolves || channel == ChatChannel::Family || channel == ChatChannel::Dead;
+    return channel == ChatChannel::Wolves || channel == ChatChannel::Vampires || channel == ChatChannel::Family || channel == ChatChannel::Dead;
 }
 
 // "Mia, die Rolle …" / "Mia, ich glaube dir" rather than "Mia, Die …" / "Mia, Ich …"; English "I" and
@@ -96,12 +96,14 @@ int Bot::verdict(const Match& match, const dialogue::Message& message, uint8_t t
     return 0;
 }
 
-bool Bot::repeats(uint8_t speaker, const dialogue::Message& message) const {
-    auto same = [&](const Reply& r) { return r.speaker == speaker && r.intent == message.intent && r.topic == message.topic; };
-    return std::any_of(m_replies.begin(), m_replies.end(), same) || (m_lastReply && same(*m_lastReply));
+bool Bot::repeats(uint8_t speaker, const Text& message) const {
+    auto same = [&](const Reply& r) { return r.speaker == speaker && r.question == message; };
+    return std::any_of(m_replies.begin(), m_replies.end(), same) ||
+        (m_lastReply && m_now - m_lastReply->due < 15 && same(*m_lastReply));
 }
 
-int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel, const Speech* speech) const {
+int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel, const Speech* speech,
+                       const dialogue::Message* interpreted) const {
     const auto* me = match.find(m_id);
     const auto* from = match.find(speaker);
     if (!me || !from || speaker == m_id || !me->alive || !from->alive || match.phase() == Phase::GameOver ||
@@ -109,7 +111,7 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
     if (match.chatChannel(m_id, secretChannel(channel)) != channel) return 0;
     // A busy bot still takes questions meant for it (they wait in line), but leaves small talk to others.
     const bool busy = !m_replies.empty() || match.clock() < m_replyAfter;
-    if (busy && m_replies.size() >= 2) return 0;
+    if (busy && m_replies.size() >= (m_language && m_language->available() ? 4u : 2u)) return 0;
     if (from->bot) {
         // Bots only respond to another bot's first-hand evidence, and never to a response.
         if (!speech || !speech->evidence || speech->reply) return 0;
@@ -137,7 +139,8 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         if (heard.kind == Evidence::Kind::Seer && m_dialogue.otherSeer(speaker)) return 40;             // two seers: one is lying
         return 0;
     }
-    const auto message = understand(match, speaker, text);
+    auto message = interpreted ? *interpreted : understand(match, speaker, text);
+    if (interpreted && !message.seerReport && m_dialogue.claimedRole(speaker) == Role::Seer) dialogue::presentSeerResults(message);
     const auto* addressed = match.find(message.addressed);
     const auto* topic = match.find(message.topic);
     const auto reported = reportedPlayers(message);
@@ -180,15 +183,16 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         priority = 30; // someone should point out that this player is dead
     } else if (message.intent == dialogue::Intent::Unknown) {
         if (!m_language || !m_language->available()) return 0;
-        priority = 10; // the local model can answer free wording outside the rule parser
+        priority = 20; // keep following a free conversation even during the short reply cooldown
     } else {
         priority = m_lastReply && m_lastReply->speaker == speaker && match.clock() - m_lastReply->due < 60.0 ? 20 : 10;
     }
-    if (busy && (priority < 20 || repeats(speaker, message))) return 0;
+    if (busy && (priority < 20 || repeats(speaker, text))) return 0;
     return priority;
 }
 
-void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel, bool reply, const Speech* speech) {
+void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel, bool reply, const Speech* speech,
+               const dialogue::Message* interpreted) {
     const auto* me = match.find(m_id);
     const auto* from = match.find(speaker);
     if (!me || !from || !me->alive || !from->alive || speaker == m_id ||
@@ -238,7 +242,8 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         if (message.seerReport) message.claimedRole = Role::Seer;
         if (heard->kind == Evidence::Kind::RoleClaim) message.claimedRole = heard->role;
     } else {
-        message = understand(match, speaker, text);
+        message = interpreted ? *interpreted : understand(match, speaker, text);
+        if (interpreted && !message.seerReport && m_dialogue.claimedRole(speaker) == Role::Seer) dialogue::presentSeerResults(message);
     }
     std::erase_if(message.claims, [&](const dialogue::Claim& c) {
         const auto* p = match.find(c.target);
@@ -304,7 +309,7 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         m_reconsiderAfter = match.clock() + 6.0;
     }
     if (message.topic != kNoPlayer) m_topics[speaker] = {message.topic, match.clock()};
-    const int priority = reply ? replyPriority(match, speaker, text, channel, speech) : 0;
+    const int priority = reply ? replyPriority(match, speaker, text, channel, speech, interpreted) : 0;
     if (priority == 0) return;
     std::optional<Evidence> evidence;
     const bool offerToSeer = match.viewFor(m_id).yourRole != Role::Protector &&
@@ -318,7 +323,7 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     if (response.empty()) return;
     // Wer dreimal dasselbe fragt, bekommt nicht dreimal denselben Satz
     const Reply* previous = !m_replies.empty() ? &m_replies.back() : m_lastReply ? &*m_lastReply : nullptr;
-    if (previous && previous->speaker == speaker && previous->text == addressTo(from->name, response, match))
+    if ((!m_language || !m_language->available()) && previous && previous->speaker == speaker && previous->text == addressTo(from->name, response, match))
         response = styled({"Wie gesagt – dazu habe ich gerade nichts Neues.", "Like I said – nothing new from me on that right now."},
                           m_personality.style);
     if (evidence && evidence->kind == Evidence::Kind::RoleClaim) m_publicRole = evidence->role;
@@ -342,21 +347,20 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     m_nextReply = due + m_rng.uniform(2.5f, 3.5f) * haste;
     m_replies.push_back(Reply{speaker, channel, match.phase(), match.day(), due, offerToSeer ? response : addressTo(from->name, response, match),
                               message.intent, message.topic, Speech{evidence, true}});
+    m_replies.back().question = text;
     if (!from->bot && m_language && m_language->available()) {
         auto& pending = m_replies.back();
-        // Keep strategic answers and first-hand evidence entirely under the rules layer.
-        // Even a model preface can contradict a role bluff or claim not to know one's own role.
+        // The rules choose facts and strategy; the model may now paraphrase the whole answer.
         const bool reasoning = message.intent == dialogue::Intent::AskReason || message.intent == dialogue::Intent::AskSuspicion ||
             message.intent == dialogue::Intent::AskInnocence || message.intent == dialogue::Intent::AskBelief;
         const bool preserve = evidence.has_value() || (!reasoning && message.intent != dialogue::Intent::Unknown &&
                                                        message.intent != dialogue::Intent::Greeting);
-        if (!preserve) {
-            auto request = languageRequest(match, speaker, channel, pending.text, false);
-            request.chooseReason = message.intent != dialogue::Intent::Greeting;
-            for (const auto& reason : request.reasons) pending.languageReasons.emplace_back(reason.text, reason.evidence);
-            pending.languageTicket = m_language->submit(std::move(request));
-            pending.languageDeadline = eng::nowSeconds() + 7.0;
-        }
+        auto request = languageRequest(match, speaker, channel, response, preserve);
+        if (interpreted) request.focus = message.topic == m_id ? kNoPlayer : message.topic;
+        request.chooseReason = !preserve && message.intent != dialogue::Intent::Greeting;
+        for (const auto& reason : request.reasons) pending.languageReasons.emplace_back(reason.text, reason.evidence);
+        pending.languageTicket = m_language->submit(std::move(request));
+        pending.languageDeadline = eng::nowSeconds() + 7.0;
     }
 }
 
@@ -780,24 +784,21 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
     if (m_replies.empty() || match.clock() < m_replies.front().due) return;
     auto& waiting = m_replies.front();
     if (m_language && waiting.languageTicket) {
-        std::optional<Text> composed;
+        std::optional<LanguageResult> composed;
         if (m_language->take(waiting.languageTicket, composed)) {
             if (composed) {
-                for (const auto& [line, evidence] : waiting.languageReasons)
-                    if (composed->de.ends_with(line.de) && composed->en.ends_with(line.en)) {
+                if (composed->reason >= 0 && static_cast<size_t>(composed->reason) < waiting.languageReasons.size()) {
+                        const auto& [line, evidence] = waiting.languageReasons[composed->reason];
                         const auto current = languageRequest(match, waiting.speaker, waiting.channel, waiting.text, false);
                         if (std::none_of(current.reasons.begin(), current.reasons.end(), [&](const auto& n) { return n.text == line; })) {
                             composed.reset(); // corrected, withdrawn, or no longer allowed to disclose
                             waiting.text = {"Meine Einschätzung hat sich inzwischen geändert. Lasst uns die neuen Hinweise einordnen.",
                                             "My assessment has changed in the meantime. Let's consider the new evidence."};
                             waiting.speech.evidence.reset();
-                            break;
-                        }
-                        waiting.speech.evidence = evidence;
-                        break;
-                    }
+                        } else waiting.speech.evidence = evidence;
+                }
                 if (composed) {
-                    waiting.text = std::move(*composed);
+                    waiting.text = std::move(composed->text);
                     eng::log::info("Lokale KI: Antwort fuer Bot {}", m_id);
                 }
             }
@@ -824,7 +825,8 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
 }
 
 void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
-                 eng::Rng& rng) {
+                 eng::Rng& rng, const dialogue::Message* interpreted, const std::vector<uint8_t>* recipients) {
+    auto included = [&](uint8_t id) { return !recipients || std::find(recipients->begin(), recipients->end(), id) != recipients->end(); };
     std::optional<Bot::Speech> speech;
     for (const Bot& bot : bots)
         if (bot.id() == speaker && bot.speaking()) speech = *bot.speaking();
@@ -832,7 +834,7 @@ void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, co
     struct Candidate { uint8_t id; int priority; float tie; };
     std::vector<Candidate> candidates;
     for (const Bot& bot : bots)
-        if (const int priority = bot.replyPriority(match, speaker, text, channel, said); priority > 0)
+        if (const int priority = bot.replyPriority(match, speaker, text, channel, said, interpreted); included(bot.id()) && priority > 0)
             candidates.push_back({bot.id(), priority, rng.uniform()});
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) { return a.priority != b.priority ? a.priority > b.priority : a.tie < b.tie; });
@@ -850,8 +852,8 @@ void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, co
             if (c.priority == 47 && responders.size() < 3 && std::find(responders.begin(), responders.end(), c.id) == responders.end())
                 responders.push_back(c.id);
     for (Bot& bot : bots)
-        if (match.canHear(bot.id(), speaker, channel) && !match.hidesSpeaker(bot.id(), channel, speaker))
-            bot.hear(match, speaker, text, channel, std::find(responders.begin(), responders.end(), bot.id()) != responders.end(), said);
+        if (included(bot.id()) && match.canHear(bot.id(), speaker, channel) && !match.hidesSpeaker(bot.id(), channel, speaker))
+            bot.hear(match, speaker, text, channel, std::find(responders.begin(), responders.end(), bot.id()) != responders.end(), said, interpreted);
 }
 
 } // namespace ww

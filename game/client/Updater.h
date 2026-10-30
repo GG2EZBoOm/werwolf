@@ -16,7 +16,8 @@ public:
     enum class State { Idle, Checking, UpToDate, Downloading, ReadyToInstall, Installed, Failed, Cancelled };
 
     ~Updater();
-    void start(const std::string& manifestUrl, const update::Version& current, const std::filesystem::path& installDir);
+    void start(const std::string& manifestUrl, const update::Version& current, const std::filesystem::path& installDir,
+               const std::string& exclusiveExecutable = {});
     void cancel();
     // Nur aufrufen, wenn state() == ReadyToInstall (im Hauptthread)
     bool install(std::string& error);
@@ -40,6 +41,7 @@ private:
     mutable std::mutex m_mutex;
     std::string m_status;
     std::string m_url;
+    std::string m_exclusiveExecutable;
     update::Version m_current;
     update::Manifest m_manifest;
     std::filesystem::path m_installDir;

@@ -16,7 +16,12 @@ Wichtige Aussagen bleiben unveraendert; sprachliche Kommentare werden geprueft.
 Ab 0.11.0 waehlt die KI passende Gruende aus dem persoenlichen Verdachtsgedaechtnis:
 mit Quelle, Zeitpunkt, Entlastungen und Korrekturen. Das Spiel gibt diese Gruende
 unveraendert wieder. Zurueckgehaltene Seherpruefungen bleiben geheim.
-Ein bereits installiertes KI-Paket funktioniert weiter; kein neuer Download noetig.
+Ab 0.12.0 werden auch freie Spielernachrichten im Kontext eingeordnet. Bots
+reagieren auf Smalltalk und Nachfragen; taktische Antworten und Verdachtsgruende
+werden individuell umformuliert und separat auf Bedeutungstreue geprueft.
+Missverstaendnisse bleiben moeglich. Ein bereits installiertes KI-Paket funktioniert
+weiter; kein neuer Download noetig. Mitspieler nutzen auf Wunsch werwolf_client.exe
+ohne Modell; diese Client-Version kann selbst keine Spiele hosten.
 Ein Sprachmodell kann trotzdem unpassend formulieren. Bei Fehlern oder zu langen
 Wartezeiten verwendet das Spiel automatisch seine bisherigen Bot-Antworten.
 

@@ -10,7 +10,9 @@
 #include "client/Style.h"
 #include "client/Updater.h"
 #include "client/WorldRenderer.h"
+#ifndef WERWOLF_CLIENT_ONLY
 #include "server/GameServer.h"
+#endif
 #include "world/World.h"
 
 #include "engine/gfx/Font.h"
@@ -175,6 +177,7 @@ private:
 
     // Aktionen
     void hostGame();
+    void stopHostedServer();
     void joinGame();
     void connectTo(const std::vector<std::string>& hosts, uint16_t port, const std::string& name);
     void joinFromSecret(const std::string& secret);
@@ -229,7 +232,9 @@ private:
     Config m_config;
     bool m_languageApplied = false;
     NetClient m_net;
+#ifndef WERWOLF_CLIENT_ONLY
     ServerThread m_server;
+#endif
     bool m_hosting = false;
     HostNetwork m_hostNet;
     Discord m_discord;

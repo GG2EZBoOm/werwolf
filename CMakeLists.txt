@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Werwolf VERSION 0.11.0 LANGUAGES CXX)
+project(Werwolf VERSION 0.12.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,7 @@ else()
 endif()
 option(WERWOLF_BUILD_CLIENT "Grafischen Client bauen (aktuell nur Windows)" ${_client_default})
 option(WERWOLF_BUILD_TESTS "Tests bauen" ON)
+option(WERWOLF_CLIENT_ONLY "Nur beitreten, ohne lokalen Server und KI-Laufzeit" OFF)
 # Woher der Auto-Updater die Datei update.json lädt (leer = Updater aus).
 # Mit GitHub Releases zeigt "latest/download" immer auf das neueste veröffentlichte Release.
 set(WERWOLF_UPDATE_URL "https://github.com/GG2EZBoOm/werwolf/releases/latest/download/update.json"

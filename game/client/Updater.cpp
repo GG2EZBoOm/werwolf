@@ -22,11 +22,13 @@ Updater::~Updater() {
     if (m_thread.joinable()) m_thread.join();
 }
 
-void Updater::start(const std::string& manifestUrl, const update::Version& current, const fs::path& installDir) {
+void Updater::start(const std::string& manifestUrl, const update::Version& current, const fs::path& installDir,
+                    const std::string& exclusiveExecutable) {
     if (m_thread.joinable()) m_thread.join();
     m_url = manifestUrl;
     m_current = current;
     m_installDir = installDir;
+    m_exclusiveExecutable = exclusiveExecutable;
     m_cancel = false;
     m_progress = 0.0f;
     m_state = State::Checking;
@@ -113,6 +115,10 @@ void Updater::run() {
     update::Manifest manifest;
     if (!update::parseManifest(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()), manifest, error)) {
         fail(Lf("{}", "Invalid update information ({})", error));
+        return;
+    }
+    if (!m_exclusiveExecutable.empty() && (manifest.files.size() != 1 || manifest.files.front().path != m_exclusiveExecutable)) {
+        fail(L("Dieses Update gehört zu einer anderen Spielversion.", "This update belongs to a different game edition."));
         return;
     }
     {

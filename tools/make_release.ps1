@@ -3,17 +3,18 @@
 #   .\tools\make_release.ps1                      # Version aus CMakeLists.txt, Repo GG2EZBoOm/werwolf
 #   .\tools\make_release.ps1 -Notes "Neue Rollen" # mit Änderungshinweis
 #
-# Ergebnis liegt in dist\<version>\: werwolf.exe, werwolf_server.exe und update.json.
-# Diese drei Dateien als Assets an ein GitHub-Release mit dem Tag v<version> hängen.
+# Ergebnis liegt in dist\<version>\: drei EXEs und beide Update-Manifeste.
+# Diese fünf Dateien als Assets an ein GitHub-Release mit dem Tag v<version> hängen.
 # Wichtig: Das Repository muss öffentlich sein, sonst kann das Spiel die Dateien nicht laden.
 param(
     [string]$Repo = "GG2EZBoOm/werwolf",
     [string]$Notes = "",
     [string]$BinaryDir = "", # optional: bereits geprüfter Build, zusammen mit -SkipBuild
+    [string]$ClientBinaryDir = "",
     [switch]$SkipBuild
 )
 $ErrorActionPreference = "Stop"
-if ($BinaryDir -and -not $SkipBuild) { throw "-BinaryDir erfordert -SkipBuild." }
+if (($BinaryDir -or $ClientBinaryDir) -and -not $SkipBuild) { throw "Binärverzeichnisse erfordern -SkipBuild." }
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
@@ -41,6 +42,10 @@ foreach ($step in 1..20) {
 if (-not $SkipBuild) {
     & (Join-Path $root "build.ps1") -Preset release
     if ($LASTEXITCODE -ne 0) { throw "Build fehlgeschlagen." }
+    cmake -S . -B build/client-only -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DWERWOLF_CLIENT_ONLY=ON -DWERWOLF_BUILD_TESTS=OFF
+    if ($LASTEXITCODE -ne 0) { throw "Client-Konfiguration fehlgeschlagen." }
+    cmake --build build/client-only --target werwolf
+    if ($LASTEXITCODE -ne 0) { throw "Client-Build fehlgeschlagen." }
 }
 
 $bin = if ($BinaryDir) { (Resolve-Path -LiteralPath $BinaryDir).Path } else { Join-Path $root "build\release\bin" }
@@ -72,6 +77,20 @@ $manifest = [ordered]@{
 $json = $manifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText((Join-Path $dist "update.json"), $json, (New-Object System.Text.UTF8Encoding($false)))
 
+$clientBin = if ($ClientBinaryDir) { (Resolve-Path -LiteralPath $ClientBinaryDir).Path } else { Join-Path $root 'build\client-only\bin' }
+$clientSource = Join-Path $clientBin 'werwolf_client.exe'
+if (-not (Test-Path -LiteralPath $clientSource)) { throw "Client-Build fehlt: $clientSource" }
+$clientTarget = Join-Path $dist 'werwolf_client.exe'
+Copy-Item -LiteralPath $clientSource -Destination $clientTarget -Force
+$clientEntry = [ordered]@{
+    path = 'werwolf_client.exe'
+    url = "https://github.com/$Repo/releases/download/$tag/werwolf_client.exe"
+    sha256 = (Get-FileHash -LiteralPath $clientTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+    size = (Get-Item -LiteralPath $clientTarget).Length
+}
+$clientManifest = [ordered]@{ version = $version; notes = $Notes; files = @($clientEntry) } | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText((Join-Path $dist 'update-client.json'), $clientManifest, [System.Text.UTF8Encoding]::new($false))
+
 Write-Host ""
 Write-Host "Fertig: $dist"
 Get-ChildItem $dist | Format-Table Name, Length
@@ -79,5 +98,5 @@ Write-Host "Nächster Schritt: Auf GitHub ein Release mit dem Tag $tag anlegen u
 Write-Host "  https://github.com/$Repo/releases/new?tag=$tag"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     Write-Host "Oder mit der GitHub-CLI:"
-    Write-Host "  gh release create $tag `"$dist\werwolf.exe`" `"$dist\werwolf_server.exe`" `"$dist\update.json`" --repo $Repo --title `"Werwolf $version`""
+    Write-Host "  gh release create $tag `"$dist\werwolf.exe`" `"$dist\werwolf_server.exe`" `"$dist\werwolf_client.exe`" `"$dist\update.json`" `"$dist\update-client.json`" --repo $Repo --title `"Werwolf $version`""
 }

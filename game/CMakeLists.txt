@@ -21,6 +21,7 @@ add_library(werwolf_server_lib STATIC
     server/BotKnowledge.cpp
     server/Dialogue.cpp
     server/LocalLanguage.cpp
+    server/LanguageUnderstanding.cpp
     server/GameServer.cpp
     client/NetClient.cpp
 )
@@ -44,9 +45,11 @@ if(WIN32)
 endif()
 
 # --- Dedizierter Server ---------------------------------------------------------
+if(NOT WERWOLF_CLIENT_ONLY)
 add_executable(werwolf_server server/main.cpp)
 target_link_libraries(werwolf_server PRIVATE werwolf_server_lib)
 target_compile_definitions(werwolf_server PRIVATE WERWOLF_VERSION="${PROJECT_VERSION}")
+endif()
 
 # --- Grafischer Client ----------------------------------------------------------
 if(WERWOLF_BUILD_CLIENT)
@@ -70,7 +73,16 @@ if(WERWOLF_BUILD_CLIENT)
         client/HostNetwork.cpp
         client/Discord.cpp
     )
-    target_link_libraries(werwolf PRIVATE werwolf_server_lib werwolf_updater engine_client werwolf_audio)
+    if(WERWOLF_CLIENT_ONLY)
+        target_sources(werwolf PRIVATE client/NetClient.cpp)
+        target_link_libraries(werwolf PRIVATE werwolf_logic engine_net)
+        target_compile_definitions(werwolf PRIVATE WERWOLF_CLIENT_ONLY=1)
+        set_target_properties(werwolf PROPERTIES OUTPUT_NAME werwolf_client)
+        set(WERWOLF_UPDATE_URL "https://github.com/GG2EZBoOm/werwolf/releases/latest/download/update-client.json")
+    else()
+        target_link_libraries(werwolf PRIVATE werwolf_server_lib)
+    endif()
+    target_link_libraries(werwolf PRIVATE werwolf_updater engine_client werwolf_audio)
     set(WERWOLF_MUSIC_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/audio" CACHE PATH "Lokal importierte Musik")
     set(_music_available TRUE)
     foreach(_track day_contemplation_1 day_contemplation_2 night_foreshadow night_eyes_in_the_dark night_creeping_death)
