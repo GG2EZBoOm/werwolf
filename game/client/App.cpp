@@ -471,6 +471,7 @@ void App::loadFonts(float scale) {
     };
     load(m_fonts.ui, "Segoe UI", 16, 400);
     load(m_fonts.uiBold, "Segoe UI Semibold", 16, 400);
+    load(m_fonts.chat, "Segoe UI", 18, 400);
     load(m_fonts.small, "Segoe UI", 13, 400);
     load(m_fonts.smallBold, "Segoe UI Semibold", 13, 400);
     load(m_fonts.large, "Segoe UI Semibold", 22, 400);

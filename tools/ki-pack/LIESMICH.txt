@@ -22,6 +22,11 @@ werden individuell umformuliert und separat auf Bedeutungstreue geprueft.
 Ab 0.12.1 laufen normale Gespraeche ohne feste Antwortvorgabe und ohne pauschale
 Satzsperren. Geschichten, Erklaerungen und Nachfragen haben einen eigenen freien
 Antwortweg mit mehr Kontext und einem Korrekturversuch bei beanstandeten Entwuerfen.
+Ab 0.12.2 sind Antworten fuer kurzen, lockeren Spielchat ausgelegt: normalerweise
+ein bis zwei kurze Saetze, keine Assistentenfloskeln oder angehaengten Hilfsangebote.
+Freie Standardantworten sind auf 240 Zeichen je Sprache begrenzt, ausdruecklich
+gewuenschte Details auf 420. Zu lange Entwuerfe werden neu formuliert; Quellen und
+Unsicherheiten von Verdachtsaussagen bleiben erhalten. Enter vergroessert den Chat.
 Das kleine Modell und seine Pruefung koennen weiterhin sachliche Fehler uebersehen.
 Missverstaendnisse bleiben moeglich. Ein bereits installiertes KI-Paket funktioniert
 weiter; kein neuer Download noetig. Mitspieler nutzen auf Wunsch werwolf_client.exe

@@ -36,7 +36,7 @@ void App::drawChat(const Rect& area, bool compact) {
     const bool focused = m_ui.isFocused("chat");
 
     // Schiefertafel mit Kreide – im Spiel etwas durchscheinend
-    m_kit.slate(area, compact ? (focused ? 0.95f : 0.82f) : 1.0f);
+    m_kit.slate(area, compact ? (focused || m_chatScroll > 0.0f ? 0.98f : 0.92f) : 1.0f);
     Rect inner = area.shrink(compact ? 14.0f : 22.0f, compact ? 12.0f : 20.0f);
 
     // Kanal bestimmen (gleiche Regeln wie auf dem Server)
@@ -59,6 +59,9 @@ void App::drawChat(const Rect& area, bool compact) {
         inner.takeTop(4.0f);
         m_kit.inkLine({inner.x, inner.y}, {inner.right(), inner.y + 1.0f}, 1.2f, palette::chalk.withAlpha(0.35f), 1.0f, 9);
         inner.takeTop(10.0f);
+    } else if (focused || m_chatScroll > 0.0f) {
+        const Rect header = inner.takeTop(26.0f);
+        r.text(m_fonts.smallBold, {header.x, header.y}, L("Dorfgespräch · Mausrad: Verlauf", "Village chat · Scroll: history"), palette::chalk);
     }
 
     const Rect input = inner.takeBottom(compact ? 36.0f : 42.0f);
@@ -74,14 +77,14 @@ void App::drawChat(const Rect& area, bool compact) {
         LogEntry& e = *it;
         const bool narration = !e.isChat && e.kind == NoticeKind::Narration;
         const bool victory = !e.isChat && e.kind == NoticeKind::Victory;
-        eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : (compact ? m_fonts.handSmall : m_fonts.hand);
+        eng::Font& font = narration ? m_fonts.narration : victory ? m_fonts.uiBold : m_fonts.chat;
         if (e.wrapWidth != width || e.wrapLang != language()) {
             e.lines = font.wrap(e.isChat ? chatPrefix(e) + e.text.str() : e.text.str(), width);
             e.wrapWidth = width;
             e.wrapLang = language();
         }
         const float lh = font.lineHeight();
-        const float h = static_cast<float>(e.lines.size()) * lh + (e.isChat ? 3.0f : 6.0f);
+        const float h = static_cast<float>(e.lines.size()) * lh + (e.isChat ? 8.0f : 6.0f);
         total += h;
         y -= h;
         if (y > logArea.bottom() || y + h < logArea.y) continue;

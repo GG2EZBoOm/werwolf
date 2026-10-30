@@ -15,6 +15,7 @@ namespace ww {
 struct Fonts {
     eng::Font ui;
     eng::Font uiBold;
+    eng::Font chat;
     eng::Font small;
     eng::Font smallBold;
     eng::Font large;

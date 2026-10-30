@@ -63,10 +63,11 @@ struct LanguageResult {
 };
 
 std::string languagePayload(const LanguageRequest& request, const std::string& feedback = {});
+size_t languageReplyLimit(const LanguageRequest& request, int reason = -1);
 // Parse and structurally check a candidate. The worker also verifies its meaning before publication.
 bool languageReply(const LanguageRequest& request, const std::string& response, LanguageResult& result);
 std::string languageVerificationPayload(const LanguageRequest& request, const LanguageResult& candidate);
-std::string languageRephrasePayload(const LanguageRequest& request, int reason = -1);
+std::string languageRephrasePayload(const LanguageRequest& request, int reason = -1, const std::string& feedback = {});
 bool languageVerified(const std::string& response);
 bool languageConversationVerified(const std::string& response);
 std::string understandingPayload(const UnderstandingRequest& request);

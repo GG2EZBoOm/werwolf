@@ -314,6 +314,57 @@ TEST(FreeConversationKeepsHarmlessFirstPersonStoriesAndPlans) {
     }
 }
 
+TEST(BotRepliesStayCompactUnlessTheLatestMessageAsksForDetail) {
+    auto r = request(); r.freeConversation = true;
+    CHECK_EQ(languageReplyLimit(r), 240u);
+    r.history.push_back({"Spieler", Text::same("Erkläre mir das bitte ausführlich.")});
+    CHECK_EQ(languageReplyLimit(r), 420u);
+    r.history.push_back({"Spieler", Text::same("Kannst du das auf einen Satz kürzen?")});
+    CHECK_EQ(languageReplyLimit(r), 240u);
+    r.history.push_back({"Spieler", Text::same("Nicht ausführlich, bitte nur kurz.")});
+    CHECK_EQ(languageReplyLimit(r), 240u);
+    std::string umlauts;
+    for (int i = 0; i < 230; ++i) umlauts += "ä";
+    LanguageResult out;
+    CHECK(languageReply(r, answer(umlauts, "Short."), out));
+    CHECK(!languageReply(r, answer(std::string(241, 'a'), "Short."), out));
+    CHECK(!languageReply(r, answer("Kurz.", std::string(241, 'a')), out));
+}
+
+TEST(OverlongBotDraftIsRewrittenRatherThanCutOffMidSentence) {
+    std::atomic<int> generated{0}, checked{0};
+    std::string feedback;
+    LocalLanguage model({}, [&](const std::string& payload, std::string& out) {
+        if (verification(payload)) { ++checked; out = verified; }
+        else {
+            ++generated;
+            eng::json::Value envelope, context;
+            eng::json::parse(payload, envelope);
+            eng::json::parse(envelope.get("messages")->array[1].getString("content"), context);
+            feedback = context.getString("ueberarbeitung");
+            out = generated == 1 ? answer(std::string(300, 'a'), std::string(300, 'b'))
+                                 : answer("Ich auch. Bleib lieber bei uns.", "Me too. Better stick with us.");
+        }
+        return true;
+    });
+    auto r = request(); r.freeConversation = true;
+    const auto ticket = model.submit(r); std::optional<LanguageResult> result;
+    CHECK(waitUntil([&] { return model.take(ticket, result); }));
+    CHECK(result && result->text.de == "Ich auch. Bleib lieber bei uns.");
+    CHECK_EQ(generated.load(), 2); CHECK_EQ(checked.load(), 1);
+    CHECK(feedback.find("zu lang") != std::string::npos);
+}
+
+TEST(CompactGroundedRepliesPreserveNecessarySourcesAndUncertainty) {
+    auto r = request(); r.preserveStance = true;
+    r.stance = Text::same("Spieler hat Berta an Tag 2 beschuldigt. Clara hat dagegen erklärt, dass Berta die ganze Nacht zu Hause gewesen sei. "
+                         "Beides habe ich nicht selbst überprüft. Diese widersprüchlichen Aussagen reichen mir deshalb nicht aus, um Berta sicher als Werwolf zu bezeichnen.");
+    CHECK(languageReplyLimit(r) > 240);
+    LanguageResult out;
+    CHECK(languageReply(r, answer(r.stance.de, r.stance.en), out));
+    CHECK_EQ(out.text, r.stance);
+}
+
 TEST(FreeConversationRepairsRejectedAnswerOnceAndNeverPublishesRejectedClaims) {
     for (bool repaired : {true, false}) {
         std::atomic<int> generated{0}, checked{0};

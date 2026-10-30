@@ -202,6 +202,15 @@ wird der bisherige Gesprächspartner bevorzugt. Ein beanstandeter freier Entwurf
 konkrete Korrekturhinweise, bevor der Ersatzdialog greift. Erfundene Geschichten zählen nicht als Rollenenthüllung.
 Eine zusätzliche Themenprüfung verhindert, dass eine neue allgemeine Frage unnötig in einen
 vorherigen Verdachtsdialog eingeordnet wird.
+
+Ab **0.12.2** schreiben Bots normalerweise ein bis zwei kurze Sätze in lockerer Spielersprache,
+ohne Assistentenfloskeln, Belehrungen oder angehängte Hilfsangebote. Freie Standardantworten
+sind auf 240 Zeichen je Sprache begrenzt; ausdrücklich gewünschte Details dürfen bis zu 420 Zeichen
+haben. Zu lange Entwürfe werden einmal neu formuliert, nicht mitten im Satz abgeschnitten.
+Notwendige Quellen, Namen und Unsicherheiten bei Verdachtsaussagen bleiben vollständig erhalten.
+Der Spielchat verwendet eine größere, klare Schrift und mehr Abstand zwischen Nachrichten.
+Mit **Enter** oder beim Zurückscrollen vergrößert sich die Chatfläche zum Lesen des Verlaufs.
+
 Bei Verdachtsfragen wählt die KI einen erlaubten Grund und formuliert ihn individuell; auch Rollenhinweise,
 Ausflüchte und taktische Antworten dürfen sinngleich umformuliert werden. Die Spielentscheidung bleibt
 vorgegeben. Namen und Belegzuordnung werden technisch erhalten, weitere Bedeutungstreue wird in

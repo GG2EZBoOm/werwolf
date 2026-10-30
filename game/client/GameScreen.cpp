@@ -1189,7 +1189,10 @@ void App::drawMatchHud() {
     }
 
     // Chat tritt in den Hintergrund, wenn nichts passiert
-    const Rect chat{W - 404.0f, H - 294.0f, 380.0f, 270.0f};
+    const bool expandedChat = m_ui.isFocused("chat") || m_chatScroll > 0.0f;
+    const float chatW = std::min(expandedChat ? 620.0f : 420.0f, W - 48.0f);
+    const float chatH = std::min(expandedChat ? 480.0f : 300.0f, H - 120.0f);
+    const Rect chat{W - chatW - 24.0f, H - chatH - 24.0f, chatW, chatH};
     m_hudBlockers.push_back(chat);
     const bool chatActive = m_ui.isFocused("chat") || !m_config.fadeChat || m_time - m_lastChatActivity < 10.0 ||
                             !m_window.isMouseCaptured() || over;
