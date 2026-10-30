@@ -112,6 +112,8 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         if (!speech || !speech->evidence || speech->reply) return 0;
         const Evidence& heard = *speech->evidence;
         const auto view = match.viewFor(m_id);
+        if (speech->protectOffer && view.yourRole != Role::Protector)
+            return !isEvilRole(view.yourRole) && view.yourRole != Role::Seer ? 40 : 0;
         if (heard.kind == Evidence::Kind::RoleClaim) {
             if (heard.role == Role::Villager) return 0;
             if (view.yourRole == heard.role) return 85; // that is my role
@@ -152,6 +154,12 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         priority = 85; // that is my role – or a wolf pretends it is
     } else if (addressed && addressed->alive) {
         return 0;
+    } else if (message.protectOffer && message.seerWord) {
+        const Role mine = match.viewFor(m_id).yourRole;
+        if (isEvilRole(mine) || mine == Role::Seer || mine == Role::Protector) return 0;
+        priority = 40; // warn the seer not to give herself away in front of everyone
+    } else if (message.intent == dialogue::Intent::AskRole && message.toAll && message.askedRole == Role::Unknown) {
+        priority = 47; // a question to the whole round: several answer, one after another
     } else if (message.askedRole != Role::Unknown) {
         const Role mine = match.viewFor(m_id).yourRole;
         if (m_publicRole != message.askedRole && mine != message.askedRole && !(isEvilRole(mine) && message.askedRole == Role::Hunter))
@@ -255,6 +263,10 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         }
     }
     feelChat(match, speaker, remembered);
+    if ((speech && speech->protectOffer) || (!heard && message.protectOffer && (message.seerWord || message.addressed == m_id)))
+        considerOffer(match, speaker, (heard && heard->role == Role::Protector) || m_dialogue.claimedRole(speaker) == Role::Protector);
+    if (const auto view = match.viewFor(m_id); isEvilRole(view.yourRole) && message.claimedRole == Role::Seer)
+        if (const auto* p = view.player(speaker); !p || !ally(view, p->role)) m_suspicion[speaker] += 4.0f; // die Seherin muss weg
     if (heard && heard->kind == Evidence::Kind::Vouch) m_dialogue.support(heard->target);
     if (!message.claims.empty() || reportsFacts(message) || message.claimedRole != Role::Unknown) m_lastDiscussion = match.clock();
     const auto view = match.viewFor(m_id);
@@ -286,7 +298,13 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     const int priority = reply ? replyPriority(match, speaker, text, channel, speech) : 0;
     if (priority == 0) return;
     std::optional<Evidence> evidence;
-    Text response = styled(heard ? react(match, speaker, *heard, &evidence) : answer(match, speaker, message, contradiction, &evidence),
+    const bool offerToSeer = match.viewFor(m_id).yourRole != Role::Protector &&
+                             ((speech && speech->protectOffer) || (!heard && message.protectOffer && message.seerWord));
+    Text response = styled(offerToSeer ? tx("Seherin, verrate dich nicht vor allen – {} könnte genauso gut ein Wolf sein, der dich sucht.",
+                                            "Seer, don't give yourself away in front of everyone – {} could just as well be a wolf looking for you.",
+                                            from->name)
+                           : heard     ? react(match, speaker, *heard, &evidence)
+                                       : answer(match, speaker, message, contradiction, &evidence),
                            m_personality.style);
     if (response.empty()) return;
     // Wer dreimal dasselbe fragt, bekommt nicht dreimal denselben Satz
@@ -309,10 +327,11 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     // Questions asked in quick succession are answered one after another, like a person typing.
     // After a seer's results, whoever is not named takes a moment longer, so replies do not arrive all at once.
     const float haste = 1.0f - 0.6f * m_feelings.stress;
-    const float think = m_rng.uniform(1.2f, 2.8f) * haste + (reportsFacts(message) && priority < 90 ? m_rng.uniform(1.5f, 3.0f) : 0.0f);
+    const float think = m_rng.uniform(1.2f, 2.8f) * haste +
+        ((reportsFacts(message) && priority < 90) || priority == 47 ? m_rng.uniform(1.5f, 4.0f) : 0.0f);
     const double due = std::max(match.clock() + think, m_nextReply);
     m_nextReply = due + m_rng.uniform(2.5f, 3.5f) * haste;
-    m_replies.push_back(Reply{speaker, channel, match.phase(), match.day(), due, addressTo(from->name, response, match),
+    m_replies.push_back(Reply{speaker, channel, match.phase(), match.day(), due, offerToSeer ? response : addressTo(from->name, response, match),
                               message.intent, message.topic, Speech{evidence, true}});
 }
 
@@ -735,6 +754,11 @@ void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, co
     if (!candidates.empty() && candidates.front().priority >= 80 && responders.size() < 3)
         for (const auto& c : candidates)
             if (c.priority == 40 || c.priority == 45) { responders.push_back(c.id); break; }
+    // a question to the whole round ("möchte jemand seine Rolle nennen?") gets up to three answers
+    if (!candidates.empty() && candidates.front().priority == 47)
+        for (const auto& c : candidates)
+            if (c.priority == 47 && responders.size() < 3 && std::find(responders.begin(), responders.end(), c.id) == responders.end())
+                responders.push_back(c.id);
     for (Bot& bot : bots)
         if (match.canHear(bot.id(), speaker, channel) && !match.hidesSpeaker(bot.id(), channel, speaker))
             bot.hear(match, speaker, text, channel, std::find(responders.begin(), responders.end(), bot.id()) != responders.end(), said);

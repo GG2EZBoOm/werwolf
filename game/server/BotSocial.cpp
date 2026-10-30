@@ -87,6 +87,64 @@ Text Bot::styled(const Text& line, Personality::Style style) {
 
 namespace {
 bool uniqueRole(Role role) { return role != Role::Unknown && role != Role::Villager && role != Role::Sister && role != Role::Brother; }
+
+// Wie viel Sinn es ergibt, die eigene Rolle offen zu nennen: Der Jäger schreckt ab, Dorfälteste, Dorfdepp und Ritter
+// überstehen oder bestrafen einen Angriff, Geschwister bürgen füreinander. Wer nachts etwas herausfindet, rettet oder
+// heimlich wirkt (Seherin, Hexe, Beschützer, Fuchs, Medium …), wäre sofort das nächste Opfer und schweigt.
+float revealSense(Role role) {
+    switch (role) {
+    case Role::Hunter: return 0.6f;
+    case Role::Villager: return 0.4f;
+    case Role::Elder:
+    case Role::Idiot:
+    case Role::Knight: return 0.35f;
+    case Role::Sister:
+    case Role::Brother: return 0.3f;
+    case Role::Blacksmith:
+    case Role::Scapegoat: return 0.2f;
+    default: return 0.0f;
+    }
+}
+
+const std::array<Text, 4> kVillagerLines = {
+    Text{"Nur ein einfacher Dorfbewohner – leider ohne besondere Fähigkeiten.", "Just a simple villager – no special abilities, sadly."},
+    Text{"Ich bin Dorfbewohner, ganz ohne Fähigkeiten. Ich kann nur aufpassen und abstimmen.",
+         "I'm a villager, no abilities at all. All I can do is watch and vote."},
+    Text{"Bei mir nichts Spannendes: ganz normaler Dorfbewohner.", "Nothing exciting here: a perfectly ordinary villager."},
+    Text{"Dorfbewohner. Nichts, wofür die Wölfe mich nachts holen müssten.", "Villager. Nothing the wolves would need to come for me at night."},
+};
+const std::array<Text, 4> kSecretLines = {
+    Text{"Meine Rolle behalte ich vorerst für mich. Über konkrete Beobachtungen können wir sprechen.",
+         "I'm keeping my role to myself for now. We can discuss specific observations."},
+    Text{"Das sage ich lieber noch nicht. Wer seine Rolle zu früh nennt, ist nachts dran.",
+         "I'd rather not say yet. Whoever names their role too early is next at night."},
+    Text{"Da halte ich mich erst mal bedeckt.", "I'll keep that to myself for now."},
+    Text{"Noch nicht – erst will ich sehen, wer hier was behauptet.", "Not yet – first I want to see who claims what."},
+};
+
+// verteilt auch die unteren Bits, damit benachbarte Bots nicht dieselbe Formulierung wählen
+uint64_t mix(uint64_t x) {
+    x ^= x >> 30;
+    x *= 0xBF58476D1CE4E5B9ull;
+    x ^= x >> 27;
+    x *= 0x94D049BB133111EBull;
+    return x ^ (x >> 31);
+}
+
+int votesOn(const GameView& view, uint8_t id) {
+    int votes = 0;
+    for (const auto& p : view.players) votes += p.alive && p.vote == id;
+    return votes;
+}
+
+// Druck auf einen Bot: Angst und Stimmen gegen ihn bringen auch Vorsichtige zum Reden
+float pressureOn(const GameView& view, uint8_t id, float stress) {
+    return std::min(1.0f, stress + 0.3f * static_cast<float>(votesOn(view, id)));
+}
+}
+
+float Bot::dailyRoll(int day, uint64_t purpose) const {
+    return static_cast<float>(mix(mix(m_salt + purpose * 0xD1B54A32D192ED03ull) ^ static_cast<uint64_t>(day)) % 1000) / 1000.0f;
 }
 
 Text Bot::roleAnswer(const Match& match, Role asked, std::optional<Evidence>* evidence) const {
@@ -99,8 +157,8 @@ Text Bot::roleAnswer(const Match& match, Role asked, std::optional<Evidence>* ev
     auto plainly = [&](Role role) {
         return claim(role, tx("Ich bin {}.", "I'm {}.", roleWithArticle(role)));
     };
-    const Text secret{"Meine Rolle behalte ich vorerst für mich. Über konkrete Beobachtungen können wir sprechen.",
-                      "I'm keeping my role to myself for now. We can discuss specific observations."};
+    const Text& secret = variant(kSecretLines, mix(m_salt), static_cast<uint64_t>(match.day()));
+    const Text& villager = variant(kVillagerLines, mix(m_salt), 7);
     // Wer einmal etwas gesagt hat, bleibt dabei – sonst fliegt die Lüge auf
     if (m_publicRole != Role::Unknown) {
         if (asked != Role::Unknown && asked != m_publicRole)
@@ -108,10 +166,8 @@ Text Bot::roleAnswer(const Match& match, Role asked, std::optional<Evidence>* ev
         return claim(m_publicRole, tx("Wie gesagt: Ich bin {}.", "Like I said: I'm {}.", roleWithArticle(m_publicRole)));
     }
     // je Bot und Tag eine feste Entscheidung, damit dieselbe Frage nicht mal so, mal so beantwortet wird
-    const float roll = static_cast<float>((m_salt ^ (static_cast<uint64_t>(match.day()) * 0x9E3779B97F4A7C15ull)) % 1000) / 1000.0f;
-    int votesAgainstMe = 0;
-    for (const auto& p : view.players) votesAgainstMe += p.alive && p.vote == m_id;
-    const float pressure = std::min(1.0f, m_feelings.stress + 0.3f * static_cast<float>(votesAgainstMe));
+    const float roll = dailyRoll(match.day(), 0);
+    const float pressure = pressureOn(view, m_id, m_feelings.stress);
     if (isEvilRole(mine)) {
         // Wölfe und Vampire lügen: ein harmloser Dorfbewohner – oder, wer sich traut, ein falscher Jäger
         const bool hunterTaken = m_dialogue.otherClaimant(Role::Hunter, m_id) != kNoPlayer;
@@ -119,33 +175,98 @@ Text Bot::roleAnswer(const Match& match, Role asked, std::optional<Evidence>* ev
             return claim(Role::Hunter, {"Ich bin der Jäger. Hängt mich, und ich nehme jemanden mit.",
                                         "I'm the hunter. Hang me and I'll take someone with me."});
         if (asked != Role::Unknown) return tx("Nein, {} bin ich nicht.", "No, I'm not {}.", roleWithArticle(asked));
-        if (roll < 0.65f) return claim(Role::Villager, {"Nur ein einfacher Dorfbewohner – leider ohne besondere Fähigkeiten.",
-                                                         "Just a simple villager – no special abilities, sadly."});
+        if (roll < 0.55f) return claim(Role::Villager, villager);
         return secret;
     }
     if (asked != Role::Unknown && asked != mine) return tx("Nein, {} bin ich nicht.", "No, I'm not {}.", roleWithArticle(asked));
     if (isPublicRole(mine)) return plainly(mine);
-    // Wie gern man die eigene Rolle verrät: Der Jäger schreckt ab, ein Dorfbewohner verliert nichts,
-    // Hexe und Beschützer wären sofort das nächste Opfer und schweigen lieber – außer unter Druck
-    float reveal = 0.3f;
-    switch (mine) {
-    case Role::Hunter: reveal = 0.6f; break;
-    case Role::Villager: reveal = 0.55f; break;
-    case Role::Elder: reveal = 0.4f; break;
-    case Role::Witch:
-    case Role::Protector:
-    case Role::Seer: reveal = 0.08f; break;
-    default: break;
-    }
+    // Nur wo es Sinn ergibt – Seherin, Hexe & Co. verraten sich höchstens, wenn ihnen der Strick droht
+    const float sense = revealSense(mine);
+    float reveal = sense > 0.0f ? sense + 0.5f * pressure : 0.03f + 0.25f * static_cast<float>(votesOn(view, m_id));
     if (asked == mine) reveal += 0.15f; // direkt gefragt
-    if (roll >= std::min(0.95f, reveal + 0.5f * pressure)) return secret;
+    if (roll >= std::min(0.95f, reveal)) return secret;
     if (mine == Role::Hunter)
         return claim(mine, {"Ich bin der Jäger. Hängt mich, und ich nehme jemanden mit.", "I'm the hunter. Hang me and I'll take someone with me."});
-    if (mine == Role::Villager)
-        return claim(mine, {"Nur ein einfacher Dorfbewohner – leider ohne besondere Fähigkeiten.", "Just a simple villager – no special abilities, sadly."});
+    if (mine == Role::Villager) return claim(mine, villager);
     if (const Text hint = roleHint(match); !hint.empty())
         return claim(mine, tx("Ich bin {}. {}", "I'm {}. {}", roleWithArticle(mine), hint));
     return plainly(mine);
+}
+
+Text Bot::volunteerRole(const Match& match, std::optional<Evidence>* evidence) const {
+    const auto view = match.viewFor(m_id);
+    Role shown = view.yourRole;
+    const float pressure = pressureOn(view, m_id, m_feelings.stress);
+    float sense = revealSense(shown);
+    if (isEvilRole(shown)) {
+        // gelogen: meistens ein harmloser Dorfbewohner, mutige oder bedrängte Wölfe geben den Jäger
+        const bool hunterTaken = m_dialogue.otherClaimant(Role::Hunter, m_id) != kNoPlayer;
+        const float bluff = dailyRoll(0, 2);
+        shown = !hunterTaken && bluff < 0.15f * m_personality.boldness + 0.3f * pressure ? Role::Hunter : Role::Villager;
+        sense = 0.3f;
+    }
+    if (sense <= 0.0f || isPublicRole(shown)) return {}; // die einen wären sofort das nächste Opfer, die anderen kennt man ohnehin
+    // je Bot und Tag eine feste Entscheidung: die meisten schweigen, unter Druck reden mehr
+    const float roll = dailyRoll(match.day(), 1);
+    if (roll >= std::min(0.7f, sense * (0.4f + pressure) * m_personality.talk)) return {};
+    if (evidence) *evidence = Evidence{Evidence::Kind::RoleClaim, m_id, shown == Role::Villager ? -0.2f : -0.5f, shown};
+    if (shown == Role::Hunter)
+        return {"Zur Info: Ich bin der Jäger. Wer mich hängt, nimmt jemanden mit.", "For the record: I'm the hunter. Whoever hangs me takes someone along."};
+    if (shown == Role::Villager)
+        return {"Damit ihr wisst, woran ihr seid: Ich bin nur ein einfacher Dorfbewohner.", "So you know where you stand: I'm just a simple villager."};
+    return tx("Damit ihr Anhaltspunkte habt: Ich bin {}.", "To give you something to go on: I'm {}.", roleWithArticle(shown));
+}
+
+void Bot::considerOffer(const Match& match, uint8_t speaker, bool claimsProtector) {
+    const auto view = match.viewFor(m_id);
+    const auto* from = match.find(speaker);
+    if (!from || !from->alive || speaker == m_id || m_whisperTo != kNoPlayer || m_publicRole != Role::Unknown) return;
+    if (view.yourRole == Role::Seer) {
+        // Ein Lügner, ein Verdächtiger oder ein zweiter "Beschützer" erfährt nichts – Vertrauen und Vorsicht entscheiden
+        const bool doubtful = m_dialogue.liar(speaker) || suspicion(match, speaker) > 0.8f || !claimsProtector ||
+                              m_dialogue.otherClaimant(Role::Protector, speaker) != kNoPlayer;
+        const float chance = std::clamp(0.45f + 0.8f * (m_personality.trust - 0.95f) - 0.3f * (m_personality.caution - 0.5f), 0.15f, 0.8f);
+        if (doubtful || !m_rng.chance(chance)) return;
+    } else if (!(isEvilRole(view.yourRole) && packSpeaker(match) && !ally(view, view.player(speaker) ? view.player(speaker)->role : Role::Unknown) &&
+                 m_rng.chance(0.3f * m_personality.boldness))) {
+        return; // nur ein Wolf lügt hier: als "Seherin" lässt er den Beschützer seine Nacht verschwenden
+    }
+    m_whisperTo = speaker;
+    m_whisperRole = Role::Seer;
+    m_whisperDay = match.day();
+}
+
+void Bot::whisper(const Match& match, const SayFn& say) {
+    if (m_whisperTo == kNoPlayer) return;
+    const auto* me = match.find(m_id);
+    const auto* to = match.find(m_whisperTo);
+    if (!me || !me->alive || !to || !to->alive || match.day() > m_whisperDay + 1) {
+        m_whisperTo = kNoPlayer;
+        return;
+    }
+    if (match.viewFor(m_id).yourRole == Role::Seer &&
+        (m_dialogue.liar(m_whisperTo) || suspicion(match, m_whisperTo) > 0.8f || m_dialogue.otherClaimant(Role::Protector, m_whisperTo) != kNoPlayer)) {
+        m_whisperTo = kNoPlayer;
+        return;
+    }
+    // nur im Nähe-Chat, nie vor allen in der Versammlung: tagsüber geht man hin, nachts und morgens nur, wer ohnehin nah ist
+    const Phase phase = match.phase();
+    if ((phase != Phase::Day && phase != Phase::Night && phase != Phase::Morning) || !m_replies.empty()) return;
+    if (distanceXZ(me->position, to->position) > 4.0f || !match.hasLineOfSight(me->position, to->position)) {
+        if (phase != Phase::Day) return;
+        m_companion = m_whisperTo; // hingehen
+        m_companionTime = 20.0f;
+        m_companionOffset = Vec2{1.2f, 0.0f};
+        return;
+    }
+    Speech speech;
+    speech.evidence = Evidence{Evidence::Kind::RoleClaim, m_id, -0.5f, m_whisperRole};
+    speech.topic = m_id;
+    m_publicRole = m_whisperRole;
+    lookAt(m_whisperTo, match.clock() + 4.0);
+    const std::string name = to->name;
+    m_whisperTo = kNoPlayer;
+    speak(say, tx("Psst, {}: Ich bin die Seherin. Pass heute Nacht auf mich auf.", "Psst, {}: I'm the seer. Watch over me tonight.", name), false, speech);
 }
 
 // --- Täuschung der Wölfe -----------------------------------------------------

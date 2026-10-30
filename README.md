@@ -96,6 +96,17 @@ Bots reagieren auf deutsche und englische Spielernachrichten, zum Beispiel:
   dem Dorf hilft (der Jäger schreckt damit ab, Hexe oder Seherin schweigen lieber), Werwölfe und Vampire lügen
   („nur ein einfacher Dorfbewohner“, ein falscher Jäger). Jeder bleibt bei dem, was er einmal gesagt hat; wer die
   Rolle wirklich hat, widerspricht einer falschen Behauptung, und zwei Ansprüche auf dieselbe Rolle machen misstrauisch.
+- `Möchte jemand seine Rolle nennen?`, `Welche Rollen habt ihr?` – eine Frage an die ganze Runde beantworten bis zu
+  drei Bots nacheinander, die meisten halten sich bedeckt. Von sich aus nennen Bots ihre Rolle nur, wo es Sinn ergibt:
+  Jäger, Dorfälteste, Dorfdepp, Ritter, Geschwister oder ein einfacher Dorfbewohner, unter Druck öfter. Seherin,
+  Hexe, Beschützer, Fuchs und andere Nachtrollen schweigen. Wölfe und Vampire geben sich dabei als Dorfbewohner
+  oder Jäger aus.
+- `Ich bin der Beschützer. Seherin, sag mir heimlich, wer du bist – ich passe heute Nacht auf dich auf.` – die Runde
+  warnt die Seherin, sich nicht vor allen zu verraten. Die echte Seherin flüstert es am nächsten Tag im Nähe-Chat,
+  wenn sie dem Beschützer traut (kein Lügner, nicht verdächtig, kein zweiter „Beschützer“). Der Beschützer-Bot
+  bewacht nachts eine glaubwürdige Seherin. Wölfe nutzen genau das: Sie bieten selbst falschen Schutz an, um die
+  Seherin zu finden, oder flüstern ein falsches „Ich bin die Seherin“. Wer ihnen die Seherin verrät, ist nachts ihr
+  nächstes Opfer. Der echte Beschützer widerspricht einem falschen Angebot.
 - Eine Seherin kann vor der ersten Nacht noch niemanden geprüft haben und danach höchstens eine Person pro Nacht.
   Mitgezählt werden nur ausdrücklich genannte Prüfungen („gecheckt“, „geprüft“), keine bloßen Meinungen.
 - `Emil verhält sich komisch`, `Berta raus!`, `wir voten alle Berta`, `Anton du bist sus` – auch Umgangssprache

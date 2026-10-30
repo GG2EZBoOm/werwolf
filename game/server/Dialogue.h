@@ -36,6 +36,9 @@ struct Message {
     // The results are framed as a check ("gecheckt", or in the same message as "ich bin Seher"). Only these
     // count towards "one check per night": a claimed seer's later "Berta ist unschuldig" may be an opinion.
     bool explicitCheck = false;
+    bool toAll = false;        // to the whole round: "möchte jemand …", "welche Rollen habt ihr?"
+    bool protectOffer = false; // "ich passe auf dich auf", "Seherin, ich beschütze dich"
+    bool seerWord = false;     // mentions the seer at all
     bool correction = false;
     bool exclusiveAlibi = false;
 };

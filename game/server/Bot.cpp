@@ -295,6 +295,7 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
     observe(dt, match, view);
     roleplay(match, say);
     speakPlanned(match, say);
+    whisper(match, say);
 
     // Augenzeuge: wer nachts als (halbe) Bestie gesehen wird, ist verdächtig
     if (me->alive && view.phase == Phase::Night) {
@@ -362,6 +363,24 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 speak(say, m_rng.pick(kEndLines), false);
             } else if (me->alive && me->role == Role::Jester && m_rng.chance(0.6f)) {
                 speak(say, m_rng.pick(kJesterLines), false);
+            } else if (me->alive && view.phase == Phase::Assembly && view.day >= 2 && !m_offered && m_publicRole == Role::Unknown &&
+                       (view.yourRole == Role::Protector || packSpeaker(match)) && m_dialogue.otherClaimant(Role::Seer, m_id) == kNoPlayer &&
+                       dailyRoll(view.day, 3) < (view.yourRole == Role::Protector ? 0.25f : 0.2f * m_personality.boldness)) {
+                // Der Beschützer bietet der Seherin Schutz an – oder ein Wolf stellt ihr genau damit eine Falle
+                m_offered = true;
+                m_publicRole = Role::Protector;
+                Speech offer;
+                offer.evidence = Evidence{Evidence::Kind::RoleClaim, m_id, -0.5f, Role::Protector};
+                offer.protectOffer = true;
+                speak(say, {"Ich bin der Beschützer. Seherin, sag mir heimlich, wer du bist – dann passe ich heute Nacht auf dich auf.",
+                            "I'm the protector. Seer, tell me in secret who you are – then I'll watch over you tonight."},
+                      false, offer);
+            } else if (me->alive && view.phase == Phase::Assembly && m_publicRole == Role::Unknown && !volunteerRole(match, nullptr).empty()) {
+                // Von sich aus die Rolle nennen, wo es Sinn ergibt (Jäger, Dorfälteste …) – Wölfe und Vampire lügen dabei
+                std::optional<Evidence> claim;
+                const Text line = volunteerRole(match, &claim);
+                m_publicRole = claim->role;
+                speak(say, line, false, {claim});
             } else if (me->alive && view.phase == Phase::Assembly && view.day >= 2 && packSpeaker(match) && m_fakeReportDay != view.day &&
                        (m_claimedSeer || (!packClaimedSeer(match) && m_rng.chance(0.55f * m_personality.boldness)))) {
                 // Ein Wolf gibt sich als Seherin aus: belastet einen Unschuldigen oder entlastet einen bedrängten Gefährten
@@ -973,9 +992,23 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
                 match.interact(m_id, Interaction::Track, target);
         }
         if (view.can(AbilityProtect)) {
-            const uint8_t near = nearestPlayer(match, me.position, isAlive, kProtectRange);
-            const uint8_t target = (near != kNoPlayer && m_rng.chance(0.7f)) ? near : m_id;
-            match.interact(m_id, Interaction::Protect, target);
+            // Wer sich als Seherin zu erkennen gegeben hat (und kein Lügner ist), bekommt den Schutz – dafür geht man zu ihr
+            uint8_t ward = kNoPlayer;
+            for (const Match::Player& p : match.players())
+                if (p.alive && p.id != m_id && m_dialogue.claimedRole(p.id) == Role::Seer && !m_dialogue.liar(p.id) && suspicion(match, p.id) < 1.0f)
+                    ward = p.id;
+            const Match::Player* seer = match.find(ward);
+            if (seer && match.checkInteraction(m_id, Interaction::Protect, ward).empty()) {
+                match.interact(m_id, Interaction::Protect, ward);
+            } else if (seer && m_phaseTime < 45.0f && ward != view.lastProtected) {
+                m_target = {seer->position.x, seer->position.z};
+                m_goHome = false;
+                m_staysOut = true;
+            } else {
+                const uint8_t near = nearestPlayer(match, me.position, isAlive, kProtectRange);
+                const uint8_t target = (near != kNoPlayer && m_rng.chance(0.7f)) ? near : m_id;
+                match.interact(m_id, Interaction::Protect, target);
+            }
         }
         if (view.can(AbilityCupid)) {
             const uint8_t near = nearestPlayer(match, me.position, isAlive, kCupidRange);

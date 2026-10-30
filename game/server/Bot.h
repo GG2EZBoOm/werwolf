@@ -38,6 +38,7 @@ public:
         bool reply = false;          // auf Antworten antworten Bots nicht, sonst reden sie endlos weiter
         uint8_t topic = kNoPlayer;   // worum es geht: wer es gerade gehört hat, muss es nicht wiederholen
         bool alarm = false;          // "Hilfe, ein Werwolf!": wer es hört, flieht vor topic
+        bool protectOffer = false;   // "Seherin, sag mir heimlich, wer du bist – ich passe auf dich auf"
     };
 
     // Wie ein Bot spielt und schreibt. Jeder Bot im Spiel bekommt eigene Züge; neutral ist der Standard.
@@ -101,6 +102,13 @@ private:
     bool knowsFirstHand(const Match& match, const Evidence& heard) const;
     // Antwort auf "Welche Rolle hast du?": manchmal die Wahrheit, bei Wölfen und Vampiren manchmal eine Lüge
     Text roleAnswer(const Match& match, Role asked, std::optional<Evidence>* evidence) const;
+    // von sich aus eine Rolle nennen (wahr oder gelogen), damit das Dorf Anhaltspunkte hat
+    Text volunteerRole(const Match& match, std::optional<Evidence>* evidence) const;
+    // je Bot, Tag und Anlass fest gewürfelt (0..1), damit ein Entschluss nicht bei jeder Gelegenheit neu fällt
+    float dailyRoll(int day, uint64_t purpose) const;
+    // Schutzangebot an die Seherin: die echte flüstert es einem vertrauenswürdigen Beschützer, ein Wolf lügt
+    void considerOffer(const Match& match, uint8_t speaker, bool claimsProtector);
+    void whisper(const Match& match, const SayFn& say);
     // Gehört other zum eigenen Rudel oder Clan? (nur für Wölfe und Vampire wahr)
     bool ally(const GameView& view, Role other) const;
     // Kann der Bot eine Rollen- oder Seherangabe über target selbst prüfen? +1 wahr, -1 gelogen, 0 unbekannt
@@ -232,6 +240,10 @@ private:
     double m_roleSpeakAfter = 0;
     int m_roleHintDay = -1;
     Role m_publicRole = Role::Unknown;    // welche Rolle der Bot öffentlich genannt hat (wahr oder gelogen)
+    uint8_t m_whisperTo = kNoPlayer;      // wem der Bot tagsüber leise seine (angebliche) Rolle verraten will
+    Role m_whisperRole = Role::Unknown;
+    int m_whisperDay = -1;
+    bool m_offered = false;               // Schutz für die Seherin schon angeboten (echt oder als Falle)
     uint8_t m_fleeFrom = kNoPlayer;       // vor wem der Bot gerade flieht
     double m_fleeUntil = 0;
     bool m_shouted = false;               // diese Nacht schon um Hilfe gerufen

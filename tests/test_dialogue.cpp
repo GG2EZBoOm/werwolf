@@ -859,6 +859,150 @@ TEST(BotsNameTheirRolesTruthfullyOrNot) {
     CHECK(v.heard(1, "ich bin der Jäger, nicht du"));
 }
 
+TEST(BotsNameTheirRoleOnlyWhereItMakesSense) {
+    CHECK(parseLine("möchte jemand seine rolle nennen").question);
+    CHECK(parseLine("möchte jemand seine rolle nennen").toAll);
+    CHECK_EQ(parseLine("Welche Rollen habt ihr?").intent, Intent::AskRole);
+    CHECK(parseLine("Wer will seine Rolle sagen?").toAll);
+    CHECK(!parseLine("Anton, welche Rolle hast du?").toAll);
+    CHECK(!parseLine("kann sein, dass Anna ein Werwolf ist").question);
+    CHECK(weight(parseLine("kann sein, dass Anna ein Werwolf ist"), 2) > 0.0f);
+
+    // a question to the whole round gets several answers – the seer bot keeps her secret
+    int rounds = 0, severalAnswers = 0, seerTold = 0;
+    for (uint64_t seed = 1; seed <= 6; ++seed) {
+        Village v(seed);
+        phase(v.match, Phase::Assembly);
+        v.advance(0.5f);
+        v.said.clear();
+        v.human("Möchte jemand seine Rolle nennen?");
+        v.advance(12.0f);
+        std::vector<uint8_t> speakers;
+        for (const auto& [id, text] : v.said)
+            if (text.de.find("Spieler") != std::string::npos && std::find(speakers.begin(), speakers.end(), id) == speakers.end())
+                speakers.push_back(id);
+        ++rounds;
+        severalAnswers += speakers.size() >= 2;
+        seerTold += v.heard(1, "bin die Seherin");
+    }
+    std::printf("    Asked the round: several answers in %d of %d, the seer told %d times\n", severalAnswers, rounds, seerTold);
+    CHECK(severalAnswers * 3 >= rounds * 2);
+    CHECK(seerTold <= 1);
+
+    // unasked, only some name their role – and only where it makes sense; wolves lie about it
+    struct Tally { Role role; int volunteered = 0; int truthful = 0; };
+    std::vector<Tally> tally = {{Role::Villager}, {Role::Hunter}, {Role::Elder}, {Role::Seer}, {Role::Witch},
+                                {Role::Protector}, {Role::Fox}, {Role::Werewolf}};
+    for (Tally& t : tally)
+        for (uint64_t seed = 1; seed <= 20; ++seed) {
+            Conversation c(t.role, seed);
+            c.advance(55.0f);
+            for (const Text& line : c.replies)
+                if (line.de.find("Damit ihr") != std::string::npos || line.de.find("Zur Info") != std::string::npos) {
+                    ++t.volunteered;
+                    t.truthful += line.de.find(roleName(t.role, Lang::German)) != std::string::npos;
+                    break;
+                }
+        }
+    for (const Tally& t : tally) std::printf("    %s: named the role unasked in %d of 20\n", roleName(t.role, Lang::German), t.volunteered);
+    auto of = [&](Role role) -> const Tally& { return *std::find_if(tally.begin(), tally.end(), [&](const Tally& t) { return t.role == role; }); };
+    CHECK(of(Role::Hunter).volunteered >= 2 && of(Role::Hunter).volunteered < 20);
+    CHECK(of(Role::Villager).volunteered >= 1 && of(Role::Villager).volunteered < 15); // some, not all
+    CHECK_EQ(of(Role::Hunter).truthful, of(Role::Hunter).volunteered);
+    for (Role quiet : {Role::Seer, Role::Witch, Role::Protector, Role::Fox}) CHECK_EQ(of(quiet).volunteered, 0);
+    CHECK(of(Role::Werewolf).volunteered >= 1);
+    CHECK_EQ(of(Role::Werewolf).truthful, 0);
+}
+
+TEST(TheSeerWhispersToAProtectorSheTrusts) {
+    CHECK(parseLine("Seherin, ich passe heute Nacht auf dich auf").protectOffer);
+    CHECK(parseLine("ich beschütze die Seherin").seerWord);
+    CHECK(!parseLine("Anna ist ein Werwolf").protectOffer);
+    const std::string offer = "Ich bin der Beschützer. Seherin, sag mir heimlich, wer du bist – ich passe heute Nacht auf dich auf.";
+
+    // Anton is the seer, Anna a wolf. The offer is made in front of everyone, the answer comes quietly the next day.
+    int whispered = 0, warned = 0, wolfLied = 0, doubted = 0;
+    for (uint64_t seed = 1; seed <= 10; ++seed) {
+        Village v(seed);
+        phase(v.match, Phase::Assembly);
+        v.advance(0.5f);
+        v.human(offer);
+        v.advance(8.0f);
+        warned += v.heard(3, "verrate dich nicht") || v.heard(4, "verrate dich nicht") || v.heard(5, "verrate dich nicht");
+        phase(v.match, Phase::Day);
+        v.advance(60.0f);
+        whispered += v.heard(1, "Psst, Spieler: Ich bin die Seherin");
+        wolfLied += v.heard(2, "Psst, Spieler: Ich bin die Seherin");
+
+        // a second "protector" in the room: she tells neither of them
+        Village rival(seed);
+        phase(rival.match, Phase::Assembly);
+        rival.advance(0.5f);
+        Bot::Speech claim;
+        claim.evidence = Bot::Evidence{Bot::Evidence::Kind::RoleClaim, 4, -0.5f, Role::Protector};
+        for (Bot& b : rival.bots) b.hear(rival.match, 4, Text::same("Ich bin der Beschützer."), ChatChannel::Global, false, &claim);
+        rival.human(offer);
+        rival.advance(8.0f);
+        phase(rival.match, Phase::Day);
+        rival.advance(60.0f);
+        doubted += rival.heard(1, "Psst");
+    }
+    std::printf("    Offer to the seer: she whispered back in %d of 10, the wolf faked it in %d, warnings in %d; with a rival protector %d\n",
+                whispered, wolfLied, warned, doubted);
+    CHECK(whispered >= 2 && whispered < 10);
+    CHECK(wolfLied >= 1);
+    CHECK(warned >= 5);
+    CHECK_EQ(doubted, 0);
+
+    // a wolf bot's offer is a trap: the real protector calls it out
+    Village trap(3, {Role::Villager, Role::Seer, Role::Werewolf, Role::Protector, Role::Villager, Role::Villager});
+    phase(trap.match, Phase::Assembly);
+    trap.advance(0.5f);
+    Bot::Speech lure;
+    lure.evidence = Bot::Evidence{Bot::Evidence::Kind::RoleClaim, 2, -0.5f, Role::Protector};
+    lure.protectOffer = true;
+    for (Bot& b : trap.bots) b.hear(trap.match, 2, Text::same(offer), ChatChannel::Global, true, &lure);
+    trap.advance(6.0f);
+    CHECK(trap.heard(3, "ich bin der Beschützer, nicht du"));
+}
+
+TEST(TheProtectorGuardsAKnownSeerAndTheWolvesHuntHer) {
+    // the human seer has made herself known: the protector bot goes to her at night and watches over her
+    int guarded = 0, nights = 0;
+    for (uint64_t seed = 1; seed <= 6; ++seed) {
+        Village v(seed, {Role::Seer, Role::Protector, Role::Villager, Role::Villager, Role::Villager, Role::Werewolf});
+        phase(v.match, Phase::Assembly);
+        v.advance(0.5f);
+        v.human("Ich bin die Seherin.");
+        v.advance(6.0f);
+        phase(v.match, Phase::Night);
+        v.advance(50.0f);
+        ++nights;
+        guarded += v.match.find(1)->lastProtected == 0;
+    }
+    std::printf("    The protector bot watched over the known seer in %d of %d nights\n", guarded, nights);
+    CHECK(guarded * 3 >= nights * 2);
+
+    // whoever whispers "I'm the seer" to a wolf is the pack's next victim
+    int toldTheWolf = 0, keptQuiet = 0;
+    for (uint64_t seed = 1; seed <= 8; ++seed)
+        for (const bool whisper : {true, false}) {
+            Village v(seed, {Role::Seer, Role::Villager, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager});
+            phase(v.match, Phase::Day);
+            v.advance(0.5f);
+            if (whisper) {
+                v.match.teleport(0, world().ground(4, 9));
+                v.match.teleport(2, world().ground(5, 9));
+                v.bots[1].hear(v.match, 0, Text::same("Psst, Anna: Ich bin die Seherin. Pass heute Nacht auf mich auf."), ChatChannel::Nearby, false);
+            }
+            phase(v.match, Phase::Night);
+            v.advance(60.0f);
+            (whisper ? toldTheWolf : keptQuiet) += !v.match.find(0)->alive;
+        }
+    std::printf("    The seer was killed in %d of 8 nights after whispering to the wolf, %d of 8 otherwise\n", toldTheWolf, keptQuiet);
+    CHECK(toldTheWolf > keptQuiet);
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

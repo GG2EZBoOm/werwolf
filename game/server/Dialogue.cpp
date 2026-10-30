@@ -141,6 +141,15 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
     if (result.addressed != kNoPlayer) listener = result.addressed;
     if (!t.empty() && has(Tokens{t.front()}, {"ist", "sind", "bist", "hast", "habt", "warst", "was", "what", "is", "are", "did", "do", "were", "beweise", "evidence"}))
         result.question = true;
+    // Requests count as questions, with or without "?": "möchte jemand seine Rolle nennen", "nennt mal eure Rollen"
+    if (!t.empty() && has(Tokens{t.front()}, {"moechte", "moechtet", "will", "wollt", "kann", "koennt", "koennte", "wuerde", "wuerdet", "mag",
+                                            "magst", "nennt", "sagt", "verratet", "erzaehlt", "can", "could", "would", "tell", "share"}) &&
+        !(t.size() >= 2 && has(Tokens{t[1]}, {"sein", "be"}))) // "kann sein, dass Anna lügt" stays a statement
+        result.question = true;
+    result.toAll = has(t, {"jemand", "wer", "ihr", "euch", "eure", "euer", "alle", "who", "anyone", "anybody", "everyone", "somebody"});
+    result.seerWord = has(t, {"seherin", "seher", "seer"});
+    result.protectOffer = has(t, {"schuetze", "schuetzen", "beschuetze", "beschuetzen", "schutz", "bewache", "bewachen", "protect", "guard"}) ||
+        (has(t, {"passe", "pass", "passen"}) && has(t, {"auf"})) || has(t, {"aufpassen"}) || phrase(t, "watch over");
     result.correction = phrase(t, "lag falsch") || phrase(t, "nehme zurueck") || phrase(t, "was wrong") ||
         phrase(t, "take it back") || has(t, {"korrigiere", "korrektur", "correction"});
     result.exclusiveAlibi = phrase(t, "ganze nacht") || phrase(t, "all night") || phrase(t, "entire night") || has(t, {"durchgehend", "ausschliesslich"});
@@ -152,7 +161,7 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         else if (has(t, {"warum", "wieso", "weshalb", "why", "beweis", "beweise", "evidence"})) result.intent = Intent::AskReason;
         else if (has(t, {"wo", "where"})) result.intent = Intent::AskAlibi;
         else if (has(t, {"unschuldig", "innocent", "safe", "vertrauen", "trust"})) result.intent = Intent::AskInnocence;
-        else if (has(t, {"rolle", "role", "bist"}) || phrase(t, "are you") ||
+        else if (has(t, {"rolle", "rollen", "role", "roles", "bist"}) || phrase(t, "are you") ||
                  (roleIn(t) != Role::Unknown && has(t, {"wer", "who"}))) {
             result.intent = Intent::AskRole;
             result.askedRole = roleIn(t);
@@ -171,6 +180,8 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         else if (has(t, {"wald", "forest", "woods"})) result.place = Place::Forest;
         if (result.place != Place::Unknown) result.intent = Intent::Alibi;
     } else if (has(t, {"hallo", "hi", "hey", "hello", "moin", "servus", "huhu", "guten"})) result.intent = Intent::Greeting;
+    // "Ich bin der Beschützer. Seherin, wer bist du?" claims a role even though it ends in a question
+    if (result.question && self && result.claimedRole == Role::Unknown) result.claimedRole = claimedRoleIn(t);
 
     // Separate clauses so "Anna ist unschuldig, aber Berta ist ein Wolf" is not flattened.
     std::vector<Tokens> clauses(1);
