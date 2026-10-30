@@ -112,6 +112,12 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         if (!speech || !speech->evidence || speech->reply) return 0;
         const Evidence& heard = *speech->evidence;
         const auto view = match.viewFor(m_id);
+        if (heard.kind == Evidence::Kind::RoleClaim) {
+            if (heard.role == Role::Villager) return 0;
+            if (view.yourRole == heard.role) return 85; // that is my role
+            const auto* first = match.find(m_dialogue.otherClaimant(heard.role, speaker));
+            return first && first->alive ? 40 : 0;
+        }
         if (heard.target == m_id) return heard.weight > 0 ? 90 : 0;
         if (heard.kind == Evidence::Kind::Seer && view.yourRole == Role::Seer) return 85; // that is my role
         dialogue::Message asMessage;
@@ -140,13 +146,23 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
         priority = 95; // confirm or refute what was said about me
     } else if (accused) {
         priority = 90;
-    } else if ((message.claimedRole == Role::Seer && match.viewFor(m_id).yourRole == Role::Seer) ||
+    } else if ((message.claimedRole != Role::Unknown && message.claimedRole != Role::Villager &&
+                match.viewFor(m_id).yourRole == message.claimedRole) ||
                wouldCounterclaim(match, message, speaker)) {
         priority = 85; // that is my role – or a wolf pretends it is
     } else if (addressed && addressed->alive) {
         return 0;
+    } else if (message.askedRole != Role::Unknown) {
+        const Role mine = match.viewFor(m_id).yourRole;
+        if (m_publicRole != message.askedRole && mine != message.askedRole && !(isEvilRole(mine) && message.askedRole == Role::Hunter))
+            return 0;
+        priority = 70;
     } else if (message.topic == m_id) {
         priority = 70;
+    } else if (message.claimedRole != Role::Unknown && message.claimedRole != Role::Villager &&
+               match.find(m_dialogue.otherClaimant(message.claimedRole, speaker)) &&
+               match.find(m_dialogue.otherClaimant(message.claimedRole, speaker))->alive) {
+        priority = 40; // a second claim on the same role
     } else if (reportsFacts(message)) {
         priority = 40; // a seer's results deserve a reaction from the room
     } else if (addressed || (topic && !topic->alive)) {
@@ -202,7 +218,9 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         message.topic = heard->target;
         // A bot presenting seer results claims the seer, true or not; later reveals can expose a liar.
         message.seerReport = heard->kind == Evidence::Kind::Seer;
+        message.explicitCheck = message.seerReport; // "Ich habe X geprüft" from a bot is always framed as a check
         if (message.seerReport) message.claimedRole = Role::Seer;
+        if (heard->kind == Evidence::Kind::RoleClaim) message.claimedRole = heard->role;
     } else {
         message = understand(match, speaker, text);
     }
@@ -222,7 +240,20 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         std::erase_if(remembered.claims, [&](const dialogue::Claim& c) { return c.fact && revealedAlready(c.target); });
         std::erase_if(remembered.roleReports, [&](const dialogue::RoleReport& r) { return revealedAlready(r.target); });
     }
+    // A first claim on a special role ("ich bin der Jäger") gives the village a clue who it is not – unless a
+    // second player claims the same role, then one of them lies.
+    const bool specialClaim = message.claimedRole != Role::Unknown && message.claimedRole != Role::Villager &&
+        message.claimedRole != Role::Seer && m_dialogue.claimedRole(speaker) != message.claimedRole;
+    const auto* earlierClaimant = specialClaim ? match.find(m_dialogue.otherClaimant(message.claimedRole, speaker)) : nullptr;
     const bool contradiction = m_dialogue.remember(speaker, remembered, match.day());
+    if (specialClaim && !isEvilRole(match.viewFor(m_id).yourRole)) {
+        if (earlierClaimant && earlierClaimant->alive) {
+            m_suspicion[speaker] += 0.8f;
+            m_suspicion[earlierClaimant->id] += 0.3f;
+        } else {
+            m_suspicion[speaker] -= 0.4f;
+        }
+    }
     feelChat(match, speaker, remembered);
     if (heard && heard->kind == Evidence::Kind::Vouch) m_dialogue.support(heard->target);
     if (!message.claims.empty() || reportsFacts(message) || message.claimedRole != Role::Unknown) m_lastDiscussion = match.clock();
@@ -235,6 +266,8 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         // A seer checks once per night: before the first night nobody, on day 2 at most one person.
         if (message.seerReport && m_dialogue.seerChecks(speaker) > nightsSoFar(match)) m_dialogue.judge(speaker, false);
     }
+    if (message.claimedRole != Role::Unknown && message.claimedRole != Role::Villager && message.claimedRole != Role::Seer &&
+        view.yourRole == message.claimedRole) m_dialogue.judge(speaker, false);
     // Wolves remember who is dangerous to the pack: whoever accuses one of them, a seer most of all.
     if (isEvilRole(view.yourRole))
         for (const auto& c : message.claims) {
@@ -261,6 +294,7 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     if (previous && previous->speaker == speaker && previous->text == addressTo(from->name, response, match))
         response = styled({"Wie gesagt – dazu habe ich gerade nichts Neues.", "Like I said – nothing new from me on that right now."},
                           m_personality.style);
+    if (evidence && evidence->kind == Evidence::Kind::RoleClaim) m_publicRole = evidence->role;
     // a wolf who answers with seer results has now claimed the seer
     if (evidence && evidence->kind == Evidence::Kind::Seer && isEvilRole(view.yourRole)) {
         m_claimedSeer = true;
@@ -347,6 +381,14 @@ Text Bot::react(const Match& match, uint8_t speaker, const Evidence& heard, std:
     asMessage.seerReport = heard.kind == Kind::Seer;
     asMessage.claims.push_back({heard.target, heard.weight, true});
     if (wouldCounterclaim(match, asMessage, speaker)) return counterclaim(match, speaker, evidence);
+    if (heard.kind == Kind::RoleClaim) {
+        if (view.yourRole == heard.role)
+            return tx("Moment – ich bin {}, nicht du. Du lügst.", "Hold on – I'm {}, not you. You're lying.", roleWithArticle(heard.role));
+        if (const auto* first = match.find(m_dialogue.otherClaimant(heard.role, speaker)); first && first->alive)
+            return tx("Zweimal {}? {} hat das schon behauptet – einer von euch lügt.", "Two times {}? {} already claimed that – one of you is lying.",
+                      roleText(heard.role), first->name);
+        return {};
+    }
     if (heard.target == m_id) {
         if (heard.weight > 0) if (const Text hint = roleHint(match); !hint.empty()) return hint;
         // Not every accused bot should deny with the same sentence.
@@ -427,6 +469,8 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
     // Someone else claims my role: one of us is lying, and I know who.
     if (message.claimedRole == Role::Seer && view.yourRole == Role::Seer)
         return {"Moment – ich bin die Seherin, nicht du. Du lügst.", "Hold on – I'm the seer, not you. You're lying."};
+    if (message.claimedRole != Role::Unknown && message.claimedRole != Role::Villager && view.yourRole == message.claimedRole)
+        return tx("Moment – ich bin {}, nicht du. Du lügst.", "Hold on – I'm {}, not you. You're lying.", roleWithArticle(message.claimedRole));
     // A wolf whose pack was exposed claims the seer for itself and turns the accusation around.
     if (wouldCounterclaim(match, message, speaker)) return counterclaim(match, speaker, evidence);
     // A result or role named for me: I know whether it is true.
@@ -565,11 +609,16 @@ Text Bot::answer(const Match& match, uint8_t speaker, const dialogue::Message& m
     case Intent::AskRole:
         if (other) return explain(match, other->id, evidence);
         if (aboutMe && message.wolfWord) return {"Nein, ich bin kein Werwolf.", "No, I'm not a werewolf."};
-        if (me->role == Role::Seer && !view.seerResults.empty()) return explain(match, view.seerResults.back().player, evidence);
-        if (m_feelings.stress >= 0.3f) if (const Text hint = roleHint(match); !hint.empty()) return hint;
-        return {"Meine Rolle behalte ich vorerst für mich. Über konkrete Beobachtungen können wir sprechen.",
-                "I'm keeping my role to myself for now. We can discuss specific observations."};
+        if (me->role == Role::Seer && !view.seerResults.empty() && m_publicRole == Role::Unknown)
+            return explain(match, view.seerResults.back().player, evidence);
+        return roleAnswer(match, message.askedRole, evidence);
     case Intent::RoleClaim:
+        if (message.claimedRole != Role::Villager && message.claimedRole != Role::Seer)
+            if (const auto* first = match.find(m_dialogue.otherClaimant(message.claimedRole, speaker)); first && first->alive)
+                return tx("Zweimal {}? {} hat das schon behauptet – einer von euch lügt.", "Two times {}? {} already claimed that – one of you is lying.",
+                          roleText(message.claimedRole), first->name);
+        if (message.claimedRole == Role::Hunter)
+            return {"Ein Jäger also. Dann überlegen wir uns gut, ob wir dich hängen.", "A hunter, then. We'll think carefully before hanging you."};
         if (message.claimedRole == Role::Seer)
             return {"Du behauptest, die Seherin zu sein. Wen hast du in welcher Nacht geprüft, und was war das Ergebnis?",
                     "You claim to be the seer. Who did you check, on which night, and what was the result?"};

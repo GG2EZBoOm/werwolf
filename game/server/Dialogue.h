@@ -28,10 +28,14 @@ struct Message {
     uint8_t addressed = kNoPlayer;
     uint8_t topic = kNoPlayer;
     Role claimedRole = Role::Unknown;
+    Role askedRole = Role::Unknown; // "Wer ist der Jäger?", "Bist du die Hexe?"
     Place place = Place::Unknown;
     bool question = false;
     bool wolfWord = false;   // mentions werewolves at all ("Anton, bist du ein Wolf?")
     bool seerReport = false; // presents seer results ("hab Berta gecheckt, sie ist ein Werwolf")
+    // The results are framed as a check ("gecheckt", or in the same message as "ich bin Seher"). Only these
+    // count towards "one check per night": a claimed seer's later "Berta ist unschuldig" may be an opinion.
+    bool explicitCheck = false;
     bool correction = false;
     bool exclusiveAlibi = false;
 };
@@ -59,6 +63,7 @@ public:
     Role claimedRole(uint8_t speaker) const;
     std::vector<uint8_t> defenders(uint8_t target) const; // who spoke up for target
     bool otherSeer(uint8_t speaker) const;                // someone else claims the seer as well
+    uint8_t otherClaimant(Role role, uint8_t speaker) const; // someone else who claimed this role
     bool liar(uint8_t speaker) const { return m_liars.contains(speaker); }
     int confirmed(uint8_t speaker) const;
     int seerChecks(uint8_t speaker) const; // how many people the speaker claims to have checked as the seer
@@ -73,7 +78,7 @@ private:
     std::map<uint8_t, Role> m_roles;
     struct Alibi { Place place; int day; bool exclusive; };
     std::map<uint8_t, Alibi> m_alibis;
-    struct Report { Role role = Role::Unknown; float weight = 0; bool checked = false; bool seer = false; }; // role or wolf/good result
+    struct Report { Role role = Role::Unknown; float weight = 0; bool checked = false; bool seer = false; bool counted = false; }; // role or wolf/good result
     std::map<std::pair<uint8_t, uint8_t>, Report> m_reports;
     std::set<uint8_t> m_liars;
     std::map<uint8_t, int> m_confirmed;

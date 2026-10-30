@@ -26,10 +26,12 @@ public:
     // diesen, nie den Wortlaut – so schaukeln sich Gerüchte zwischen Bots nicht auf.
     struct Evidence {
         // Vouch: "Stimmt, ich bin die Hexe" bestätigt den Sprecher; Sighting: nachts beim Haus des Opfers gesehen
-        enum class Kind { Seer, Witness, Trail, KnownRole, Vouch, Sighting, Opinion };
+        // RoleClaim: "Ich bin der Jäger" – vielleicht gelogen; role sagt, welche Rolle
+        enum class Kind { Seer, Witness, Trail, KnownRole, Vouch, Sighting, Opinion, RoleClaim };
         Kind kind = Kind::Seer;
         uint8_t target = kNoPlayer;
         float weight = 0.0f; // > 0 belastet, < 0 entlastet
+        Role role = Role::Unknown;
     };
     struct Speech {
         std::optional<Evidence> evidence;
@@ -97,6 +99,8 @@ private:
     Text react(const Match& match, uint8_t speaker, const Evidence& heard, std::optional<Evidence>* evidence) const;
     Text explain(const Match& match, uint8_t target, std::optional<Evidence>* evidence = nullptr) const;
     bool knowsFirstHand(const Match& match, const Evidence& heard) const;
+    // Antwort auf "Welche Rolle hast du?": manchmal die Wahrheit, bei Wölfen und Vampiren manchmal eine Lüge
+    Text roleAnswer(const Match& match, Role asked, std::optional<Evidence>* evidence) const;
     // Gehört other zum eigenen Rudel oder Clan? (nur für Wölfe und Vampire wahr)
     bool ally(const GameView& view, Role other) const;
     // Kann der Bot eine Rollen- oder Seherangabe über target selbst prüfen? +1 wahr, -1 gelogen, 0 unbekannt
@@ -227,6 +231,7 @@ private:
     uint8_t m_sacrificed = kNoPlayer;
     double m_roleSpeakAfter = 0;
     int m_roleHintDay = -1;
+    Role m_publicRole = Role::Unknown;    // welche Rolle der Bot öffentlich genannt hat (wahr oder gelogen)
     uint8_t m_fleeFrom = kNoPlayer;       // vor wem der Bot gerade flieht
     double m_fleeUntil = 0;
     bool m_shouted = false;               // diese Nacht schon um Hilfe gerufen

@@ -43,12 +43,15 @@ void phase(Match& match, Phase target) {
     CHECK_EQ(match.phase(), target);
 }
 struct Conversation {
-    Match match = matchWith();
-    Bot bot{1, 55};
+    Match match;
+    Bot bot;
     std::vector<Text> replies;
     std::vector<bool> secrets;
     Bot::SayFn say = [&](uint8_t, const Text& text, bool secret) { replies.push_back(text); secrets.push_back(secret); };
-    Conversation() { phase(match, Phase::Assembly); bot.update(0.01f, match, say); }
+    explicit Conversation(Role role = Role::Villager, uint64_t seed = 55) : match(matchWith(role)), bot(1, seed) {
+        phase(match, Phase::Assembly);
+        bot.update(0.01f, match, say);
+    }
     void advance(float seconds) {
         for (float t = 0; t < seconds; t += 0.1f) { match.update(0.1f); bot.update(0.1f, match, say); }
     }
@@ -773,7 +776,87 @@ TEST(NoSeerResultsBeforeTheFirstNight) {
     phase(later.match, Phase::Assembly);
     CHECK_EQ(Bot::nightsSoFar(later.match), 2);
     CHECK(reply(later, "ich bin seher, Anna ist ein Werwolf und Berta ist gut").de.find("Nacht") == std::string::npos);
-    CHECK(reply(later, "Ann ist auch gut").de.find("erst 2 Nächte") != std::string::npos);
+    CHECK(reply(later, "Ann ist auch gut").de.find("Nacht") == std::string::npos); // an opinion, not a third check
+    CHECK(reply(later, "ich habe auch Jörg gecheckt, er ist gut").de.find("erst 2 Nächte") != std::string::npos);
+}
+
+TEST(AnOpinionIsNotACheck) {
+    // the seer claims, gives an opinion, and reports one check during the first night – which is possible
+    Match m;
+    Settings settings;
+    settings.captain = false;
+    settings.nightSeconds = 120;
+    const std::vector<Match::Seat> seats = {{0, "Spieler", false}, {1, "Anton", true}, {2, "Anna", false},
+        {3, "Ann", false}, {4, "Berta", false}, {5, "Jörg", false}};
+    Text error;
+    CHECK(m.startWithRoles(seats, {Role::Seer, Role::Villager, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager},
+                           settings, world(), 42, error));
+    phase(m, Phase::Night);
+    CHECK_EQ(Bot::nightsSoFar(m), 1);
+    m.teleport(0, world().ground(4, 9));
+    m.teleport(1, world().ground(5, 9));
+    Bot bot(1, 55);
+    std::vector<Text> replies;
+    const Bot::SayFn say = [&](uint8_t, const Text& text, bool) { replies.push_back(text); };
+    for (const char* line : {"ich bin seher", "Berta ist unschuldig", "ich habe Anna geprüft, sie ist ein Werwolf"}) {
+        replies.clear();
+        for (int i = 0; i < 52; ++i) { m.update(0.1f); bot.update(0.1f, m, say); m.teleport(1, world().ground(5, 9)); }
+        bot.hear(m, 0, Text::same(line), ChatChannel::Nearby, true);
+        for (int i = 0; i < 80; ++i) { m.update(0.1f); bot.update(0.1f, m, say); m.teleport(1, world().ground(5, 9)); }
+        CHECK(!replies.empty());
+        for (const auto& text : replies) CHECK(text.de.find("So viele Ergebnisse") == std::string::npos);
+    }
+}
+
+TEST(BotsNameTheirRolesTruthfullyOrNot) {
+    CHECK_EQ(parseLine("Wer ist der Jäger?").intent, Intent::AskRole);
+    CHECK_EQ(parseLine("Wer ist der Jäger?").askedRole, Role::Hunter);
+    CHECK_EQ(parseLine("Anton, bist du die Hexe?").askedRole, Role::Witch);
+    CHECK_EQ(parseLine("Anton, welche Rolle hast du?").intent, Intent::AskRole);
+
+    int hunterReveals = 0, consistent = 0, wolfTruths = 0, wolfLies = 0, villagerReveals = 0;
+    for (uint64_t seed = 1; seed <= 20; ++seed) {
+        Conversation hunter(Role::Hunter, seed);
+        const Text first = hunter.ask("Anton, welche Rolle hast du?");
+        if (first.de.find("Jäger") != std::string::npos) {
+            ++hunterReveals;
+            consistent += hunter.ask("Anton, welche Rolle hast du?").de.find("Wie gesagt") != std::string::npos ||
+                          hunter.replies.front().de.find("wie gesagt") != std::string::npos;
+        }
+        Conversation villager(Role::Villager, seed);
+        villagerReveals += villager.ask("Anton, welche Rolle hast du?").de.find("Dorfbewohner") != std::string::npos;
+        Conversation wolf(Role::Werewolf, seed);
+        const Text lie = wolf.ask("Anton, welche Rolle hast du?");
+        wolfTruths += lie.de.find("Werwolf") != std::string::npos && lie.de.find("kein") == std::string::npos;
+        wolfLies += lie.de.find("Dorfbewohner") != std::string::npos || lie.de.find("Jäger") != std::string::npos;
+    }
+    std::printf("    Asked for their role: hunter told %d/20 (consistent %d), villager %d/20, wolf lied %d/20, wolf told the truth %d/20\n",
+                hunterReveals, consistent, villagerReveals, wolfLies, wolfTruths);
+    CHECK(hunterReveals >= 6 && hunterReveals <= 18); // often, not always
+    CHECK_EQ(consistent, hunterReveals);
+    CHECK(villagerReveals >= 5);
+    CHECK(wolfLies >= 5);
+    CHECK_EQ(wolfTruths, 0);
+
+    // whoever really has the role knows a claimant is lying
+    Conversation real(Role::Hunter);
+    CHECK(real.ask("ich bin der Jäger").de.find("ich bin der Jäger, nicht du") != std::string::npos);
+    // a second claim on the same role draws attention
+    Conversation room;
+    room.ask("ich bin der Jäger");
+    room.advance(5.1f);
+    room.replies.clear();
+    room.bot.hear(room.match, 3, Text::same("ich bin der Jäger"), ChatChannel::Global, true);
+    room.advance(3.0f);
+    CHECK(!room.replies.empty() && room.replies.front().de.find("einer von euch lügt") != std::string::npos);
+    // a wolf bot faking the hunter is called out by the real hunter bot
+    Village v(4, {Role::Villager, Role::Hunter, Role::Werewolf, Role::Villager, Role::Villager, Role::Villager});
+    phase(v.match, Phase::Assembly);
+    v.advance(0.5f);
+    const Bot::Speech fake{Bot::Evidence{Bot::Evidence::Kind::RoleClaim, 2, -0.5f, Role::Hunter}, false};
+    for (Bot& b : v.bots) b.hear(v.match, 2, Text::same("Ich bin der Jäger."), ChatChannel::Global, b.id() == 1, &fake);
+    v.advance(4.0f);
+    CHECK(v.heard(1, "ich bin der Jäger, nicht du"));
 }
 
 int main() {

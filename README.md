@@ -92,6 +92,12 @@ Bots reagieren auf deutsche und englische Spielernachrichten, zum Beispiel:
   als starker Hinweis. Wer genannt wird, bestätigt oder widerspricht anhand der eigenen Rolle, die echte Seherin
   meldet sich bei einer falschen Behauptung, und sobald Tote aufgedeckt werden, prüfen die Bots die Angaben nach.
   Eine bestätigte Seherin wird geschützt, wer nachweislich lügt, gilt als verdächtig.
+- `Anton, welche Rolle hast du?`, `Wer ist der Jäger?`, `Bist du die Hexe?` – manche Bots nennen ihre Rolle, wenn es
+  dem Dorf hilft (der Jäger schreckt damit ab, Hexe oder Seherin schweigen lieber), Werwölfe und Vampire lügen
+  („nur ein einfacher Dorfbewohner“, ein falscher Jäger). Jeder bleibt bei dem, was er einmal gesagt hat; wer die
+  Rolle wirklich hat, widerspricht einer falschen Behauptung, und zwei Ansprüche auf dieselbe Rolle machen misstrauisch.
+- Eine Seherin kann vor der ersten Nacht noch niemanden geprüft haben und danach höchstens eine Person pro Nacht.
+  Mitgezählt werden nur ausdrücklich genannte Prüfungen („gecheckt“, „geprüft“), keine bloßen Meinungen.
 - `Emil verhält sich komisch`, `Berta raus!`, `wir voten alle Berta`, `Anton du bist sus` – auch Umgangssprache
   zählt als Verdacht oder Stimme; wer schon tot ist, wird als tot erkannt.
 

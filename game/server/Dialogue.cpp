@@ -91,7 +91,13 @@ Role roleIn(const Tokens& t) {
     if (has(t, {"hexe", "witch"})) return Role::Witch;
     if (has(t, {"beschuetzer", "protector"})) return Role::Protector;
     if (has(t, {"faehrtenleser", "tracker"})) return Role::Tracker;
-    if (has(t, {"jaeger", "hunter"})) return Role::Hunter;
+    if (has(t, {"jaeger", "jaegerin", "hunter"})) return Role::Hunter;
+    if (has(t, {"dorfaeltester", "dorfaelteste", "elder"})) return Role::Elder;
+    if (has(t, {"pfarrer", "priest"})) return Role::Priest;
+    if (has(t, {"schmied", "blacksmith"})) return Role::Blacksmith;
+    if (has(t, {"buergermeister", "buergermeisterin", "mayor"})) return Role::Mayor;
+    if (has(t, {"ritter", "knight"})) return Role::Knight;
+    if (has(t, {"amor", "cupid"})) return Role::Cupid;
     if (has(t, {"dorfbewohner", "dorfbewohnerin", "villager"})) return Role::Villager;
     return Role::Unknown;
 }
@@ -146,7 +152,11 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         else if (has(t, {"warum", "wieso", "weshalb", "why", "beweis", "beweise", "evidence"})) result.intent = Intent::AskReason;
         else if (has(t, {"wo", "where"})) result.intent = Intent::AskAlibi;
         else if (has(t, {"unschuldig", "innocent", "safe", "vertrauen", "trust"})) result.intent = Intent::AskInnocence;
-        else if (has(t, {"rolle", "role", "bist"}) || phrase(t, "are you")) result.intent = Intent::AskRole;
+        else if (has(t, {"rolle", "role", "bist"}) || phrase(t, "are you") ||
+                 (roleIn(t) != Role::Unknown && has(t, {"wer", "who"}))) {
+            result.intent = Intent::AskRole;
+            result.askedRole = roleIn(t);
+        }
         else if (has(t, {"waehlen", "waehlst", "waehlt", "abstimmen", "stimmst", "voten", "votest", "votet", "vote", "voting"}))
             result.intent = Intent::AskVote;
         else result.intent = Intent::AskSuspicion;
@@ -245,6 +255,7 @@ Message parse(const std::string& text, const std::vector<Person>& people, uint8_
         result.topic = previousTopic;
     result.seerReport = seerContext && !result.question &&
         std::any_of(result.claims.begin(), result.claims.end(), [](const Claim& c) { return c.fact; });
+    result.explicitCheck = result.seerReport;
     return result;
 }
 
@@ -274,13 +285,19 @@ std::vector<uint8_t> Memory::defenders(uint8_t target) const {
     return out;
 }
 
+uint8_t Memory::otherClaimant(Role role, uint8_t speaker) const {
+    for (const auto& [other, claimed] : m_roles)
+        if (other != speaker && claimed == role) return other;
+    return kNoPlayer;
+}
+
 bool Memory::otherSeer(uint8_t speaker) const {
     return std::any_of(m_roles.begin(), m_roles.end(), [&](const auto& r) { return r.first != speaker && r.second == Role::Seer; });
 }
 
 int Memory::seerChecks(uint8_t speaker) const {
     int checks = 0;
-    for (const auto& [key, r] : m_reports) checks += key.first == speaker && r.seer && r.weight != 0.0f;
+    for (const auto& [key, r] : m_reports) checks += key.first == speaker && r.counted;
     return checks;
 }
 
@@ -319,6 +336,7 @@ bool Memory::remember(uint8_t speaker, const Message& message, int day) {
         if (r.weight * c.weight <= 0) r.checked = false; // a new or changed result is checked again
         r.weight = c.weight;
         r.seer = true;
+        r.counted = r.counted || message.explicitCheck;
     }
     for (const auto& reported : message.roleReports) {
         auto& r = m_reports[{speaker, reported.target}];
@@ -326,10 +344,11 @@ bool Memory::remember(uint8_t speaker, const Message& message, int day) {
         r.role = reported.role;
         r.seer = r.seer || seer;
     }
-    if (message.claimedRole == Role::Seer && claimedRole(speaker) != Role::Seer) {
-        // A second seer is suspicious, the more so when the "seer" was just accused by the first one.
+    const bool unique = message.claimedRole != Role::Unknown && message.claimedRole != Role::Villager;
+    if (unique && claimedRole(speaker) != message.claimedRole) {
+        // A second seer (or hunter …) is suspicious, the more so when the "seer" was just accused by the first one.
         for (const auto& [other, role] : m_roles) {
-            if (other == speaker || role != Role::Seer || liar(other)) continue;
+            if (other == speaker || role != message.claimedRole || liar(other)) continue;
             const auto accused = m_claims.find({other, speaker});
             const bool accusedFirst = accused != m_claims.end() && accused->second.weight > 0;
             m_credibility[speaker] = credibility(speaker) * (accusedFirst ? 0.45f : 0.6f);

@@ -83,6 +83,71 @@ Text Bot::styled(const Text& line, Personality::Style style) {
     }
 }
 
+// --- Rollen nennen -----------------------------------------------------------
+
+namespace {
+bool uniqueRole(Role role) { return role != Role::Unknown && role != Role::Villager && role != Role::Sister && role != Role::Brother; }
+}
+
+Text Bot::roleAnswer(const Match& match, Role asked, std::optional<Evidence>* evidence) const {
+    const auto view = match.viewFor(m_id);
+    const Role mine = view.yourRole;
+    auto claim = [&](Role role, Text line) {
+        if (evidence) *evidence = Evidence{Evidence::Kind::RoleClaim, m_id, role == Role::Villager ? -0.2f : -0.5f, role};
+        return line;
+    };
+    auto plainly = [&](Role role) {
+        return claim(role, tx("Ich bin {}.", "I'm {}.", roleWithArticle(role)));
+    };
+    const Text secret{"Meine Rolle behalte ich vorerst für mich. Über konkrete Beobachtungen können wir sprechen.",
+                      "I'm keeping my role to myself for now. We can discuss specific observations."};
+    // Wer einmal etwas gesagt hat, bleibt dabei – sonst fliegt die Lüge auf
+    if (m_publicRole != Role::Unknown) {
+        if (asked != Role::Unknown && asked != m_publicRole)
+            return tx("Nein, {} bin ich nicht.", "No, I'm not {}.", roleWithArticle(asked));
+        return claim(m_publicRole, tx("Wie gesagt: Ich bin {}.", "Like I said: I'm {}.", roleWithArticle(m_publicRole)));
+    }
+    // je Bot und Tag eine feste Entscheidung, damit dieselbe Frage nicht mal so, mal so beantwortet wird
+    const float roll = static_cast<float>((m_salt ^ (static_cast<uint64_t>(match.day()) * 0x9E3779B97F4A7C15ull)) % 1000) / 1000.0f;
+    int votesAgainstMe = 0;
+    for (const auto& p : view.players) votesAgainstMe += p.alive && p.vote == m_id;
+    const float pressure = std::min(1.0f, m_feelings.stress + 0.3f * static_cast<float>(votesAgainstMe));
+    if (isEvilRole(mine)) {
+        // Wölfe und Vampire lügen: ein harmloser Dorfbewohner – oder, wer sich traut, ein falscher Jäger
+        const bool hunterTaken = m_dialogue.otherClaimant(Role::Hunter, m_id) != kNoPlayer;
+        if ((asked == Role::Unknown || asked == Role::Hunter) && !hunterTaken && roll < 0.2f * m_personality.boldness + 0.2f * pressure)
+            return claim(Role::Hunter, {"Ich bin der Jäger. Hängt mich, und ich nehme jemanden mit.",
+                                        "I'm the hunter. Hang me and I'll take someone with me."});
+        if (asked != Role::Unknown) return tx("Nein, {} bin ich nicht.", "No, I'm not {}.", roleWithArticle(asked));
+        if (roll < 0.65f) return claim(Role::Villager, {"Nur ein einfacher Dorfbewohner – leider ohne besondere Fähigkeiten.",
+                                                         "Just a simple villager – no special abilities, sadly."});
+        return secret;
+    }
+    if (asked != Role::Unknown && asked != mine) return tx("Nein, {} bin ich nicht.", "No, I'm not {}.", roleWithArticle(asked));
+    if (isPublicRole(mine)) return plainly(mine);
+    // Wie gern man die eigene Rolle verrät: Der Jäger schreckt ab, ein Dorfbewohner verliert nichts,
+    // Hexe und Beschützer wären sofort das nächste Opfer und schweigen lieber – außer unter Druck
+    float reveal = 0.3f;
+    switch (mine) {
+    case Role::Hunter: reveal = 0.6f; break;
+    case Role::Villager: reveal = 0.55f; break;
+    case Role::Elder: reveal = 0.4f; break;
+    case Role::Witch:
+    case Role::Protector:
+    case Role::Seer: reveal = 0.08f; break;
+    default: break;
+    }
+    if (asked == mine) reveal += 0.15f; // direkt gefragt
+    if (roll >= std::min(0.95f, reveal + 0.5f * pressure)) return secret;
+    if (mine == Role::Hunter)
+        return claim(mine, {"Ich bin der Jäger. Hängt mich, und ich nehme jemanden mit.", "I'm the hunter. Hang me and I'll take someone with me."});
+    if (mine == Role::Villager)
+        return claim(mine, {"Nur ein einfacher Dorfbewohner – leider ohne besondere Fähigkeiten.", "Just a simple villager – no special abilities, sadly."});
+    if (const Text hint = roleHint(match); !hint.empty())
+        return claim(mine, tx("Ich bin {}. {}", "I'm {}. {}", roleWithArticle(mine), hint));
+    return plainly(mine);
+}
+
 // --- Täuschung der Wölfe -----------------------------------------------------
 
 bool Bot::ally(const GameView& view, Role other) const {
