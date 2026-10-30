@@ -31,6 +31,7 @@ struct Config {
     // Netzwerk und Discord
     bool upnp = true;       // Port beim Hosten automatisch im Router freigeben
     bool discord = true;    // Status in Discord anzeigen und Einladungen erlauben
+    bool localAI = true;    // optionales installiertes Sprachpaket beim Hosten verwenden
     // Ton (Prozent)
     int masterVolume = 75;
     int effectsVolume = 85;

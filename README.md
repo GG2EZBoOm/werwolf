@@ -155,9 +155,40 @@ zur Rettung eines geprüften Unschuldigen oder bei akuter eigener Gefahr. Wölfe
 Partner öffentlich fallenlassen und gegen ihn stimmen, wenn das Rudel dafür nicht einen nahen Sieg aufgibt.
 Wer öffentlich gegen einen entlarvten Wolf gestimmt hat, gewinnt Vertrauen – auch ein täuschender Mitwolf.
 
-Das ist lokale, regelbasierte Spiel-KI ohne Cloud-Dienst oder API-Schlüssel. Sie erkennt typische Aussagen
-zum Spiel, führt aber kein allgemeines Sprachmodell-Gespräch. Unklare direkte Ansprachen beantwortet sie
-mit einer Rückfrage; Ironie und beliebig verschachtelte Sätze werden nicht zuverlässig verstanden.
+Ohne Zusatzpaket ist das lokale, regelbasierte Spiel-KI. Sie erkennt typische Aussagen zum Spiel;
+Ironie und beliebig verschachtelte Sätze werden nicht zuverlässig verstanden.
+
+### Optionales lokales KI-Sprachpaket
+
+Ab Version **0.10.0** können Bots Spielernachrichten zusätzlich mit einem lokalen Sprachmodell beantworten.
+Der Host lädt einmal das [KI-Installationspaket](https://github.com/GG2EZBoOm/werwolf/releases/latest/download/Werwolf-KI-Paket.zip),
+entpackt es und startet `Installieren.cmd`. Das lädt etwa **2,6 GB** mit geprüften SHA-256-Prüfsummen.
+Danach unter **Einstellungen → Bots → Lokale Bot-KI** einschalten und ein Spiel hosten.
+Nur der Host braucht das Paket; während der Partie läuft die Inferenz offline, ohne Konto, API-Schlüssel oder Gebühren.
+
+Das Modell bekommt den vom Bot gehörten Verlauf desselben Chatkanals, Stimmung, Beziehung zum Sprecher
+und die von der Spiellogik erlaubte Antwortabsicht. Geheime Rollentabellen, unbekannte Seherergebnisse und
+unhörbare Gespräche werden nicht übergeben. Rollenenthüllungen, Beweise und strategische Aussagen werden
+unverändert an einen optionalen KI-Kommentar angehängt. Abstimmung, Erinnerungen an Beweise, Fähigkeiten
+und Bewegung bleiben regelbasiert; das Modell entscheidet nicht eigenständig über Aktionen.
+Freie Gespräche gehen auf den Wortlaut ein, können aber weiterhin unpassend formuliert sein.
+
+Antworten entstehen auf einem Hintergrundthread; eine begrenzte Warteschlange, ein Zeitlimit von sieben
+Sekunden und die Prüfung von Phase, Kanal und lebenden Gesprächspartnern verhindern blockiertes oder
+verspätetes Chatten. Bei Ausfällen oder verworfenen Modellantworten greift der bisherige Dialog.
+Deutsch und Englisch werden gemeinsam erzeugt. Ohne installiertes Paket startet kein KI-Prozess.
+
+Technik: **Qwen3-4B-Instruct-2507 Q4_K_M** (GGUF von Unsloth, Apache-2.0), **llama.cpp b11960** (MIT)
+mit Vulkan. Lizenzen liegen dem Paket bei. Ausgangspunkt: 16 GB RAM, moderne Vulkan-GPU mit etwa
+4 GB freiem VRAM, 6 GB freier Plattenspeicher für die Installation; tatsächliche Leistung hängt von
+Hardware und Treiber ab. Das ist eine Integration eines vorhandenen Modells, kein eigenes Modelltraining.
+
+Installation unter `%APPDATA%\Werwolf\ki` oder portabel im Ordner `ki` neben der EXE.
+Der normale Auto-Updater verändert diesen Modellordner nicht. Zum Ausschalten den Schalter deaktivieren
+und neu hosten. Für eigene lokale Dienste: `--ai-port 8080` (ausschließlich `127.0.0.1`),
+für einen anderen Paketordner `--ai-dir <Pfad>`, zum Abschalten `--no-ai`.
+Quellen: [Modell](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507),
+[GGUF](https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF), [Laufzeit](https://github.com/ggml-org/llama.cpp).
 
 ### Ton
 

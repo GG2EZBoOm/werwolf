@@ -16,6 +16,9 @@
 
 namespace ww {
 
+class LocalLanguage;
+struct LanguageRequest;
+
 // KI-Mitspieler für das Echtzeit-Spiel. Bewegt sich wie ein Mensch durchs Dorf und
 // nutzt nur das, was seine persönliche Spielansicht verrät (plus sichtbare Positionen).
 class Bot {
@@ -72,6 +75,8 @@ public:
                       const Speech* speech = nullptr) const;
     // Was der Bot gerade sagt; nur während seines say()-Aufrufs gesetzt.
     const Speech* speaking() const { return m_speaking ? &*m_speaking : nullptr; }
+    void setLanguageModel(LocalLanguage* language) { m_language = language; }
+    void cancelLanguageReplies();
 
 private:
     enum class Nav { Moving, Arrived, Blocked };
@@ -116,6 +121,8 @@ private:
     bool repeats(uint8_t speaker, const dialogue::Message& message) const;
     void speak(const SayFn& say, const Text& text, bool secret, Speech speech = {});
     void updateConversation(float dt, const Match& match, const SayFn& say);
+    LanguageRequest languageRequest(const Match& match, uint8_t speaker, ChatChannel channel,
+                                    const Text& stance, bool preserve) const;
     // Täuschung der Wölfe
     bool packSpeaker(const Match& match) const;        // dieser Wolf-Bot spricht fürs Rudel (niedrigste Nummer)
     bool packClaimedSeer(const Match& match) const;    // jemand aus dem Rudel gibt sich schon als Seherin aus
@@ -184,9 +191,14 @@ private:
         dialogue::Intent intent = dialogue::Intent::Unknown;
         uint8_t topic = kNoPlayer;
         Speech speech;
+        uint64_t languageTicket = 0;
+        double languageDeadline = 0;
     };
     std::deque<Reply> m_replies;          // angesprochene Fragen warten, statt verloren zu gehen
     std::optional<Reply> m_lastReply;     // zuletzt gegebene Antwort (gegen Wiederholungen)
+    LocalLanguage* m_language = nullptr; // server owns the worker; never accessed from that worker
+    struct HeardLine { uint8_t speaker; Text text; ChatChannel channel; int day; };
+    std::deque<HeardLine> m_conversation;
     std::optional<Speech> m_speaking;
     double m_replyAfter = 0;              // so lange überlässt der Bot allgemeines Geplauder anderen
     double m_nextReply = 0;               // frühester Zeitpunkt der nächsten Antwort

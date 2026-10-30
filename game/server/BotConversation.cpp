@@ -1,4 +1,7 @@
 #include "server/Bot.h"
+#include "server/LocalLanguage.h"
+#include "engine/core/Time.h"
+#include "engine/core/Log.h"
 
 #include <algorithm>
 
@@ -176,7 +179,8 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
     } else if (addressed || (topic && !topic->alive)) {
         priority = 30; // someone should point out that this player is dead
     } else if (message.intent == dialogue::Intent::Unknown) {
-        return 0;
+        if (!m_language || !m_language->available()) return 0;
+        priority = 10; // the local model can answer free wording outside the rule parser
     } else {
         priority = m_lastReply && m_lastReply->speaker == speaker && match.clock() - m_lastReply->due < 60.0 ? 20 : 10;
     }
@@ -189,6 +193,10 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     const auto* from = match.find(speaker);
     if (!me || !from || !me->alive || !from->alive || speaker == m_id ||
         match.phase() == Phase::GameOver || !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel, speaker)) return;
+    if (m_language) {
+        m_conversation.push_back({speaker, text, channel, match.day()});
+        while (m_conversation.size() > 12) m_conversation.pop_front();
+    }
     // From bots only first-hand evidence counts, never their wording: a repeated rumour must not
     // turn into a new witness.
     lookAt(speaker, match.clock() + 3.0);
@@ -333,6 +341,40 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     m_nextReply = due + m_rng.uniform(2.5f, 3.5f) * haste;
     m_replies.push_back(Reply{speaker, channel, match.phase(), match.day(), due, offerToSeer ? response : addressTo(from->name, response, match),
                               message.intent, message.topic, Speech{evidence, true}});
+    if (!from->bot && m_language && m_language->available()) {
+        auto& pending = m_replies.back();
+        // Keep all rule-based strategic/factual statements byte for byte. Only unconstrained
+        // small talk and otherwise unrecognized questions are fully composed by the model.
+        const bool preserve = evidence.has_value() || (message.intent != dialogue::Intent::Unknown &&
+                                                       message.intent != dialogue::Intent::Greeting);
+        pending.languageTicket = m_language->submit(languageRequest(match, speaker, channel, pending.text, preserve));
+        pending.languageDeadline = eng::nowSeconds() + 7.0;
+    }
+}
+
+void Bot::cancelLanguageReplies() {
+    if (!m_language) return;
+    for (auto& r : m_replies) { m_language->cancel(r.languageTicket); r.languageTicket = 0; }
+}
+
+LanguageRequest Bot::languageRequest(const Match& match, uint8_t speaker, ChatChannel channel,
+                                     const Text& stance, bool preserve) const {
+    LanguageRequest r;
+    r.bot = m_id;
+    r.name = match.find(m_id)->name;
+    r.day = match.day();
+    r.phase = phaseTitle(match.phase(), Lang::German);
+    r.stance = stance;
+    r.preserveStance = preserve;
+    r.fear = m_feelings.fear; r.anger = m_feelings.anger; r.stress = m_feelings.stress;
+    r.friendship = relationship(speaker);
+    r.style = static_cast<int>(m_personality.style);
+    for (const auto& p : match.players()) r.people.push_back({p.id, p.name});
+    for (const auto& line : m_conversation) {
+        if (line.channel != channel || line.day < match.day() - 1) continue;
+        if (const auto* p = match.find(line.speaker)) r.history.emplace_back(p->name, line.text);
+    }
+    return r;
 }
 
 Text Bot::explain(const Match& match, uint8_t target, std::optional<Evidence>* evidence) const {
@@ -722,10 +764,23 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
         else if (Vec2{me->position.x, me->position.z}.length() > 48) place = dialogue::Place::Forest;
         m_nightPlaces[static_cast<size_t>(place)] += dt;
     }
-    if (!me->alive) m_replies.clear();
-    while (!m_replies.empty() && (m_replies.front().phase != match.phase() || m_replies.front().day != match.day()))
+    while (!m_replies.empty() && (!me->alive || m_replies.front().phase != match.phase() || m_replies.front().day != match.day())) {
+        if (m_language) m_language->cancel(m_replies.front().languageTicket);
         m_replies.pop_front();
+    }
     if (m_replies.empty() || match.clock() < m_replies.front().due) return;
+    auto& waiting = m_replies.front();
+    if (m_language && waiting.languageTicket) {
+        std::optional<Text> composed;
+        if (m_language->take(waiting.languageTicket, composed)) {
+            if (composed) {
+                waiting.text = std::move(*composed);
+                eng::log::info("Lokale KI: Antwort fuer Bot {}", m_id);
+            }
+            waiting.languageTicket = 0;
+        } else if (eng::nowSeconds() < waiting.languageDeadline) return;
+        else { m_language->cancel(waiting.languageTicket); waiting.languageTicket = 0; }
+    }
     Reply pending = std::move(m_replies.front());
     m_replies.pop_front(); // before say() re-enters the server's chat routing
     const auto* from = match.find(pending.speaker);
@@ -738,6 +793,10 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
     m_lastReply = pending;
     m_chatTimer = -1.0f;
     speak(say, pending.text, secret, pending.speech);
+    if (m_language) {
+        m_conversation.push_back({m_id, pending.text, pending.channel, match.day()});
+        while (m_conversation.size() > 12) m_conversation.pop_front();
+    }
 }
 
 void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,

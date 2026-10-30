@@ -76,6 +76,7 @@ struct RawClient {
 TEST(KomplettePartieUeberNetzwerk) {
     ServerThread server;
     ServerOptions options;
+    options.language.enabled = false; // ordinary protocol tests must not load an installed model
     options.port = kTestPort;
     options.timeScale = 40.0f;
     options.logChat = false;
@@ -184,6 +185,7 @@ TEST(KomplettePartieUeberNetzwerk) {
 TEST(VersionWirdGeprueft) {
     ServerThread server;
     ServerOptions options;
+    options.language.enabled = false; // ordinary protocol tests must not load an installed model
     options.port = kTestPort + 1;
     options.logChat = false;
     std::string error;
@@ -234,6 +236,7 @@ TEST(AdressenMitPortUndIPv6) {
 TEST(ServerLauschtAufIPv6UndIPv4) {
     ServerThread server;
     ServerOptions options;
+    options.language.enabled = false; // ordinary protocol tests must not load an installed model
     options.port = kTestPort + 2;
     options.logChat = false;
     std::string error;
@@ -280,6 +283,7 @@ TEST(TexteInBeidenSprachen) {
 TEST(SpielerChatErreichtGenauEinenPassendenBot) {
     ServerThread server;
     ServerOptions options;
+    options.language.enabled = false; // ordinary protocol tests must not load an installed model
     options.port = kTestPort + 3;
     options.timeScale = 5.0f;
     options.logChat = false;

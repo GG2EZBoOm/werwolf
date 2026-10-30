@@ -3,6 +3,7 @@
 #include "logic/Match.h"
 #include "protocol/Protocol.h"
 #include "server/Bot.h"
+#include "server/LocalLanguage.h"
 #include "world/World.h"
 
 #include "engine/core/Random.h"
@@ -21,6 +22,7 @@ struct ServerOptions {
     uint16_t port = proto::kDefaultPort;
     float timeScale = 1.0f; // > 1 beschleunigt alle Phasen (für Tests)
     bool logChat = true;
+    LocalLanguage::Options language;
 };
 
 // Autoritativer Spielserver: Lobby, Verbindungen, Chat und die laufende Echtzeit-Runde.
@@ -110,6 +112,7 @@ private:
     Settings m_settings;
     World m_world;
     std::unique_ptr<Match> m_match;
+    std::unique_ptr<LocalLanguage> m_language;
     std::vector<Bot> m_bots;
     uint8_t m_host = kNoPlayer;
     bool m_dirty = true;

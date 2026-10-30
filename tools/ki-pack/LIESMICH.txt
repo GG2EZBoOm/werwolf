@@ -1,0 +1,40 @@
+WERWOLF - LOKALES KI-SPRACHPAKET / LOCAL AI DIALOGUE PACK
+
+1. ZIP vollstaendig entpacken, dann Installieren.cmd doppelklicken.
+2. Einmalig ca. 2,6 GB herunterladen. Keine Administratorrechte erforderlich.
+3. Werwolf ab Version 0.10.0 starten und ein Spiel hosten.
+   Einstellungen > Bots > Lokale Bot-KI muss eingeschaltet sein.
+
+Das Modell laeuft nur beim Host. Mitspieler brauchen weder das Paket noch eine
+leistungsfaehige Grafikkarte. Nach der Installation ist keine Internetverbindung
+fuer die Bot-KI erforderlich. Keine API, kein Konto, keine laufenden Kosten.
+
+Die KI formuliert Antworten auf Spielernachrichten frei. Sie bekommt den gehoerten
+Gespraechsverlauf, Stimmung, Beziehung und die erlaubte Antwortabsicht. Beweise,
+Rollenhinweise, Abstimmung und Faehigkeiten steuert weiterhin die Spiellogik.
+Wichtige Aussagen bleiben unveraendert; sprachliche Kommentare werden geprueft.
+Ein Sprachmodell kann trotzdem unpassend formulieren. Bei Fehlern oder zu langen
+Wartezeiten verwendet das Spiel automatisch seine bisherigen Bot-Antworten.
+
+Empfohlener Ausgangspunkt: Windows x64, 16 GB RAM, moderne Vulkan-Grafikkarte,
+ca. 4 GB freier Grafikspeicher und 6 GB freier Festplattenspeicher fuer Installation.
+Geschwindigkeit und Speicherbedarf haengen von Hardware und Treiber ab.
+Ohne passende GPU kann die Inferenz zu langsam fuer Antworten im Spiel sein.
+
+Installation: %APPDATA%\Werwolf\ki
+Portabel: Installieren.ps1 -Destination 'C:\DeinSpiel\ki'
+Das Spiel sucht zuerst den Unterordner ki neben der EXE, danach den Benutzerordner.
+Der normale Auto-Updater ersetzt das Modell nicht. Kein erneuter Modell-Download
+bei Spielupdates. Zum Deaktivieren Lokale Bot-KI ausschalten und neu hosten.
+Zum Entfernen den genannten ki-Ordner loeschen, waehrend kein Spiel gehostet wird.
+
+Technik: llama.cpp b11960 (MIT), Qwen3-4B-Instruct-2507 Q4_K_M (Apache-2.0),
+GGUF-Konvertierung von Unsloth. Lizenzen liegen bei. Dies ist eine Integration
+eines vorhandenen Modells, kein neu trainiertes eigenes Sprachmodell.
+Alle Downloads sind auf feste Versionen und SHA-256-Pruefsummen festgelegt.
+
+ENGLISH: Extract the ZIP, run Installieren.cmd, then host a game in Werwolf 0.10.0+.
+The installer downloads about 2.6 GB once. The model runs offline on the host only.
+Enable Settings > Bots > Local bot AI. Existing game rules remain in control
+of roles, evidence and actions. If inference fails or takes too long, standard bot
+replies are used. Both German and English replies are supported.

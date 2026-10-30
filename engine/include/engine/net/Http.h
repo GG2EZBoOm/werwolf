@@ -23,6 +23,10 @@ struct HttpOptions {
 // Aus Sicherheitsgründen nur HTTPS – unverschlüsseltes HTTP nur für localhost (Tests).
 bool httpGet(const std::string& url, std::vector<uint8_t>& body, std::string& error, const HttpOptions& options = {});
 
+// JSON to an IPv4 loopback service only, without proxy or redirects (local bot inference).
+bool httpPostLocal(const std::string& url, const std::string& json, std::vector<uint8_t>& body,
+                   std::string& error, const HttpOptions& options = {});
+
 bool isLocalHttpUrl(const std::string& url);
 
 } // namespace eng::net

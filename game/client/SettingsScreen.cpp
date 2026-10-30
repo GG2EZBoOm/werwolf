@@ -1,5 +1,8 @@
 #include "client/App.h"
 
+#include <windows.h>
+#include <shellapi.h>
+
 #include <cmath>
 #include <format>
 
@@ -58,11 +61,11 @@ bool App::drawSettings(const Rect& area) {
     eng::Renderer2D& r = m_renderer;
     const bool english = language() == Lang::English;
     // Lesebändchen als Reiter, die oben über das Blatt hängen
-    const char* tabs[] = {L("Grafik", "Graphics"), L("Steuerung", "Controls"), L("Oberfläche", "Interface"), L("Ton", "Sound")};
-    const Color ribbons[] = {Color::hex(0x7A1F18), Color::hex(0x2F4A35), Color::hex(0x2E3D5C), Color::hex(0x69502F)};
+    const char* tabs[] = {L("Grafik", "Graphics"), L("Steuerung", "Controls"), L("Oberfläche", "Interface"), L("Ton", "Sound"), "Bots"};
+    const Color ribbons[] = {Color::hex(0x7A1F18), Color::hex(0x2F4A35), Color::hex(0x2E3D5C), Color::hex(0x69502F), Color::hex(0x503854)};
     m_kit.paper(area, 7070u);
-    const float tabWidth = std::min(132.0f, (area.w - 60.0f) / 4.0f);
-    for (int i = 0; i < 4; ++i) {
+    const float tabWidth = std::min(132.0f, (area.w - 60.0f) / 5.0f);
+    for (int i = 0; i < 5; ++i) {
         const Rect tr{area.x + 30.0f + static_cast<float>(i) * tabWidth, area.y - 8.0f, tabWidth - 4.0f, 40.0f};
         if (m_kit.inkTab(std::string("settings/tab/") + std::to_string(i), tr, tabs[i], m_settingsTab == i, ribbons[i])) m_settingsTab = i;
     }
@@ -227,6 +230,30 @@ bool App::drawSettings(const Rect& area) {
         if (!m_audioReady) r.text(m_fonts.paperItalic, {inner.x, inner.y + 8.0f}, L("Kein Audiogerät verfügbar.", "No audio device available."), inkRed);
         break;
     }
+    case 4: {
+        onOff("settings/localai", L("Lokale Bot-KI", "Local bot AI"),
+              L("Gilt ab dem nächsten Hosten. Nur der Host braucht das Sprachpaket.", "Applies next time you host. Only the host needs the language pack."),
+              m_config.localAI);
+        inner.takeTop(12.0f);
+        auto paragraph = [&](const char* text) {
+            for (const auto& line : m_fonts.paperItalic.wrap(text, inner.w - 16.0f)) {
+                r.text(m_fonts.paperItalic, {inner.x + 8.0f, inner.y}, line, inkSoft);
+                inner.takeTop(m_fonts.paperItalic.lineHeight());
+            }
+            inner.takeTop(12.0f);
+        };
+        paragraph(LocalLanguage::installed() ? L("Sprachpaket installiert. Die KI startet automatisch beim Hosten.",
+                                                                  "Language pack installed. AI starts automatically when hosting.")
+                                             : L("Sprachpaket noch nicht installiert. Einmaliger Download: etwa 2,6 GB.",
+                                                 "Language pack not installed yet. One-time download: about 2.6 GB."));
+        paragraph(L("Freie Antworten auf deinen Chat, passend zu Stimmung und Beziehungen. Läuft auf deinem Rechner, ohne Konto oder laufende Kosten.",
+                    "Free-form replies to your chat, shaped by mood and relationships. Runs on your computer without an account or ongoing fees."));
+        paragraph(L("Wenn die KI nicht verfügbar ist, antworten die Bots wie bisher. Rollen und Spielaktionen bestimmt weiterhin die Spiellogik.",
+                    "When AI is unavailable, bots use their usual replies. Roles and game actions remain controlled by the game rules."));
+        if (m_kit.inkButton("settings/aipack", inner.takeTop(38.0f), L("KI-Paket auf GitHub", "AI pack on GitHub")))
+            ShellExecuteW(nullptr, L"open", L"https://github.com/GG2EZBoOm/werwolf/releases/latest", nullptr, nullptr, SW_SHOWNORMAL);
+        break;
+    }
     default: break;
     }
 
@@ -258,6 +285,7 @@ bool App::drawSettings(const Rect& area) {
         m_config.showFps = defaults.showFps;
         m_config.discord = defaults.discord;
         m_config.upnp = defaults.upnp;
+        m_config.localAI = defaults.localAI;
         m_config.masterVolume = defaults.masterVolume;
         m_config.effectsVolume = defaults.effectsVolume;
         m_config.ambienceVolume = defaults.ambienceVolume;

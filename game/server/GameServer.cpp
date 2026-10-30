@@ -36,6 +36,7 @@ GameServer::~GameServer() { shutdown(); }
 bool GameServer::start(std::string& error) {
     if (!m_listener.listen(m_options.port, &error)) return false;
     m_lastTick = eng::nowSeconds();
+    m_language = std::make_unique<LocalLanguage>(m_options.language);
     eng::log::info("Server lauscht auf Port {}", m_options.port);
     return true;
 }
@@ -63,6 +64,7 @@ void GameServer::shutdown() {
     m_closing.clear();
     m_match.reset();
     m_bots.clear();
+    m_language.reset();
     eng::log::info("Server beendet");
 }
 
@@ -264,6 +266,7 @@ void GameServer::processRemovals() {
             }
         }
         if (m_match) m_match->playerLeft(m->id);
+        for (auto& b : m_bots) if (b.id() == m->id) b.cancelLanguageReplies();
         std::erase_if(m_bots, [&](const Bot& b) { return b.id() == m->id; });
         removed = true;
     }
@@ -294,6 +297,7 @@ void GameServer::resetIfEmpty() {
         std::any_of(m_members.begin(), m_members.end(), [](const auto& m) { return m->online && !m->bot; });
     if (anyHuman) return;
     if (!m_members.empty() || m_match) eng::log::info("Keine Spieler mehr verbunden – Server wird zurückgesetzt");
+    for (auto& b : m_bots) b.cancelLanguageReplies();
     m_match.reset();
     m_bots.clear();
     m_members.clear();
@@ -406,11 +410,13 @@ void GameServer::startGame(Member& host) {
     }
     m_history.clear();
     m_match = std::move(match);
+    for (auto& b : m_bots) b.cancelLanguageReplies();
     m_bots.clear();
     for (auto& m : m_members)
         if (m->bot) {
             const uint64_t seed = m_rng.next64();
             m_bots.emplace_back(m->id, seed, Bot::Personality::random(seed)); // jeder Bot spielt und schreibt anders
+            m_bots.back().setLanguageModel(m_language.get());
         }
     eng::log::info("Spiel gestartet mit {} Spielern (Welt {} in {:.0f} ms)", seats.size(), worldSeed,
                    (eng::nowSeconds() - t0) * 1000.0);
@@ -422,6 +428,7 @@ void GameServer::startGame(Member& host) {
 void GameServer::returnToLobby() {
     m_lobbyRequested = false;
     if (!m_match) return;
+    for (auto& b : m_bots) b.cancelLanguageReplies();
     m_match.reset();
     m_bots.clear();
     for (auto& m : m_members)

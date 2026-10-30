@@ -141,6 +141,7 @@ void Bot::onPhaseChange(const Match& match, const GameView& view) {
     m_chatTimer = -1.0f;
     m_transformDelay = m_rng.uniform(4.0f, 16.0f);
     m_goHome = false;
+    cancelLanguageReplies();
     m_replies.clear();
     m_companion = kNoPlayer;
     m_hesitate = 0.0f;

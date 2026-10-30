@@ -35,6 +35,7 @@ void Config::load() {
         else if (key == "language") language = value;
         else if (key == "upnp") upnp = value == "1";
         else if (key == "discord") discord = value == "1";
+        else if (key == "local_ai") localAI = value == "1";
         else if (key == "fade_chat") fadeChat = value == "1";
         else if (key == "subtitles") subtitles = value == "1";
         else if (key == "show_fps") showFps = value == "1";
@@ -72,6 +73,7 @@ void Config::save() const {
     if (!language.empty()) out << "language=" << language << "\n";
     out << "upnp=" << (upnp ? 1 : 0) << "\n";
     out << "discord=" << (discord ? 1 : 0) << "\n";
+    out << "local_ai=" << (localAI ? 1 : 0) << "\n";
     out << "fade_chat=" << (fadeChat ? 1 : 0) << "\n";
     out << "subtitles=" << (subtitles ? 1 : 0) << "\n";
     out << "show_fps=" << (showFps ? 1 : 0) << "\n";

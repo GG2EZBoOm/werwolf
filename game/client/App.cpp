@@ -111,6 +111,11 @@ bool App::init() {
     if (m_dev.preview) m_screen = Screen::Preview;
     else if (m_dev.sandbox) enterSandbox();
     else startUpdateCheck();
+    if (m_dev.settingsTab >= 0) {
+        m_screen = Screen::Menu;
+        m_menuPage = MenuPage::Settings;
+        m_settingsTab = std::clamp(m_dev.settingsTab, 0, 4);
+    }
     return true;
 }
 
@@ -259,6 +264,10 @@ void App::parseCommandLine() {
         else if (a == "--shot-every" && hasValue) m_dev.shotInterval = std::atof(arg(++i).c_str());
         else if (a == "--quit-after" && hasValue) m_dev.quitAfter = std::atof(arg(++i).c_str());
         else if (a == "--no-update") m_dev.noUpdate = true;
+        else if (a == "--no-ai") m_dev.noAI = true;
+        else if (a == "--ai-port" && hasValue) m_dev.aiPort = static_cast<uint16_t>(std::atoi(arg(++i).c_str()));
+        else if (a == "--ai-dir" && hasValue) m_dev.aiDirectory = std::filesystem::path(argv[++i]);
+        else if (a == "--settings-tab" && hasValue) m_dev.settingsTab = std::atoi(arg(++i).c_str());
         else if (a == "--force-update") m_dev.forceUpdate = true;
         else if (a == "--update-url" && hasValue) m_dev.updateUrl = arg(++i);
         else if (a == "--updated" && hasValue) m_dev.updatedTo = arg(++i);
@@ -732,6 +741,9 @@ void App::hostGame() {
     ServerOptions options;
     options.port = port;
     options.timeScale = m_dev.timeScale;
+    options.language.enabled = m_config.localAI && !m_dev.noAI;
+    options.language.port = m_dev.aiPort;
+    options.language.directory = m_dev.aiDirectory;
     std::string error;
     if (!m_server.start(options, error)) {
         m_menuError = Lf("Der Server konnte nicht gestartet werden: {}", "The server could not be started: {}", netErrorText(error).str());

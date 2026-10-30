@@ -19,10 +19,14 @@ add_library(werwolf_server_lib STATIC
     server/BotSocial.cpp
     server/BotPsychology.cpp
     server/Dialogue.cpp
+    server/LocalLanguage.cpp
     server/GameServer.cpp
     client/NetClient.cpp
 )
 target_link_libraries(werwolf_server_lib PUBLIC werwolf_logic engine_net)
+if(WIN32)
+    target_link_libraries(werwolf_server_lib PUBLIC engine_http)
+endif()
 
 # --- Auto-Updater: Kern (plattformunabhängig) und Download/Installation (Windows) -
 add_library(werwolf_update STATIC

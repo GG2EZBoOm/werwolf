@@ -95,6 +95,10 @@ private:
         std::string updatedTo;    // nach einem Update neu gestartet
         bool fromDiscord = false; // von Discord für eine Einladung gestartet
         std::string language;     // --lang de|en (nur für diesen Start)
+        bool noAI = false;
+        uint16_t aiPort = 0;
+        std::filesystem::path aiDirectory;
+        int settingsTab = -1;     // --settings-tab for rendering QA
     };
 
     bool init();

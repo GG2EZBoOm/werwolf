@@ -38,7 +38,8 @@ bool isLocalHttpUrl(const std::string& url) {
            url.rfind("http://localhost/", 0) == 0 || url.rfind("http://127.0.0.1/", 0) == 0;
 }
 
-bool httpGet(const std::string& url, std::vector<uint8_t>& body, std::string& error, const HttpOptions& options) {
+static bool httpRequest(const std::string& url, const std::string* json, std::vector<uint8_t>& body,
+                        std::string& error, const HttpOptions& options) {
     body.clear();
     const bool secure = url.rfind("https://", 0) == 0;
     if (!secure && !isLocalHttpUrl(url)) {
@@ -62,10 +63,15 @@ bool httpGet(const std::string& url, std::vector<uint8_t>& body, std::string& er
         error = "Ungültige Adresse: " + url;
         return false;
     }
+    if (json && (secure || std::wstring(host) != L"127.0.0.1" ||
+                 url.find('@') != std::string::npos || json->size() > 64 * 1024)) {
+        error = "Lokale KI erlaubt nur http://127.0.0.1 ohne Zugangsdaten";
+        return false;
+    }
     const std::wstring object = std::wstring(path) + extra;
     const std::wstring agent = utf8::toWide(options.userAgent);
 
-    Handle session{WinHttpOpen(agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+    Handle session{WinHttpOpen(agent.c_str(), json ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                WINHTTP_NO_PROXY_BYPASS, 0)};
     if (!session.h) {
         error = lastErrorText("WinHTTP");
@@ -77,13 +83,20 @@ bool httpGet(const std::string& url, std::vector<uint8_t>& body, std::string& er
         error = lastErrorText("Verbindung");
         return false;
     }
-    Handle request{WinHttpOpenRequest(connection.h, L"GET", object.c_str(), nullptr, WINHTTP_NO_REFERER,
+    Handle request{WinHttpOpenRequest(connection.h, json ? L"POST" : L"GET", object.c_str(), nullptr, WINHTTP_NO_REFERER,
                                       WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0)};
     if (!request.h) {
         error = lastErrorText("Anfrage");
         return false;
     }
-    if (!WinHttpSendRequest(request.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+    if (json) {
+        DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+        if (!WinHttpSetOption(request.h, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy))) return false;
+    }
+    const DWORD requestSize = json ? static_cast<DWORD>(json->size()) : 0;
+    if (!WinHttpSendRequest(request.h, json ? L"Content-Type: application/json\r\n" : WINHTTP_NO_ADDITIONAL_HEADERS,
+                           json ? static_cast<DWORD>(-1) : 0, json ? const_cast<char*>(json->data()) : WINHTTP_NO_REQUEST_DATA,
+                           requestSize, requestSize, 0) ||
         !WinHttpReceiveResponse(request.h, nullptr)) {
         error = lastErrorText("Download");
         return false;
@@ -134,6 +147,14 @@ bool httpGet(const std::string& url, std::vector<uint8_t>& body, std::string& er
         return false;
     }
     return true;
+}
+
+bool httpGet(const std::string& url, std::vector<uint8_t>& body, std::string& error, const HttpOptions& options) {
+    return httpRequest(url, nullptr, body, error, options);
+}
+bool httpPostLocal(const std::string& url, const std::string& json, std::vector<uint8_t>& body,
+                   std::string& error, const HttpOptions& options) {
+    return httpRequest(url, &json, body, error, options);
 }
 
 } // namespace eng::net

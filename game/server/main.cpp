@@ -32,6 +32,12 @@ void printUsage() {
                       "  --timescale <f>   time lapse for tests (default 1.0)\n"
                       "  --quiet           don't log the chat\n"),
                 static_cast<unsigned>(ww::proto::kDefaultPort));
+    std::puts(ww::L("  --no-ai          Lokales Sprachmodell ausschalten\n"
+                    "  --ai-dir <Pfad>  Anderer Ordner des KI-Pakets\n"
+                    "  --ai-port <n>    Vorhandenes Sprachmodell auf 127.0.0.1 verwenden",
+                    "  --no-ai          Disable local language model\n"
+                    "  --ai-dir <path>  Alternative AI pack directory\n"
+                    "  --ai-port <n>    Use existing language model on 127.0.0.1"));
 }
 } // namespace
 
@@ -49,6 +55,14 @@ int main(int argc, char** argv) {
             options.timeScale = static_cast<float>(std::atof(argv[++i]));
         } else if (arg == "--quiet") {
             options.logChat = false;
+        } else if (arg == "--no-ai") {
+            options.language.enabled = false;
+        } else if (arg == "--ai-port" && i + 1 < argc) {
+            const int port = std::atoi(argv[++i]);
+            if (port <= 0 || port > 65535) return 1;
+            options.language.port = static_cast<uint16_t>(port);
+        } else if (arg == "--ai-dir" && i + 1 < argc) {
+            options.language.directory = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[++i])));
         } else if (arg == "--help" || arg == "-h") {
             printUsage();
             return 0;
