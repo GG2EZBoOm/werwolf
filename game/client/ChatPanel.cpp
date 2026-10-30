@@ -12,7 +12,10 @@ namespace {
 
 std::string chatPrefix(const LogEntry& e) {
     // Leerer Name: Das kleine Mädchen hört den Rudel-Chat, ohne die Sprecher zu kennen
-    const std::string name = e.name.empty() ? std::string(L("Unbekannter Werwolf", "Unknown werewolf")) : e.name;
+    // Leerer Name im Nähe-Chat: eine verwandelte Bestie, deren Gesicht man nicht erkennt
+    const std::string name = !e.name.empty() ? e.name
+        : e.channel == ChatChannel::Wolves ? std::string(L("Unbekannter Werwolf", "Unknown werewolf"))
+                                           : std::string(L("Unbekannte Gestalt", "Unknown figure"));
     switch (e.channel) {
     case ChatChannel::Wolves: return std::string(L("[Rudel] ", "[Pack] ")) + name + ": ";
     case ChatChannel::Dead: return std::string(L("[Geist] ", "[Ghost] ")) + name + ": ";

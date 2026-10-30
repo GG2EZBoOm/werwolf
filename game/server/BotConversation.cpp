@@ -102,7 +102,7 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
     const auto* me = match.find(m_id);
     const auto* from = match.find(speaker);
     if (!me || !from || speaker == m_id || !me->alive || !from->alive || match.phase() == Phase::GameOver ||
-        !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel)) return 0;
+        !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel, speaker)) return 0;
     if (match.chatChannel(m_id, secretChannel(channel)) != channel) return 0;
     // A busy bot still takes questions meant for it (they wait in line), but leaves small talk to others.
     const bool busy = !m_replies.empty() || match.clock() < m_replyAfter;
@@ -180,7 +180,7 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     const auto* me = match.find(m_id);
     const auto* from = match.find(speaker);
     if (!me || !from || !me->alive || !from->alive || speaker == m_id ||
-        match.phase() == Phase::GameOver || !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel)) return;
+        match.phase() == Phase::GameOver || !match.canHear(m_id, speaker, channel) || match.hidesSpeaker(m_id, channel, speaker)) return;
     // From bots only first-hand evidence counts, never their wording: a repeated rumour must not
     // turn into a new witness.
     lookAt(speaker, match.clock() + 3.0);
@@ -736,7 +736,7 @@ void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, co
         for (const auto& c : candidates)
             if (c.priority == 40 || c.priority == 45) { responders.push_back(c.id); break; }
     for (Bot& bot : bots)
-        if (match.canHear(bot.id(), speaker, channel) && !match.hidesSpeaker(bot.id(), channel))
+        if (match.canHear(bot.id(), speaker, channel) && !match.hidesSpeaker(bot.id(), channel, speaker))
             bot.hear(match, speaker, text, channel, std::find(responders.begin(), responders.end(), bot.id()) != responders.end(), said);
 }
 

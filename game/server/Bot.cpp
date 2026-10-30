@@ -850,6 +850,18 @@ void Bot::nightRole(float dt, Match& match, const GameView& view, const Match::P
     if (me.role == Role::SerialKiller && view.can(AbilityStab) && m_phaseTime > 12.0f) {
         if (hunt(match, view, me, wish, speed)) return;
     }
+    if (isVampireRole(me.role) && m_phaseTime > 8.0f) {
+        if (!me.vampireForm && view.packKillsLeft > 0 && view.can(AbilityTransform)) {
+            bool watched = false;
+            for (const Match::Player& p : match.players())
+                if (p.alive && p.id != m_id && !isVampireRole(p.role) && distanceXZ(p.position, me.position) < 9.0f &&
+                    match.hasLineOfSight(p.position, me.position))
+                    watched = true;
+            if (!watched || m_phaseTime > 40.0f) match.interact(m_id, Interaction::Transform, 1);
+        } else if (me.vampireForm && view.packKillsLeft == 0) {
+            match.interact(m_id, Interaction::Transform, 0); // satt: wieder unauffällig
+        }
+    }
     if (isVampireRole(me.role) && view.can(AbilityBite) && m_phaseTime > 8.0f) {
         const uint8_t before = m_quarry;
         if (hunt(match, view, me, wish, speed)) {

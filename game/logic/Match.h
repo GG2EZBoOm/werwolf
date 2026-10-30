@@ -82,6 +82,7 @@ public:
         bool buried = false;
 
         bool wolfForm() const { return transform >= 0.999f; }
+        bool vampireForm = false; // Vampir hat sich verwandelt: rote Augen, darf beißen, kein Namensschild
         // Rolle, nach der der Spieler gerade handelt (Schauspieler nachts)
         Role effectiveRole() const { return acting != Role::Unknown ? acting : role; }
     };
@@ -137,6 +138,8 @@ public:
     bool canReadChannel(uint8_t listener, ChatChannel channel) const;
     // Das kleine Mädchen liest den Rudel-Chat ohne Namen
     bool hidesSpeaker(uint8_t listener, ChatChannel channel) const;
+    // … und eine verwandelte Bestie bleibt im Nähe-Chat namenlos, außer für ihr Rudel bzw. ihren Clan
+    bool hidesSpeaker(uint8_t listener, ChatChannel channel, uint8_t speaker) const;
 
     Team teamOf(uint8_t id) const;
     bool isWinner(uint8_t id) const;

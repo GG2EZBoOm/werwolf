@@ -48,7 +48,7 @@ Die Programme landen in `build\<preset>\bin\`:
 2. Alle anderen tragen die Adresse ein und klopfen an – oder treten über eine **Discord-Einladung** bei.
 3. Die Spielleitung stellt Rollen und Phasenlängen ein, füllt mit **Bots** auf und startet.
 
-Port **27777 (TCP)**, 4 bis 16 Spieler. Beim ersten Hosten fragt die Windows-Firewall – Zugriff erlauben.
+Port **27777 (TCP)**, 4 bis 32 Spieler. Beim ersten Hosten fragt die Windows-Firewall – Zugriff erlauben.
 
 ### Über das Internet (IPv4 und IPv6)
 
@@ -213,7 +213,7 @@ mit und sprechen im Geisterchat.
 | Narr         | gewinnt allein, wenn das Dorf ihn hinrichtet                                    |
 | Serienmörder | tötet jede Nacht mit dem Messer (Linksklick), Werwölfe können ihm nichts anhaben |
 | Brandstifter | tränkt Häuser mit Öl (E an der Tür) und zündet alle auf einmal an (F)           |
-| Vampir       | eigener Clan (1, ab 10 Spielern 2) mit geheimem Chat (Tab): beißt nachts lautlos ein Opfer (Linksklick), das blutleer mit Bissspuren gefunden wird; kommt durch keine geschlossene Tür, die Augen glühen nachts schwach rot. Gewinnt, wenn kein Werwolf mehr lebt und der Clan gleichauf mit dem Rest ist |
+| Vampir       | eigener Clan (1, ab 10 Spielern 2, ab 22 Spielern 3) mit geheimem Chat (Tab): nimmt nachts die Vampirgestalt an (R) – dann glühen die Augen rot – und beißt lautlos ein Opfer (Linksklick), das blutleer mit Bissspuren gefunden wird; kommt durch keine geschlossene Tür. Gewinnt, wenn kein Werwolf mehr lebt und der Clan gleichauf mit dem Rest ist |
 | Dieb         | stiehlt in der ersten Nacht die Rolle eines Spielers in der Nähe (E)             |
 | Sündenbock   | stirbt bei Gleichstand in der Abstimmung                                        |
 | Fuchs        | wittert nachts, ob bei einer Person oder in ihrer Nähe ein Werwolf ist (E); ohne Fund verliert er die Gabe |
@@ -237,7 +237,11 @@ mit und sprechen im Geisterchat.
 Seine Stimme zählt doppelt; stirbt er, bestimmt er in 15 Sekunden einen Nachfolger (E).
 
 In der Lobby werden Sonderrollen einzeln zugeschaltet; gibt es mehr als Plätze, werden nur so viele
-vergeben, wie Spieler da sind.
+vergeben, wie Spieler da sind. Automatisch gibt es 1 Werwolf bis 6 Spieler, 2 bis 10, 3 bis 14, 4 bis 19,
+5 bis 24, 6 bis 28 und 7 bei bis zu 32 Spielern; von Hand lassen sich bis zu 10 einstellen.
+
+Über einem verwandelten Werwolf oder Vampir steht kein Namensschild, und im Nähe-Chat spricht er als
+„Unbekannte Gestalt“ – nur sein Rudel bzw. Clan und die Toten wissen, wer es ist.
 
 **Sieg:** Das Dorf gewinnt, wenn kein Werwolf und kein mordender Einzelgänger mehr lebt; die Werwölfe,
 sobald sie mindestens so viele sind wie alle anderen; ein gemischtes Liebespaar, wenn nur noch die

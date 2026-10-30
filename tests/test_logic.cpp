@@ -8,6 +8,7 @@
 #include "world/World.h"
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 
 #ifdef _WIN32
@@ -906,15 +907,25 @@ TEST(VampirclanBeisstLautlos) {
     CHECK(!m.canHear(4, 1, ChatChannel::Vampires));
     CHECK(!m.canHear(0, 1, ChatChannel::Vampires));
     runUntil(m, Phase::Night);
+    auto flagsOf = [&](uint8_t viewer, uint8_t id) {
+        uint8_t flags = 0;
+        for (const auto& e : m.entitiesFor(viewer))
+            if (e.id == id && e.kind == EntityLiving) flags = e.flags;
+        return flags;
+    };
+    // in Menschengestalt unauffällig: Laterne, keine roten Augen, kein Biss
+    CHECK(!m.viewFor(1).can(AbilityBite));
+    CHECK(!(flagsOf(4, 1) & EntityRedEyes));
+    CHECK(flagsOf(4, 1) & EntityLantern);
+    placeNear(m, 1, 4);
+    CHECK(!m.interact(1, Interaction::Bite, 4).empty());
+    // verwandelt: rote Augen, keine Laterne, namenlos – außer für den eigenen Clan
+    CHECK(m.interact(1, Interaction::Transform, 1).empty());
     CHECK(m.viewFor(1).can(AbilityBite));
-    bool redEyes = false, lantern = false;
-    for (const auto& e : m.entitiesFor(4))
-        if (e.id == 1) {
-            redEyes = e.flags & EntityRedEyes;
-            lantern = e.flags & EntityLantern;
-        }
-    CHECK(redEyes);
-    CHECK(!lantern);
+    CHECK(flagsOf(4, 1) & EntityRedEyes);
+    CHECK(!(flagsOf(4, 1) & EntityLantern));
+    CHECK(m.hidesSpeaker(4, ChatChannel::Nearby, 1));
+    CHECK(!m.hidesSpeaker(2, ChatChannel::Nearby, 1));
     m.takeNotices();
     placeNear(m, 1, 2);
     CHECK(!m.interact(1, Interaction::Bite, 2).empty()); // nicht den eigenen Clan
@@ -965,11 +976,56 @@ TEST(VampireGewinnenErstOhneWoelfe) {
         CHECK(m.winner() == Team::None); // ohne Wölfe, aber mit Vampir: noch nicht vorbei
         runUntil(m, Phase::Night);
         placeNear(m, 1, 3);
+        CHECK(m.interact(1, Interaction::Transform, 1).empty());
         CHECK(m.interact(1, Interaction::Bite, 3).empty());
         runUntil(m, Phase::Day);
+        CHECK(!m.find(1)->vampireForm); // am Morgen wieder in Menschengestalt
         voteOut(m, 4);
         CHECK(m.winner() == Team::Vampires); // Vampir gegen Pfarrer: gleichauf
     }
+}
+
+TEST(VerwandelteBestienBleibenNamenlos) {
+    Match m = makeMatch({W, W, V, V, V, V});
+    runUntil(m, Phase::Night);
+    CHECK(!m.hidesSpeaker(2, ChatChannel::Nearby, 0)); // in Menschengestalt erkennt man die Stimme
+    becomeWolf(m, 0);
+    CHECK(m.hidesSpeaker(2, ChatChannel::Nearby, 0));  // als Bestie nicht
+    CHECK(!m.hidesSpeaker(1, ChatChannel::Nearby, 0)); // das Rudel schon
+    CHECK(!m.hidesSpeaker(2, ChatChannel::Global, 0));
+}
+
+TEST(ZweiunddreissigBewohner) {
+    Settings s = quickSettings();
+    std::vector<Role> roles = buildRoleList(s, 32);
+    CHECK_EQ(roles.size(), 32u);
+    CHECK_EQ(std::count_if(roles.begin(), roles.end(), isWolfRole), 7);
+    s.set(Role::Vampire, true);
+    roles = buildRoleList(s, 32);
+    CHECK_EQ(std::count(roles.begin(), roles.end(), Role::Vampire), 3);
+    CHECK(buildRoleList(s, 33).empty());
+    // eine ganze Partie mit 32 Bots läuft durch
+    std::vector<Match::Seat> seats;
+    std::vector<Bot> bots;
+    for (int i = 0; i < 32; ++i) {
+        seats.push_back({static_cast<uint8_t>(i), "Bot" + std::to_string(i), true});
+        bots.emplace_back(static_cast<uint8_t>(i), 7000u + static_cast<uint64_t>(i), Bot::Personality::random(7000u + static_cast<uint64_t>(i)));
+    }
+    Match m;
+    Text error;
+    CHECK(m.start(seats, s, testWorld(), 77, error));
+    const Bot::SayFn say = [](uint8_t, const Text&, bool) {};
+    const auto started = std::chrono::steady_clock::now();
+    float t = 0.0f;
+    for (; t < 3600.0f && m.phase() != Phase::GameOver; t += 0.1f) {
+        m.update(0.1f);
+        for (Bot& b : bots) b.update(0.1f, m, say);
+        m.takeNotices();
+        m.takeCorrections();
+    }
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    std::printf("    32 Bots: Partie nach %.0f s Spielzeit beendet (%s), gerechnet in %.1f s\n", t, teamName(m.winner()), seconds);
+    CHECK(m.phase() == Phase::GameOver);
 }
 
 int main() {

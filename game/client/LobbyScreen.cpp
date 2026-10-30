@@ -200,11 +200,17 @@ void App::drawLobby() {
                inkRed);
         list.takeBottom(24.0f);
     }
-    const float rowH = std::min(40.0f, list.h / std::max<float>(1.0f, static_cast<float>(v.players.size())));
-    float y = list.y;
+    // ab vielen Bewohnern zweispaltig, damit die Namen lesbar bleiben
+    const int count = static_cast<int>(v.players.size());
+    const int columns = list.h / static_cast<float>(std::max(1, count)) < 26.0f ? 2 : 1;
+    const int perColumn = (count + columns - 1) / columns;
+    const float columnGap = 18.0f;
+    const float columnW = (list.w - columnGap * static_cast<float>(columns - 1)) / static_cast<float>(columns);
+    const float rowH = std::min(40.0f, list.h / std::max<float>(1.0f, static_cast<float>(perColumn)));
     int index = 0;
     for (const PlayerView& p : v.players) {
-        const Rect row{list.x, y, list.w, rowH};
+        const int column = index / std::max(1, perColumn), line = index % std::max(1, perColumn);
+        const Rect row{list.x + static_cast<float>(column) * (columnW + columnGap), list.y + static_cast<float>(line) * rowH, columnW, rowH};
         const bool me = p.id == v.you;
         const float appear = eng::smoothstep(0.0f, 1.0f, m_kit.animFrom(std::format("lobby/row/{}/{}", p.id, p.name), 0.0f, 1.0f, 3.0f));
         // Name, als hätte man sich eben eingetragen
@@ -226,7 +232,6 @@ void App::drawLobby() {
         if (!tag.empty())
             r.textRight(m_fonts.paperItalic, {tagRight, row.center().y - m_fonts.paperItalic.lineHeight() * 0.5f}, tag,
                         p.id == v.host ? inkRed : inkFaded);
-        y += rowH;
     }
     if (host) {
         const bool full = static_cast<int>(v.players.size()) >= kMaxPlayers;
@@ -253,7 +258,7 @@ void App::drawLobby() {
         Rect row = s.takeTop(32.0f);
         r.text(m_fonts.script, {row.x, row.center().y - m_fonts.script.lineHeight() * 0.5f}, L("Werwölfe", "Werewolves"), inkSoft);
         std::vector<std::string> options = {Lf("so viele, wie es braucht ({})", "as many as needed ({})", autoWolfCount(std::max(playerCount, kMinPlayers)))};
-        for (int i = 1; i <= 6; ++i)
+        for (int i = 1; i <= 10; ++i)
             options.push_back(i == 1 ? std::string(L("1 Werwolf", "1 werewolf")) : Lf("{} Werwölfe", "{} werewolves", i));
         int wolves = edit.wolves;
         const Rect ctrl{row.x + 110.0f, row.y, std::min(320.0f, row.w - 110.0f), row.h};

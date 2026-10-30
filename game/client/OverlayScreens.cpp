@@ -299,18 +299,28 @@ void App::drawJournal(const GameView& v) {
     right.w -= 30.0f;
     r.text(m_fonts.scriptLarge, {right.x, right.y - 4.0f}, L("Die Bewohner", "The villagers"), inkRed.withAlpha(a));
     float ry = right.y + 48.0f;
-    const float rowH = std::min(28.0f, (right.h * 0.6f) / std::max<float>(1.0f, static_cast<float>(v.players.size())));
+    // ab vielen Bewohnern zweispaltig, damit die Zeilen lesbar bleiben
+    const int count = static_cast<int>(v.players.size());
+    const int columns = (right.h * 0.6f) / static_cast<float>(std::max(1, count)) < 20.0f ? 2 : 1;
+    const int perColumn = (count + columns - 1) / columns;
+    const float columnGap = 16.0f;
+    const float columnW = (right.w - columnGap * static_cast<float>(columns - 1)) / static_cast<float>(columns);
+    const float rowH = std::min(28.0f, (right.h * 0.6f) / std::max<float>(1.0f, static_cast<float>(perColumn)));
+    int index = 0;
     for (const PlayerView& p : v.players) {
+        const int column = index / std::max(1, perColumn), line = index % std::max(1, perColumn);
+        ++index;
+        const Rect col{right.x + static_cast<float>(column) * (columnW + columnGap), ry + static_cast<float>(line) * rowH, columnW, rowH};
         std::string name = p.name;
         if (p.captain) name = "♛ " + name;
         if (p.id == v.you) name += L(" (ich)", " (me)");
         const Color nameInk = p.alive ? eng::lerp(theme::playerColor(p.id), inkDark, 0.72f) : inkFaded;
-        r.text(m_fonts.hand, {right.x, ry + rowH * 0.5f - m_fonts.hand.lineHeight() * 0.5f}, m_fonts.hand.ellipsize(name, right.w * 0.48f),
+        r.text(m_fonts.hand, {col.x, col.y + rowH * 0.5f - m_fonts.hand.lineHeight() * 0.5f}, m_fonts.hand.ellipsize(name, col.w * 0.48f),
                nameInk.withAlpha(a));
         if (!p.alive) {
             // Durchgestrichen mit roter Tinte
-            const float nw = std::min(m_fonts.hand.measure(name), right.w * 0.48f);
-            m_kit.inkLine({right.x - 2.0f, ry + rowH * 0.55f}, {right.x + nw + 4.0f, ry + rowH * 0.45f}, 1.6f, inkRed.withAlpha(0.85f * a), 1.0f,
+            const float nw = std::min(m_fonts.hand.measure(name), col.w * 0.48f);
+            m_kit.inkLine({col.x - 2.0f, col.y + rowH * 0.55f}, {col.x + nw + 4.0f, col.y + rowH * 0.45f}, 1.6f, inkRed.withAlpha(0.85f * a), 1.0f,
                           static_cast<uint32_t>(p.id));
         }
         std::string marks;
@@ -318,13 +328,15 @@ void App::drawJournal(const GameView& v) {
         if (p.enchanted) marks += " ♪";
         if (p.marked) marks += " ♠";
         if (!marks.empty())
-            r.text(m_fonts.icon, {right.x + right.w * 0.5f, ry + rowH * 0.5f - m_fonts.icon.lineHeight() * 0.5f}, marks, inkRed.withAlpha(a));
-        const std::string known = p.role == Role::Unknown ? std::string("?") : std::string(roleIcon(p.role)) + " " + roleName(p.role);
-        r.textRight(m_fonts.paperItalic, {right.right(), ry + rowH * 0.5f - m_fonts.paperItalic.lineHeight() * 0.5f},
-                    m_fonts.paperItalic.ellipsize(known, right.w * 0.38f),
+            r.text(m_fonts.icon, {col.x + col.w * 0.5f, col.y + rowH * 0.5f - m_fonts.icon.lineHeight() * 0.5f}, marks, inkRed.withAlpha(a));
+        const std::string known = p.role == Role::Unknown ? std::string("?")
+                                  : columns > 1           ? std::string(roleIcon(p.role))
+                                                          : std::string(roleIcon(p.role)) + " " + roleName(p.role);
+        r.textRight(m_fonts.paperItalic, {col.right(), col.y + rowH * 0.5f - m_fonts.paperItalic.lineHeight() * 0.5f},
+                    m_fonts.paperItalic.ellipsize(known, col.w * 0.38f),
                     (p.role == Role::Unknown ? inkFaded : eng::lerp(theme::roleColor(p.role), inkDark, 0.6f)).withAlpha(a));
-        ry += rowH;
     }
+    ry += rowH * static_cast<float>(perColumn);
     ry += 14.0f;
     r.text(m_fonts.script, {right.x, ry}, L("Chronik", "Chronicle"), inkRed.withAlpha(a));
     ry += m_fonts.script.lineHeight() + 2.0f;

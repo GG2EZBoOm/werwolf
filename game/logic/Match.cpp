@@ -315,7 +315,7 @@ bool Match::doorwayOccupied(int house) const {
 
 Vec3 Match::seatPosition(int index, int count) const {
     const float a = 2.0f * eng::kPi * static_cast<float>(index) / static_cast<float>(std::max(1, count)) + 0.2f;
-    const float r = count > 10 ? 8.2f : 7.0f;
+    const float r = count > 20 ? 10.5f : count > 10 ? 8.2f : 7.0f; // bei 32 Bewohnern ein weiterer Kreis
     return m_world->ground(std::cos(a) * r, std::sin(a) * r);
 }
 
@@ -419,7 +419,8 @@ uint32_t Match::abilitiesFor(uint8_t id) const {
         if (night && !p->nightAbilityUsed) a |= AbilityStab;
         break;
     case Role::Vampire:
-        if (night && m_vampireBites > 0) a |= AbilityBite; // keine Türen: ohne Einladung kommt ein Vampir nicht hinein
+        if (night) a |= AbilityTransform;
+        if (night && p->vampireForm && m_vampireBites > 0) a |= AbilityBite; // keine Türen: ohne Einladung kommt ein Vampir nicht hinein
         break;
     case Role::Arsonist:
         if (night && !p->nightAbilityUsed) {
@@ -531,6 +532,7 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
     case Interaction::Bite:
         if (!(abilities & AbilityBite)) {
             if (!isVampireRole(p->role) || m_phase != Phase::Night) return cannotAttack;
+            if (!p->vampireForm) return {"Verwandle dich zuerst (R).", "Transform first (R)."};
             return {"Der Clan hat heute Nacht schon getrunken.", "The clan has already fed tonight."};
         }
         if (p->attackCooldown > 0.0f) return windingUp;
@@ -718,9 +720,9 @@ std::vector<EntityState> Match::entitiesFor(uint8_t viewer) const {
             e.flags = p.moveFlags;
             if (p.wolfForm()) e.flags |= EntityWolf;
             if (p.attackAnim > 0.0f) e.flags |= EntityAttack;
-            if (night && p.transform < 0.01f && p.role != Role::SerialKiller && p.role != Role::Arsonist && !isVampireRole(p.role))
+            if (night && p.transform < 0.01f && p.role != Role::SerialKiller && p.role != Role::Arsonist && !p.vampireForm)
                 e.flags |= EntityLantern;
-            if (night && isVampireRole(p.role)) e.flags |= EntityRedEyes;
+            if (night && p.vampireForm) e.flags |= EntityRedEyes;
             out.push_back(e);
         } else {
             if (!p.buried) {
@@ -863,6 +865,17 @@ bool Match::hidesSpeaker(uint8_t listener, ChatChannel channel) const {
            l->effectiveRole() == Role::LittleGirl && m_phase != Phase::GameOver;
 }
 
+bool Match::hidesSpeaker(uint8_t listener, ChatChannel channel, uint8_t speaker) const {
+    if (hidesSpeaker(listener, channel)) return true;
+    if (channel != ChatChannel::Nearby || m_phase == Phase::GameOver) return false;
+    const Player* l = find(listener);
+    const Player* s = find(speaker);
+    if (!l || !s || !l->alive || l->id == s->id) return false;
+    if (s->wolfForm()) return !isWolfRole(l->role);
+    if (s->vampireForm) return !isVampireRole(l->role);
+    return false;
+}
+
 bool Match::canHear(uint8_t listener, uint8_t speaker, ChatChannel channel) const {
     if (!canReadChannel(listener, channel)) return false;
     const Player* l = find(listener);
@@ -904,7 +917,8 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
 
     switch (kind) {
     case Interaction::Transform:
-        p->transformTarget = targetId ? 1.0f : 0.0f;
+        if (isVampireRole(p->role)) p->vampireForm = targetId != 0;
+        else p->transformTarget = targetId ? 1.0f : 0.0f;
         break;
     case Interaction::Attack:
         if (isWolfRole(t->role)) {
@@ -1299,6 +1313,7 @@ void Match::kill(uint8_t id, DeathCause cause, bool announceNow, uint8_t killer)
     p->ghostPosition = p->position + Vec3{0, 0.4f, 0};
     p->ghostYaw = p->yaw;
     p->transform = p->transformTarget = 0.0f;
+    p->vampireForm = false;
     p->vote = kNoPlayer;
     p->burn = 0.0f;
     if (p->role == Role::Hunter && cause != DeathCause::Left) {
@@ -1621,6 +1636,7 @@ void Match::enterAssembly(const Text& reason, float seconds) {
         alive[i]->lastMoveTime = m_clock;
         alive[i]->needsCorrection = true;
         alive[i]->transform = alive[i]->transformTarget = 0.0f;
+        alive[i]->vampireForm = false;
         alive[i]->burn = 0.0f;
     }
     // Der Bär brummt, wenn ein Sitznachbar ein Werwolf ist
@@ -1827,6 +1843,7 @@ void Match::enterMorning() {
     }
     for (Player& p : m_players) {
         p.transform = p.transformTarget = 0.0f;
+        p.vampireForm = false;
         p.acting = Role::Unknown;
     }
 
@@ -1938,6 +1955,7 @@ bool Match::checkWin() {
     m_phaseDuration = 0.0f;
     for (Player& p : m_players) {
         p.transform = p.transformTarget = 0.0f;
+        p.vampireForm = false;
         p.successorTimer = 0.0f;
     }
     markDirty();

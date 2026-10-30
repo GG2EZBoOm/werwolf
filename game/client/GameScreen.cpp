@@ -238,7 +238,13 @@ void App::buildPrompts(const GameView& v) {
     }
     if (v.can(AbilityRingBell) && distanceXZ(me, m_world.bell()) < kBellRange)
         add(Interaction::RingBell, "E", L("Glocke läuten – Versammlung einberufen", "Ring the bell – call a gathering"), 0, true);
-    if (v.can(AbilityTransform)) {
+    if (v.can(AbilityTransform) && isVampireRole(v.yourRole)) {
+        bool vampire = false;
+        for (const EntityState& e : m_entities)
+            if (e.id == v.you && e.kind == EntityLiving) vampire = e.flags & EntityRedEyes;
+        add(Interaction::Transform, "R", vampire ? L("Zurück in Menschengestalt", "Back to human form") : L("Vampirgestalt annehmen", "Take on vampire form"),
+            0, true, vampire ? 0 : 1);
+    } else if (v.can(AbilityTransform)) {
         const bool wolf = m_myTransform > 0.5f;
         add(Interaction::Transform, "R", wolf ? L("Zurückverwandeln", "Change back") : L("In einen Werwolf verwandeln", "Turn into a werewolf"), 0, true,
             wolf ? 0 : 1);
@@ -583,7 +589,7 @@ void App::renderMatch3D() {
         uint8_t flags = 0;
         for (const EntityState& e : m_entities)
             if (e.id == v.you && e.kind == EntityLiving) flags = e.flags;
-        const bool lantern = night > 0.3f && m_myTransform < 0.01f && !isVampireRole(v.yourRole);
+        const bool lantern = night > 0.3f && m_myTransform < 0.01f && !(flags & EntityRedEyes);
         if (alive) drawFigure(v.you, m_player, m_myTransform, flags | (lantern ? EntityLantern : 0), EntityLiving);
         else drawFigure(v.you, m_player, 0.0f, 0, EntityGhost);
     }
@@ -647,9 +653,11 @@ void App::drawNameTags(const GameView& v) {
     const bool seeThroughWalls = !imAlive() || v.phase == Phase::GameOver;
     const DoorMask closed = m_net.closedDoors();
 
-    auto tag = [&](uint8_t id, Vec3 feet, float height, bool corpse, bool ghost) {
+    auto tag = [&](uint8_t id, Vec3 feet, float height, bool corpse, bool ghost, bool beast = false) {
         const PlayerView* p = v.player(id);
         if (!p) return;
+        const bool ally = (isWolfRole(v.yourRole) && isWolfRole(p->role)) || (isVampireRole(v.yourRole) && isVampireRole(p->role));
+        const bool nameless = beast && !ally && !seeThroughWalls;
         Vec2 screen;
         const Vec3 head = feet + Vec3{0, height, 0};
         if (!m_renderer3d.worldToScreen(head, screen)) return;
@@ -673,11 +681,13 @@ void App::drawNameTags(const GameView& v) {
         const float w = m_fonts.smallBold.measure(label) + 16.0f;
         const Rect plate{pt.x - w * 0.5f, pt.y - 11.0f, w, 22.0f};
         Color fg = corpse ? theme::muted : ghost ? Color::hex(0xB8CCF2) : theme::playerColor(id);
-        if (id == m_aimTarget) r.roundRectOutline(plate.shrink(-2.0f), 12.0f, 1.5f, theme::gold.fade(alpha));
-        r.roundRect(plate, 11.0f, Color::hex(0x0A0D1A, 0.62f * alpha));
-        r.textCentered(m_fonts.smallBold, plate, label, fg.fade(alpha));
+        if (!nameless) {
+            if (id == m_aimTarget) r.roundRectOutline(plate.shrink(-2.0f), 12.0f, 1.5f, theme::gold.fade(alpha));
+            r.roundRect(plate, 11.0f, Color::hex(0x0A0D1A, 0.62f * alpha));
+            r.textCentered(m_fonts.smallBold, plate, label, fg.fade(alpha));
+        }
 
-        if (!corpse && votes.count(id)) {
+        if (!corpse && !nameless && votes.count(id)) {
             const Rect badge{plate.right() + 4.0f, plate.y, 24.0f, 22.0f};
             r.roundRect(badge, 11.0f, theme::blood.fade(alpha));
             r.textCentered(m_fonts.smallBold, badge, std::to_string(votes[id]), Color::hex(0xFFFFFF, alpha));
@@ -723,7 +733,8 @@ void App::drawNameTags(const GameView& v) {
         CharacterPose pose;
         pose.wolf = f.transform;
         pose.dead = f.kind == EntityCorpse;
-        tag(id, f.mover.position, m_characters.headHeight(pose) + 0.35f, f.kind == EntityCorpse, f.kind == EntityGhost);
+        const bool beast = f.kind == EntityLiving && (f.transform > 0.3f || (f.flags & (EntityWolf | EntityRedEyes)));
+        tag(id, f.mover.position, m_characters.headHeight(pose) + 0.35f, f.kind == EntityCorpse, f.kind == EntityGhost, beast);
     }
 }
 
@@ -833,17 +844,24 @@ void App::drawVotePanel(const GameView& v) {
     for (const PlayerView& p : v.players)
         if (p.alive) alive.push_back(&p);
     const float rowH = 30.0f;
-    const Rect panel{28.0f, 150.0f, 260.0f, 70.0f + rowH * static_cast<float>(alive.size())};
+    const size_t columns = alive.size() > 14 ? 2 : 1; // bei vielen Lebenden zweispaltig, sonst läuft die Liste aus dem Bild
+    const size_t perColumn = (alive.size() + columns - 1) / columns;
+    const float columnW = 232.0f, columnGap = 10.0f;
+    const Rect panel{28.0f, 150.0f, 28.0f + columnW * static_cast<float>(columns) + columnGap * static_cast<float>(columns - 1),
+                     70.0f + rowH * static_cast<float>(perColumn)};
     m_hudBlockers.push_back(panel);
     m_kit.beginTilt(panel, 0.012f);
     m_kit.paper(panel, 15000u);
     m_kit.nail({panel.center().x, panel.y + 12.0f});
     r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.election ? L("Hauptmannwahl", "Captain election") : L("Wer soll hängen?", "Who shall hang?"),
            inkRed);
-    float y = panel.y + 58.0f;
     const bool canVote = v.can(AbilityVote);
+    size_t index = 0;
     for (const PlayerView* p : alive) {
-        const Rect row{panel.x + 14.0f, y, panel.w - 28.0f, rowH - 2.0f};
+        const size_t column = index / std::max<size_t>(1, perColumn), line = index % std::max<size_t>(1, perColumn);
+        ++index;
+        const Rect row{panel.x + 14.0f + static_cast<float>(column) * (columnW + columnGap), panel.y + 58.0f + static_cast<float>(line) * rowH,
+                       columnW, rowH - 2.0f};
         const bool mine = v.vote == p->id;
         const bool clickable = canVote && p->id != v.you && !m_window.isMouseCaptured();
         if (m_ui.clickArea(std::format("vote/{}", p->id), row, clickable)) m_net.sendInteract(Interaction::Vote, mine ? kNoPlayer : p->id);
@@ -861,7 +879,6 @@ void App::drawVotePanel(const GameView& v) {
             if (k % 5 == 4) m_kit.inkLine({x - 30.0f, row.y + 18.0f}, {x + 2.0f, row.y + 8.0f}, 1.6f, inkRed, 1.0f, static_cast<uint32_t>(k));
             else m_kit.inkLine({x, row.y + 6.0f}, {x - 1.0f, row.y + 21.0f}, 1.6f, v.election ? inkDark : inkRed, 1.0f, static_cast<uint32_t>(k + 9));
         }
-        y += rowH;
     }
     m_kit.endTilt();
 }
@@ -1093,8 +1110,8 @@ void App::drawGameOver(const GameView& v) {
 
     // Steckbriefe aller Bewohner
     const int n = static_cast<int>(v.players.size());
-    const int cols = std::min(n, W > 1150.0f ? 8 : 6);
     const float cw = 118.0f, ch = 160.0f, gap = 16.0f;
+    const int cols = std::max(1, std::min(n, std::max(6, static_cast<int>((W - 80.0f) / (cw + gap)))));
     const int rows = (n + cols - 1) / std::max(1, cols);
     const float gy = head.bottom() + 30.0f;
     for (int i = 0; i < n; ++i) {

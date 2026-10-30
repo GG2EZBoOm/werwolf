@@ -193,14 +193,14 @@ const char* roleDescription(Role role, Lang lang) {
                  "You fight alone. Every night you kill with your knife (left click) without transforming. Werewolves "
                  "cannot harm you. Be the last one standing.");
     case Role::Vampire:
-        return t("Du gehörst zum Clan der Vampire und kennst deine Gefährten. Nachts beißt euer Clan lautlos ein Opfer "
-                 "(Linksklick) – man findet es blutleer. Durch geschlossene Türen kommt ihr nicht, und im Dunkeln glühen "
-                 "eure Augen schwach rot. Werwölfe sind eure Feinde: Ihr gewinnt, wenn kein Werwolf mehr lebt und ihr "
-                 "mindestens so viele seid wie alle anderen.",
-                 "You belong to the vampire clan and know your companions. At night your clan silently bites one victim "
-                 "(left click) – it is found drained of blood. You cannot pass closed doors, and in the dark your eyes "
-                 "glow a faint red. Werewolves are your enemies: you win once no werewolf is left and you are at least "
-                 "as many as everyone else.");
+        return t("Du gehörst zum Clan der Vampire und kennst deine Gefährten. Nachts nimmst du deine Vampirgestalt an "
+                 "(R): Dann glühen deine Augen rot, niemand sieht deinen Namen, und euer Clan beißt lautlos ein Opfer "
+                 "(Linksklick) – man findet es blutleer. Durch geschlossene Türen kommt ihr nicht. Werwölfe sind eure "
+                 "Feinde: Ihr gewinnt, wenn kein Werwolf mehr lebt und ihr mindestens so viele seid wie alle anderen.",
+                 "You belong to the vampire clan and know your companions. At night you take on your vampire form (R): "
+                 "your eyes glow red, nobody sees your name, and your clan silently bites one victim (left click) – it is "
+                 "found drained of blood. You cannot pass closed doors. Werewolves are your enemies: you win once no "
+                 "werewolf is left and you are at least as many as everyone else.");
     case Role::Arsonist:
         return t("Du kämpfst allein. Nachts tränkst du Häuser mit Öl (E an der Tür) und zündest alle auf einmal an (F) "
                  "– wer drinnen ist, verbrennt. Gewinne als Letzter.",
@@ -440,7 +440,7 @@ void Settings::set(Role role, bool enabled) {
 }
 
 void Settings::sanitize() {
-    wolves = std::min<uint8_t>(wolves, 6);
+    wolves = std::min<uint8_t>(wolves, 10);
     uint64_t allowed = 0;
     for (int r = 0; r < static_cast<int>(Role::Count); ++r)
         if (isOptionalRole(static_cast<Role>(r))) allowed |= uint64_t{1} << r;
@@ -474,13 +474,16 @@ bool Settings::read(eng::ByteReader& r) {
     return r.ok();
 }
 
-int autoVampireCount(int players) { return players >= 10 ? 2 : 1; }
+int autoVampireCount(int players) { return players >= 22 ? 3 : players >= 10 ? 2 : 1; }
 
 int autoWolfCount(int players) {
     if (players <= 6) return 1;
     if (players <= 10) return 2;
     if (players <= 14) return 3;
-    return 4;
+    if (players <= 19) return 4;
+    if (players <= 24) return 5;
+    if (players <= 28) return 6;
+    return 7;
 }
 
 std::vector<Role> buildRoleList(const Settings& settings, int players, Text* error) {

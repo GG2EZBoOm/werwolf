@@ -22,7 +22,10 @@ constexpr size_t kHistoryLimit = 150;
 
 const std::vector<std::string> kBotNames = {"Anton", "Berta", "Clara",  "Dieter", "Emil",  "Frieda",
                                             "Gustav", "Hanna", "Ida",   "Jakob",  "Karl",  "Luise",
-                                            "Martha", "Otto",  "Paula", "Wilhelm"};
+                                            "Martha", "Otto",  "Paula", "Wilhelm", "Bruno", "Elsa",
+                                            "Franz",  "Greta", "Heinrich", "Irma", "Johann", "Lotte",
+                                            "Max",    "Nora",  "Oskar",  "Rosa",  "Theo",   "Vera",
+                                            "Walter", "Zita"};
 
 } // namespace
 
@@ -529,7 +532,7 @@ void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves) {
         if (!target->conn) continue;
         const bool hears = m_match ? m_match->canHear(target->id, memberId, channel) : true;
         if (!hears) continue;
-        const bool hidden = m_match && m_match->hidesSpeaker(target->id, channel);
+        const bool hidden = m_match && m_match->hidesSpeaker(target->id, channel, memberId);
         target->conn->send(hidden ? anonymous.data() : w.data());
     }
     if (m_match) deliverChat(m_bots, *m_match, memberId, text, channel, m_rng);
@@ -591,7 +594,7 @@ void GameServer::sendHistory(Member& m) {
     for (const HistoryEntry& e : m_history) {
         if (e.isChat) {
             if (m_match && !m_match->canReadChannel(m.id, e.channel)) continue;
-            const bool hidden = m_match && m_match->hidesSpeaker(m.id, e.channel);
+            const bool hidden = m_match && m_match->hidesSpeaker(m.id, e.channel, e.from);
             ByteWriter w = proto::begin(proto::ServerMsg::Chat);
             w.u8(static_cast<uint8_t>(e.channel));
             w.u8(hidden ? kNoPlayer : e.from);

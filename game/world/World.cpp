@@ -786,7 +786,8 @@ bool World::insideBuilding(Vec2 p, float margin) const {
 
 Vec3 World::spawnPoint(int index, int count) const {
     const float a = 2.0f * kPi * static_cast<float>(index) / static_cast<float>(std::max(1, count)) + 0.3f;
-    return ground(std::cos(a) * 8.0f, std::sin(a) * 8.0f);
+    const float r = count > 20 ? 10.5f : 8.0f;
+    return ground(std::cos(a) * r, std::sin(a) * r);
 }
 
 } // namespace ww

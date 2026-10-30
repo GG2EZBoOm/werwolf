@@ -13,7 +13,7 @@ namespace ww {
 
 constexpr uint8_t kNoPlayer = 255;
 constexpr int kMinPlayers = 4;
-constexpr int kMaxPlayers = 16;
+constexpr int kMaxPlayers = 32;
 
 enum class Role : uint8_t {
     Unknown = 0,
