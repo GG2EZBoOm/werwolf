@@ -35,9 +35,10 @@ struct Scene {
     Bot bot{1, 12};
     std::vector<Text> lines;
     Bot::SayFn say = [&](uint8_t, const Text& text, bool) { lines.push_back(text); };
-    Scene(LocalLanguage* model = nullptr, Role role = Role::Villager) {
+    Scene(LocalLanguage* model = nullptr, Role role = Role::Villager, bool reveal = true) {
         world.generate(4242);
         Settings s; s.captain = false; s.daySeconds = 120; s.discussionSeconds = 120;
+        s.revealRoles = reveal;
         Text error;
         CHECK(match.startWithRoles({{0,"Spieler",false},{1,"Anton",true},{2,"Berta",true},
               {3,"Clara",false},{4,"Dieter",true},{5,"Emil",true}},
@@ -49,10 +50,154 @@ struct Scene {
     void advance(float seconds) {
         for (float t = 0; t < seconds; t += 0.1f) { match.update(0.1f); bot.update(0.1f, match, say); }
     }
+    void phase(Phase target) {
+        for (int i = 0; i < 12 && match.phase() != target; ++i) { match.skipPhase(); match.update(.1f); }
+        CHECK_EQ(match.phase(), target);
+        bot.update(.01f, match, say);
+    }
+    LanguageRequest knowledge(ChatChannel channel = ChatChannel::Global) const {
+        return bot.languageRequest(match, 0, channel, {}, false);
+    }
     bool has(const std::string& text) const {
         return std::any_of(lines.begin(), lines.end(), [&](const Text& t) { return t.de.find(text) != std::string::npos; });
     }
 };
+std::string chosen(int id) {
+    std::string result = good;
+    const auto at = result.find("{\\\"de\\\"");
+    result.insert(at + 1, "\\\"grund\\\":" + std::to_string(id) + ",");
+    return result;
+}
+}
+
+TEST(KnowledgePreservesSourceTimeAndSurvivesShortConversationHistory) {
+    Scene s;
+    s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+    const auto before = s.knowledge();
+    CHECK_EQ(before.reasons.size(), 1u);
+    CHECK_EQ(before.reasons.front().source, 0);
+    CHECK_EQ(before.reasons.front().target, 2);
+    CHECK_EQ(before.reasons.front().day, s.match.day());
+    CHECK_EQ(before.reasons.front().time, s.match.clock());
+    CHECK_EQ(before.reasons.front().kind, "behauptung");
+    CHECK(before.reasons.front().text.de.find("nicht selbst bestätigt") != std::string::npos);
+    for (int i = 0; i < 30; ++i) s.bot.hear(s.match, 0, Text::same("Hallo zusammen"), ChatChannel::Global, false);
+    CHECK_EQ(s.knowledge().reasons.front().text, before.reasons.front().text);
+    for (int i = 0; i < 30; ++i) s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+    CHECK_EQ(s.knowledge().reasons.size(), 1u);
+    CHECK_EQ(s.knowledge().assessments.front().suspicion, before.assessments.front().suspicion);
+}
+
+TEST(KnowledgeReplacesCorrectedAccusationsAndSeparatesContradictions) {
+    Scene s;
+    s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+    s.bot.hear(s.match, 0, Text::same("Korrektur: Berta ist kein Wolf"), ChatChannel::Global, false);
+    const auto r = s.knowledge();
+    bool corrected = false, cleared = false;
+    for (const auto& n : r.reasons) {
+        if (n.kind == "behauptung") { CHECK(n.weight < 0); cleared = true; }
+        if (n.kind == "widerspruch") { CHECK_EQ(n.weight, 0); corrected = true; }
+    }
+    CHECK(corrected && cleared);
+    s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+    const auto contradicted = s.knowledge();
+    CHECK(std::any_of(contradicted.reasons.begin(), contradicted.reasons.end(), [](const auto& n) { return n.kind == "widerspruch" && n.weight > 0; }));
+}
+
+TEST(KnowledgeKeepsPrivateChannelsOutOfPublicReplies) {
+    Scene s;
+    s.phase(Phase::Day);
+    s.match.teleport(0, s.world.ground(4,9)); s.match.teleport(1, s.world.ground(5,9));
+    s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Nearby, false);
+    CHECK(!s.knowledge(ChatChannel::Nearby).reasons.empty());
+    CHECK(s.knowledge(ChatChannel::Global).reasons.empty());
+    s.bot.hear(s.match, 2, Text::same("Clara ist ein Wolf"), ChatChannel::Wolves, false);
+    const auto privateView = s.knowledge(ChatChannel::Nearby);
+    CHECK(std::none_of(privateView.reasons.begin(), privateView.reasons.end(), [](const auto& n) { return n.source == 2; }));
+}
+
+TEST(KnowledgeDoesNotExportUnrevealedSeerChecks) {
+    Scene s(nullptr, Role::Seer);
+    s.phase(Phase::Night);
+    s.match.teleport(1, s.world.ground(4,9)); s.match.teleport(2, s.world.ground(6,9));
+    CHECK(s.match.interact(1, Interaction::Inspect, 2).empty());
+    s.bot.update(.01f, s.match, s.say);
+    s.phase(Phase::Day);
+    const auto hidden = s.knowledge();
+    CHECK(std::none_of(hidden.reasons.begin(), hidden.reasons.end(), [](const auto& n) { return n.kind == "offengelegte_pruefung"; }));
+    s.phase(Phase::Vote);
+    const auto publicKnowledge = s.knowledge();
+    CHECK(std::any_of(publicKnowledge.reasons.begin(), publicKnowledge.reasons.end(), [](const auto& n) {
+        return n.kind == "offengelegte_pruefung" && n.target == 2 && n.source == 1 && n.day > 0;
+    }));
+}
+
+TEST(KnowledgeExplainsWrongfulVotesOnlyWithPubliclyRevealedRole) {
+    for (bool reveal : {true, false}) {
+        Scene s(nullptr, Role::Villager, reveal);
+        s.phase(Phase::Vote);
+        for (uint8_t voter : std::array<uint8_t,4>{0,1,3,4}) CHECK(s.match.interact(voter, Interaction::Vote, 5).empty());
+        s.bot.update(.01f, s.match, s.say);
+        s.phase(Phase::Execution);
+        const auto r = s.knowledge();
+        CHECK_EQ(std::any_of(r.reasons.begin(), r.reasons.end(), [](const auto& n) { return n.kind == "abstimmung" && n.target == 0 && n.weight > 0; }), reveal);
+    }
+}
+
+TEST(LanguageSelectsOnlyApprovedReasonsAndRetainsAttribution) {
+    auto r = request(); r.chooseReason = true;
+    r.reasons.push_back({2,0,2,30,.7f,"behauptung", {"Spieler hat Berta an Tag 2 beschuldigt. Das ist Hörensagen.",
+                                                   "Spieler accused Berta on day 2. This is hearsay."}, {}});
+    Text out;
+    CHECK(languageReply(r, chosen(0), out));
+    CHECK(out.de.ends_with(r.reasons[0].text.de)); CHECK(out.en.ends_with(r.reasons[0].text.en));
+    CHECK_EQ(out, r.reasons[0].text); // even a wrong generated preface cannot change attribution
+    CHECK(!languageReply(r, chosen(1), out)); CHECK(!languageReply(r, chosen(-2), out));
+    r.focus = 3; CHECK(!languageReply(r, chosen(0), out)); r.focus = kNoPlayer;
+    r.preserveStance = true;
+    CHECK(!languageReply(r, chosen(0), out));
+    r.preserveStance = false; r.chooseReason = false;
+    CHECK(!languageReply(r, chosen(0), out));
+}
+
+TEST(KnowledgeKeepsReportedSeerEvidenceWhenAWeakerOpinionFollows) {
+    Scene s;
+    s.bot.hear(s.match, 0, Text::same("Ich bin die Seherin. Ich habe Berta geprüft, sie ist ein Wolf"), ChatChannel::Global, false);
+    const auto first = s.knowledge();
+    const auto original = std::find_if(first.reasons.begin(), first.reasons.end(), [](const auto& n) { return n.kind == "behauptung" && n.target == 2; });
+    CHECK(original != first.reasons.end());
+    if (original == first.reasons.end()) return;
+    s.bot.hear(s.match, 0, Text::same("Berta wirkt verdächtig"), ChatChannel::Global, false);
+    const auto after = s.knowledge();
+    CHECK(std::any_of(after.reasons.begin(), after.reasons.end(), [&](const auto& n) { return n.text == original->text; }));
+}
+
+TEST(KnowledgePrivateInnocentCheckVetoesAccusationWithoutRevealingRole) {
+    Scene s(nullptr, Role::Seer);
+    s.phase(Phase::Night);
+    s.match.teleport(1, s.world.ground(4,9)); s.match.teleport(3, s.world.ground(6,9));
+    CHECK(s.match.interact(1, Interaction::Inspect, 3).empty());
+    s.bot.update(.01f, s.match, s.say);
+    s.phase(Phase::Assembly);
+    s.bot.hear(s.match, 0, Text::same("Clara ist ein Wolf"), ChatChannel::Global, false);
+    const auto r = s.knowledge();
+    CHECK(std::none_of(r.reasons.begin(), r.reasons.end(), [](const auto& n) { return n.target == 3 && n.weight > 0; }));
+    CHECK(std::none_of(r.reasons.begin(), r.reasons.end(), [](const auto& n) { return n.kind == "offengelegte_pruefung"; }));
+}
+
+TEST(CorrectionsWhileModelThinksInvalidateOldReason) {
+    std::atomic<bool> release{false}, entered{false};
+    LocalLanguage model({}, [&](const std::string&, std::string& out) {
+        entered = true; waitUntil([&] { return release.load(); }); out = chosen(0); return true;
+    });
+    Scene s(&model);
+    s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+    s.bot.hear(s.match, 0, Text::same("Anton, warum verdächtigst du Berta?"));
+    CHECK(waitUntil([&] { return entered.load(); }));
+    s.bot.hear(s.match, 0, Text::same("Korrektur: Berta ist kein Wolf"), ChatChannel::Global, false);
+    release = true;
+    CHECK(waitUntil([&] { s.advance(.1f); return s.has("inzwischen geändert"); }));
+    CHECK(!s.has("hat Berta an Tag"));
 }
 
 TEST(LanguagePayloadEscapesUntrustedNamesAndMessages) {
@@ -122,6 +267,17 @@ TEST(LanguageFallbackAndDisabledModeKeepExistingBotsPlayable) {
     CHECK_EQ(old.bot.replyPriority(old.match, 0, Text::same("Mir wird das hier alles zu viel."), ChatChannel::Global), 0);
 }
 
+TEST(LanguageDoesNotOverrideStrategicRoleAnswers) {
+    std::atomic<int> calls{0};
+    LocalLanguage model({}, [&](const std::string&, std::string& out) { ++calls; out = good; return true; });
+    Scene s(&model);
+    s.bot.hear(s.match, 0, Text::same("Anton, welche Rolle hast du?"));
+    s.advance(10);
+    CHECK(!s.lines.empty());
+    CHECK_EQ(calls.load(), 0);
+    CHECK(!s.has("Was genau macht dich so nervös?"));
+}
+
 TEST(LanguageDoesNotReceiveUnheardMessagesOrSecretRoleTables) {
     std::string captured;
     std::atomic<bool> seen{false};
@@ -172,6 +328,40 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
+    if (argc == 3 && std::string(argv[1]) == "--live-memory") {
+        LocalLanguage::Options options;
+        options.directory = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(argv[2])));
+        options.diagnostics = true;
+        LocalLanguage model(options);
+        if (!waitUntil([&] { return model.available(); }, 60)) return 1;
+        Scene s(&model);
+        s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
+        auto query = [&](const std::string& question, const std::string& expectedKind, float sign) {
+            s.bot.hear(s.match, 0, Text::same(question), ChatChannel::Global, false);
+            auto r = s.knowledge(); r.chooseReason = true;
+            const auto ticket = model.submit(r); std::optional<Text> out;
+            const double begin = eng::nowSeconds();
+            if (!waitUntil([&] { return model.take(ticket, out); }, 10) || !out) { std::puts("MEMORY FALLBACK"); return false; }
+            std::printf("\nFRAGE: %s\nDE: %s\nEN: %s\nZEIT: %.2f s\n", question.c_str(), out->de.c_str(), out->en.c_str(), eng::nowSeconds()-begin);
+            return std::any_of(r.reasons.begin(), r.reasons.end(), [&](const auto& n) {
+                return n.kind == expectedKind && n.weight * sign > 0 && out->de.ends_with(n.text.de) && out->en.ends_with(n.text.en);
+            });
+        };
+        int passed = query("Anton, was genau spricht aus deiner Sicht gegen Berta? Wer hat das gesagt?", "behauptung", 1) ? 1 : 0;
+        // Exercise the full bot queue, knowledge snapshot and reply validation with the real model.
+        s.bot.setLanguageModel(&model);
+        s.bot.hear(s.match, 0, Text::same("Anton, warum verdächtigst du Berta?"));
+        const bool integrated = waitUntil([&] { s.advance(.1f); return s.has("Spieler hat Berta an Tag"); }, 10);
+        std::printf("BOT-INTEGRATION: %s\n", integrated ? "OK" : "FEHLER");
+        passed += integrated ? 1 : 0;
+        s.bot.hear(s.match, 0, Text::same("Korrektur: Berta ist kein Wolf"), ChatChannel::Global, false);
+        passed += query("Anton, wird Berta inzwischen auch entlastet?", "behauptung", -1) ? 1 : 0;
+        s.bot.hear(s.match, 0, Text::same("Ich war die ganze Nacht zu Hause"), ChatChannel::Global, false);
+        s.bot.hear(s.match, 0, Text::same("Ich war die ganze Nacht im Wald"), ChatChannel::Global, false);
+        passed += query("Anton, was passt an meinen Angaben zum Aufenthaltsort nicht zusammen?", "alibiwechsel", 1) ? 1 : 0;
+        std::printf("\nReale Gedächtnis-Abfragen und Bot-Integration bestanden: %d/4\n", passed);
+        return passed == 4 ? 0 : 1;
+    }
     if (argc == 3 && std::string(argv[1]) == "--live-game") {
         ServerOptions options;
         options.port = 27997; options.timeScale = 4;

@@ -77,6 +77,9 @@ public:
     const Speech* speaking() const { return m_speaking ? &*m_speaking : nullptr; }
     void setLanguageModel(LocalLanguage* language) { m_language = language; }
     void cancelLanguageReplies();
+    // A filtered snapshot for dialogue and QA; private roles/results are never exported wholesale.
+    LanguageRequest languageRequest(const Match& match, uint8_t speaker, ChatChannel channel,
+                                    const Text& stance, bool preserve) const;
 
 private:
     enum class Nav { Moving, Arrived, Blocked };
@@ -121,8 +124,10 @@ private:
     bool repeats(uint8_t speaker, const dialogue::Message& message) const;
     void speak(const SayFn& say, const Text& text, bool secret, Speech speech = {});
     void updateConversation(float dt, const Match& match, const SayFn& say);
-    LanguageRequest languageRequest(const Match& match, uint8_t speaker, ChatChannel channel,
-                                    const Text& stance, bool preserve) const;
+    void rememberDialogue(const Match& match, uint8_t speaker, ChatChannel channel, const dialogue::Message& message);
+    void rememberReason(std::string kind, uint8_t target, uint8_t source, int day, double time,
+                        ChatChannel channel, float weight, Text text, std::optional<Evidence> evidence = {});
+    void addLanguageKnowledge(const Match& match, uint8_t speaker, ChatChannel channel, LanguageRequest& request) const;
     // Täuschung der Wölfe
     bool packSpeaker(const Match& match) const;        // dieser Wolf-Bot spricht fürs Rudel (niedrigste Nummer)
     bool packClaimedSeer(const Match& match) const;    // jemand aus dem Rudel gibt sich schon als Seherin aus
@@ -193,12 +198,29 @@ private:
         Speech speech;
         uint64_t languageTicket = 0;
         double languageDeadline = 0;
+        std::vector<std::pair<Text, std::optional<Evidence>>> languageReasons;
     };
     std::deque<Reply> m_replies;          // angesprochene Fragen warten, statt verloren zu gehen
     std::optional<Reply> m_lastReply;     // zuletzt gegebene Antwort (gegen Wiederholungen)
     LocalLanguage* m_language = nullptr; // server owns the worker; never accessed from that worker
     struct HeardLine { uint8_t speaker; Text text; ChatChannel channel; int day; };
     std::deque<HeardLine> m_conversation;
+    struct Knowledge {
+        std::string kind;
+        uint8_t target = kNoPlayer, source = kNoPlayer;
+        int day = 0;
+        double time = 0;
+        ChatChannel channel = ChatChannel::Global;
+        float weight = 0;
+        Text text;
+        std::optional<Evidence> evidence;
+        Role role = Role::Unknown;
+        dialogue::Place place = dialogue::Place::Unknown;
+        bool exclusive = false;
+        bool report = false;
+    };
+    std::deque<Knowledge> m_knowledge; // bounded, survives short chat history; corrections replace old claims
+    std::map<uint8_t, int> m_checkedNight;
     std::optional<Speech> m_speaking;
     double m_replyAfter = 0;              // so lange überlässt der Bot allgemeines Geplauder anderen
     double m_nextReply = 0;               // frühester Zeitpunkt der nächsten Antwort

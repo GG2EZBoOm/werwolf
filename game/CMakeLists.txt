@@ -18,6 +18,7 @@ add_library(werwolf_server_lib STATIC
     server/BotConversation.cpp
     server/BotSocial.cpp
     server/BotPsychology.cpp
+    server/BotKnowledge.cpp
     server/Dialogue.cpp
     server/LocalLanguage.cpp
     server/GameServer.cpp

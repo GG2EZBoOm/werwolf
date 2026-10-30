@@ -262,6 +262,7 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         message.claimedRole != Role::Seer && m_dialogue.claimedRole(speaker) != message.claimedRole;
     const auto* earlierClaimant = specialClaim ? match.find(m_dialogue.otherClaimant(message.claimedRole, speaker)) : nullptr;
     const bool contradiction = m_dialogue.remember(speaker, remembered, match.day());
+    rememberDialogue(match, speaker, channel, remembered);
     if (specialClaim && !isEvilRole(match.viewFor(m_id).yourRole)) {
         if (earlierClaimant && earlierClaimant->alive) {
             m_suspicion[speaker] += 0.8f;
@@ -343,12 +344,19 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
                               message.intent, message.topic, Speech{evidence, true}});
     if (!from->bot && m_language && m_language->available()) {
         auto& pending = m_replies.back();
-        // Keep all rule-based strategic/factual statements byte for byte. Only unconstrained
-        // small talk and otherwise unrecognized questions are fully composed by the model.
-        const bool preserve = evidence.has_value() || (message.intent != dialogue::Intent::Unknown &&
+        // Keep strategic answers and first-hand evidence entirely under the rules layer.
+        // Even a model preface can contradict a role bluff or claim not to know one's own role.
+        const bool reasoning = message.intent == dialogue::Intent::AskReason || message.intent == dialogue::Intent::AskSuspicion ||
+            message.intent == dialogue::Intent::AskInnocence || message.intent == dialogue::Intent::AskBelief;
+        const bool preserve = evidence.has_value() || (!reasoning && message.intent != dialogue::Intent::Unknown &&
                                                        message.intent != dialogue::Intent::Greeting);
-        pending.languageTicket = m_language->submit(languageRequest(match, speaker, channel, pending.text, preserve));
-        pending.languageDeadline = eng::nowSeconds() + 7.0;
+        if (!preserve) {
+            auto request = languageRequest(match, speaker, channel, pending.text, false);
+            request.chooseReason = message.intent != dialogue::Intent::Greeting;
+            for (const auto& reason : request.reasons) pending.languageReasons.emplace_back(reason.text, reason.evidence);
+            pending.languageTicket = m_language->submit(std::move(request));
+            pending.languageDeadline = eng::nowSeconds() + 7.0;
+        }
     }
 }
 
@@ -374,6 +382,7 @@ LanguageRequest Bot::languageRequest(const Match& match, uint8_t speaker, ChatCh
         if (line.channel != channel || line.day < match.day() - 1) continue;
         if (const auto* p = match.find(line.speaker)) r.history.emplace_back(p->name, line.text);
     }
+    addLanguageKnowledge(match, speaker, channel, r);
     return r;
 }
 
@@ -774,8 +783,23 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
         std::optional<Text> composed;
         if (m_language->take(waiting.languageTicket, composed)) {
             if (composed) {
-                waiting.text = std::move(*composed);
-                eng::log::info("Lokale KI: Antwort fuer Bot {}", m_id);
+                for (const auto& [line, evidence] : waiting.languageReasons)
+                    if (composed->de.ends_with(line.de) && composed->en.ends_with(line.en)) {
+                        const auto current = languageRequest(match, waiting.speaker, waiting.channel, waiting.text, false);
+                        if (std::none_of(current.reasons.begin(), current.reasons.end(), [&](const auto& n) { return n.text == line; })) {
+                            composed.reset(); // corrected, withdrawn, or no longer allowed to disclose
+                            waiting.text = {"Meine Einschätzung hat sich inzwischen geändert. Lasst uns die neuen Hinweise einordnen.",
+                                            "My assessment has changed in the meantime. Let's consider the new evidence."};
+                            waiting.speech.evidence.reset();
+                            break;
+                        }
+                        waiting.speech.evidence = evidence;
+                        break;
+                    }
+                if (composed) {
+                    waiting.text = std::move(*composed);
+                    eng::log::info("Lokale KI: Antwort fuer Bot {}", m_id);
+                }
             }
             waiting.languageTicket = 0;
         } else if (eng::nowSeconds() < waiting.languageDeadline) return;

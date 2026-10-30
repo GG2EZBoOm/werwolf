@@ -436,6 +436,13 @@ void Bot::review(const Match& match, const GameView& view) {
             reported = true;
             const float weight = atTheTime ? 2.0f : 1.0f;
             if (!wolf) m_suspicion[suspect] += weight;
+            if (!wolf)
+                rememberReason("tatort", suspect, m_id, view.day - 1, now, ChatChannel::Global, weight,
+                    atTheTime ? tx("In Nacht {} habe ich {} ungefähr zur Tatzeit dort gesehen, wo {} gestorben ist. Nähe ist ein Hinweis, kein sicherer Beweis.",
+                                   "On night {} I saw {} around the time of the killing where {} died. Being nearby is a lead, not certain proof.", view.day - 1, p->name, victim->name)
+                              : tx("In Nacht {} habe ich {} in der Nähe des späteren Fundorts von {} gesehen. Den Tatzeitpunkt kann ich damit nicht belegen.",
+                                   "On night {} I saw {} near where {} was later found. This does not establish their presence at the time of the killing.", view.day - 1, p->name, victim->name),
+                    Evidence{Evidence::Kind::Sighting, suspect, weight});
             plan(Phase::Assembly, view.day, 0,
                  atTheTime ? tx("Ich habe {} heute Nacht ungefähr zur Tatzeit dort gesehen, wo {} gestorben ist.",
                                 "I saw {} last night around the time of the killing, right where {} died.", p->name, victim->name)
@@ -478,6 +485,11 @@ void Bot::review(const Match& match, const GameView& view) {
                 if (p.alive && p.id != m_id && knownWolf(p.id) && m_dialogue.suspicion(p.id, view.day) > 1.0f) alibi = p.id;
         if (const auto* p = match.find(alibi)) {
             if (!wolf) m_suspicion[alibi] -= 2.5f;
+            if (!wolf)
+                rememberReason("beobachtetes_alibi", alibi, m_id, view.day - 1, now, ChatChannel::Global, -2.5f,
+                    tx("In Nacht {} war {} fast durchgehend in Menschengestalt bei mir, während anderswo gemordet wurde. Das entlastet, verrät aber keine sichere Rolle.",
+                       "On night {} {} was near me in human form almost throughout the night while killings happened elsewhere. That is exculpatory, but does not prove a role.", view.day - 1, p->name),
+                    Evidence{Evidence::Kind::Sighting, alibi, -1.5f});
             plan(Phase::Assembly, view.day, 0,
                  tx("{} war heute Nacht die ganze Zeit in meiner Nähe. Die Bestie kann das nicht gewesen sein.",
                     "{} was near me the whole night. That can't have been the beast.", p->name),
@@ -498,6 +510,18 @@ void Bot::review(const Match& match, const GameView& view) {
         std::vector<uint8_t> voters;
         for (const auto& [voter, target] : votes)
             if (target == p.id && voter != m_id) voters.push_back(voter);
+        if (view.settings.revealRoles)
+            for (uint8_t voter : voters) {
+                const auto* person = match.find(voter);
+                if (!person || !person->alive) continue;
+                rememberReason("abstimmung", voter, m_id, p.deathDay, p.deathClock, ChatChannel::Global, wasWolf ? -.4f : .5f,
+                    wasWolf
+                        ? tx("An Tag {} hat {} für {} gestimmt; danach wurde eine böse Rolle aufgedeckt. Das schafft Vertrauen, schließt ein taktisches Opfer aber nicht aus.",
+                             "On day {} {} voted for {}; an evil role was then revealed. That builds trust, but does not rule out a tactical sacrifice.", p.deathDay, person->name, p.name)
+                        : tx("An Tag {} hat {} für {} gestimmt; danach wurde eine unschuldige Rolle aufgedeckt. Das Fehlurteil macht mich misstrauisch, beweist aber keine Wolfsrolle.",
+                             "On day {} {} voted for {}; an innocent role was then revealed. The wrongful execution makes me suspicious, but does not prove a wolf role.", p.deathDay, person->name, p.name),
+                    Evidence{Evidence::Kind::Opinion, voter, wasWolf ? -.4f : .5f});
+            }
         if (me->alive && view.phase == Phase::Execution && m_rng.chance(std::min(0.8f, (wolf ? 0.15f : 0.35f) * m_personality.talk))) {
             static const std::array<Text, 2> caught = {{{"Ich wusste es!", "I knew it!"}, {"Endlich einer!", "Finally, one of them!"}}};
             static const std::array<Text, 2> innocent = {{

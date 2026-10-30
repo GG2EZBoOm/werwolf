@@ -275,6 +275,8 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
     const Match::Player* me = match.find(m_id);
     if (!me) return;
     const GameView view = match.viewFor(m_id);
+    for (const auto& result : view.seerResults)
+        m_checkedNight.try_emplace(result.player, view.phase == Phase::Night ? view.day : std::max(1, view.day - 1));
 
     // Position mit dem Server abgleichen (z. B. nach einem Teleport zur Versammlung)
     const Vec3 serverPos = me->alive ? me->position : me->ghostPosition;
@@ -320,6 +322,11 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
                 }
                 m_suspicion[seen] += 5.0f;
                 m_wolfWitness[seen] = view.day;
+                if (const auto* named = match.find(seen))
+                    rememberReason("eigenbeobachtung", seen, m_id, view.day, match.clock(), ChatChannel::Global, 5.0f,
+                        tx("In Nacht {} habe ich {} selbst in Wolfsgestalt erkannt. Im Dunkeln kann man sich trotzdem irren.",
+                           "On night {} I personally recognised {} in wolf form. It is still possible to be mistaken in the dark.", view.day, named->name),
+                        Evidence{Evidence::Kind::Witness, seen, 2.4f});
             }
         }
         // Rot glühende Augen in der Dunkelheit: aus der Nähe erkennt man, wer der Vampir ist
@@ -330,6 +337,11 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
             if (distanceXZ(pos, me->position) > 6.0f || !match.hasLineOfSight(pos, me->position) || !m_rng.chance(0.006f)) continue;
             m_suspicion[p.id] += 4.0f;
             m_vampireWitness[p.id] = view.day;
+            if (const auto* named = match.find(p.id))
+                rememberReason("eigenbeobachtung", p.id, m_id, view.day, match.clock(), ChatChannel::Global, 4.0f,
+                    tx("In Nacht {} habe ich {} selbst mit rot glühenden Augen gesehen. Deshalb verdächtige ich diese Person als Vampir.",
+                       "On night {} I personally saw {} with glowing red eyes. That is why I suspect this person of being a vampire.", view.day, named->name),
+                    Evidence{Evidence::Kind::Witness, p.id, 2.4f});
         }
         // Ein Wolf in Gestalt der Bestie merkt, wer ihn gesehen hat – und holt sich diesen Zeugen zuerst
         if (me->wolfForm())
@@ -348,6 +360,10 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
         m_reported = true;
         m_suspicion[me->trackTarget] += 6.0f;
         if (const Match::Player* t = match.find(me->trackTarget); t && t->alive) {
+            rememberReason("spur", t->id, m_id, view.day - 1, match.clock(), ChatChannel::Global, 6.0f,
+                tx("Als Fährtenleser habe ich in Nacht {} die Spur von {} bis zur Leiche von {} verfolgt.",
+                   "As tracker, on night {} I followed {}'s trail to {}'s body.", view.day - 1, t->name,
+                   match.find(me->trackVictims.front())->name), Evidence{Evidence::Kind::Trail, t->id, 2.0f});
             speak(say,
                   tx("Ich bin der Fährtenleser! Die Spur von {} führte heute Nacht direkt zur Leiche von {}!",
                      "I'm the tracker! The trail of {} led straight to the body of {} last night!", t->name,

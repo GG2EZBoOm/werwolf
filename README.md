@@ -166,11 +166,23 @@ entpackt es und startet `Installieren.cmd`. Das lädt etwa **2,6 GB** mit geprü
 Danach unter **Einstellungen → Bots → Lokale Bot-KI** einschalten und ein Spiel hosten.
 Nur der Host braucht das Paket; während der Partie läuft die Inferenz offline, ohne Konto, API-Schlüssel oder Gebühren.
 
-Das Modell bekommt den vom Bot gehörten Verlauf desselben Chatkanals, Stimmung, Beziehung zum Sprecher
-und die von der Spiellogik erlaubte Antwortabsicht. Geheime Rollentabellen, unbekannte Seherergebnisse und
-unhörbare Gespräche werden nicht übergeben. Rollenenthüllungen, Beweise und strategische Aussagen werden
-unverändert an einen optionalen KI-Kommentar angehängt. Abstimmung, Erinnerungen an Beweise, Fähigkeiten
-und Bewegung bleiben regelbasiert; das Modell entscheidet nicht eigenständig über Aktionen.
+Ab **0.11.0** bekommt das Modell zusätzlich das persönliche, offenlegbare Verdachtswissen des Bots:
+eigene Sichtungen, gehörte Beschuldigungen und Entlastungen, widersprüchliche Alibis und Rollenangaben,
+öffentlich aufgedeckte Fehlurteile sowie Beziehungen. Jeder Hinweis enthält Quelle, Tag, Spielzeit und
+Gewicht. Wiederholungen vervielfachen keinen Beweis; Korrekturen ersetzen die alte Aussage. Dieses
+Gedächtnis bleibt auch erhalten, wenn die ursprüngliche Nachricht aus dem kurzen Chatverlauf fällt.
+
+Bei Fragen wie „Warum verdächtigst du Berta?“ wählt das Modell einen passenden erlaubten Grund aus.
+Das Spiel übernimmt dessen genauen Wortlaut auf Deutsch und Englisch, damit Quelle und Unsicherheit
+erhalten bleiben: Eine gehörte Beschuldigung wird dadurch nicht zur eigenen Beobachtung. Ändert sich
+das Wissen während der Antwortberechnung, wird ein inzwischen veralteter Grund verworfen.
+
+Außerdem erhält das Modell den gehörten Verlauf desselben Chatkanals, Stimmung, Beziehung zum Sprecher
+und die erlaubte Antwortabsicht. Geheime Rollentabellen, zurückgehaltene Seherprüfungen und unhörbare
+Gespräche werden nicht übergeben. Enthüllungen und taktische Aussagen bleiben durch die Spiellogik
+vorgegeben. Abstimmung, Fähigkeiten und Bewegung bleiben regelbasiert; das Modell entscheidet nicht
+eigenständig über Aktionen. Der im Prompt angegebene Verdacht bezieht sich auf offenlegbare Hinweise,
+nicht auf geheimes Rollenwissen oder die Jagdprioritäten eines Wolfs.
 Freie Gespräche gehen auf den Wortlaut ein, können aber weiterhin unpassend formuliert sein.
 
 Antworten entstehen auf einem Hintergrundthread; eine begrenzte Warteschlange, ein Zeitlimit von sieben

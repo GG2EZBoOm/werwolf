@@ -1,7 +1,7 @@
 #pragma once
 
 #include "i18n/Text.h"
-#include "server/Dialogue.h"
+#include "server/Bot.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -18,7 +18,21 @@ namespace ww {
 // A deliberately small, already filtered view of a conversation. Never pass Match or GameView
 // to the inference worker: neither hidden roles nor other channels belong in a language prompt.
 struct LanguageRequest {
+    struct Reason {
+        uint8_t target = kNoPlayer, source = kNoPlayer;
+        int day = 0;
+        double time = 0;
+        float weight = 0;
+        std::string kind;
+        Text text; // approved wording; the model selects an ID instead of inventing evidence
+        std::optional<Bot::Evidence> evidence;
+    };
+    struct Assessment {
+        uint8_t target = kNoPlayer;
+        float suspicion = 0, relationship = 0;
+    };
     uint8_t bot = kNoPlayer;
+    uint8_t focus = kNoPlayer;
     std::string name;
     std::string phase;
     int day = 0;
@@ -28,6 +42,9 @@ struct LanguageRequest {
     bool preserveStance = false;
     float fear = 0, anger = 0, stress = 0, friendship = 0;
     int style = 0;
+    std::vector<Reason> reasons;
+    std::vector<Assessment> assessments;
+    bool chooseReason = false;
 };
 
 std::string languagePayload(const LanguageRequest& request);

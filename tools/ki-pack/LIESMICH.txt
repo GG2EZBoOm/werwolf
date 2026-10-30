@@ -13,6 +13,10 @@ Die KI formuliert Antworten auf Spielernachrichten frei. Sie bekommt den gehoert
 Gespraechsverlauf, Stimmung, Beziehung und die erlaubte Antwortabsicht. Beweise,
 Rollenhinweise, Abstimmung und Faehigkeiten steuert weiterhin die Spiellogik.
 Wichtige Aussagen bleiben unveraendert; sprachliche Kommentare werden geprueft.
+Ab 0.11.0 waehlt die KI passende Gruende aus dem persoenlichen Verdachtsgedaechtnis:
+mit Quelle, Zeitpunkt, Entlastungen und Korrekturen. Das Spiel gibt diese Gruende
+unveraendert wieder. Zurueckgehaltene Seherpruefungen bleiben geheim.
+Ein bereits installiertes KI-Paket funktioniert weiter; kein neuer Download noetig.
 Ein Sprachmodell kann trotzdem unpassend formulieren. Bei Fehlern oder zu langen
 Wartezeiten verwendet das Spiel automatisch seine bisherigen Bot-Antworten.
 
@@ -38,3 +42,6 @@ The installer downloads about 2.6 GB once. The model runs offline on the host on
 Enable Settings > Bots > Local bot AI. Existing game rules remain in control
 of roles, evidence and actions. If inference fails or takes too long, standard bot
 replies are used. Both German and English replies are supported.
+From 0.11.0, the model can select personal suspicion reasons with their original
+source and timing, including corrections and exculpatory evidence. The game keeps
+the exact approved wording and protects unrevealed checks. No model reinstall needed.
