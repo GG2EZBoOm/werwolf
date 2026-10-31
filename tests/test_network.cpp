@@ -331,8 +331,61 @@ TEST(SpielerChatErreichtGenauEinenPassendenBot) {
         CHECK(entry.text.en.find("suspicious") != std::string::npos);
         std::printf("    %s: %s\n", entry.name.c_str(), entry.text.de.c_str());
     }
+    uint32_t original = 0;
+    for (const auto& entry : client.log()) if (isReply(entry)) original = entry.id;
+    CHECK(original != 0);
+    client.sendChat("Kurz was anderes.", false);
+    client.sendChat("Wann?", false, original);
+    CHECK(pump(client, [&] {
+        return std::any_of(client.log().begin(), client.log().end(), [&](const LogEntry& e) {
+            return e.from == bot && e.text.de.find("Tag 1") != std::string::npos;
+        });
+    }, 4));
+    bool linked = false;
+    for (const auto& e : client.log())
+        if (e.from == client.myId() && e.replyTo == original && e.quoteName == name && !e.quoteText.empty()) linked = true;
+    CHECK(linked);
+    client.sendChat("Unsichtbares Zitat", false, 0xfffffffeu);
+    CHECK(pump(client, [&] {
+        return std::any_of(client.log().begin(), client.log().end(), [](const LogEntry& e) { return !e.isChat && e.text.de.find("nicht mehr erreichbar") != std::string::npos; });
+    }, 2));
+    for (const auto& e : client.log()) CHECK(!e.isChat || e.text.de != "Unsichtbares Zitat");
     client.disconnect();
     server.stop();
+}
+
+TEST(PrivateChatReferenceCannotBeRebroadcastIntoVillage) {
+    ServerOptions opt; opt.port = kTestPort + 4; opt.language.enabled = false; opt.logChat = false;
+    ServerThread server; std::string error;
+    CHECK(server.start(opt, error));
+    if (!server.isRunning()) return;
+    std::array<NetClient,4> clients;
+    for (size_t i = 0; i < clients.size(); ++i) {
+        CHECK(clients[i].connect("127.0.0.1", opt.port, "Gast" + std::to_string(i)));
+        CHECK(pump(clients[i], [&] { return clients[i].hasView(); }, 3));
+    }
+    Settings settings; settings.roles = 0; settings.wolves = 1;
+    clients[0].sendSettings(settings); clients[0].sendStartGame();
+    NetClient* wolf = nullptr; NetClient* villager = nullptr;
+    for (auto& client : clients) {
+        CHECK(pump(client, [&] { return client.view().inGame(); }, 5));
+        if (isWolfRole(client.view().yourRole)) wolf = &client;
+        else villager = &client;
+    }
+    CHECK(wolf && villager);
+    if (!wolf || !villager) return;
+    wolf->sendChat("Rudelgeheimnis", true);
+    uint32_t secret = 0;
+    CHECK(pump(*wolf, [&] {
+        for (const auto& e : wolf->log()) if (e.text.de == "Rudelgeheimnis") secret = e.id;
+        return secret != 0;
+    }, 2));
+    wolf->sendChat("Weitergeben", false, secret);
+    villager->sendChat("Erratene Nachricht", false, secret);
+    for (auto* client : {wolf, villager}) CHECK(pump(*client, [&] {
+        return std::any_of(client->log().begin(), client->log().end(), [](const LogEntry& e) {return !e.isChat && e.text.de.find("nicht mehr erreichbar") != std::string::npos;});
+    }, 3));
+    for (const auto& e : villager->log()) CHECK(!e.isChat || (e.id != secret && e.replyTo != secret));
 }
 
 int main() {

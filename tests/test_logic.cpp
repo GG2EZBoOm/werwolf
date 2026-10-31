@@ -1028,6 +1028,52 @@ TEST(ZweiunddreissigBewohner) {
     CHECK(m.phase() == Phase::GameOver);
 }
 
+TEST(CloseVoteAllowsOneDefenseEachThenAChangeOfVoteAndPrivateEpilogue) {
+    auto m = makeMatch({W, W, V, V, V, V, V});
+    runUntil(m, Phase::Vote);
+    for (auto [voter, target] : {std::pair{0,1}, {1,2}, {3,1}, {4,2}})
+        CHECK(m.interact(voter, Interaction::Vote, target).empty());
+    m.skipPhase(); m.update(.1f);
+    CHECK(m.defenseOpen() && m.canDefend(1) && m.canDefend(2));
+    CHECK(!m.canDefend(3) && !m.interact(3, Interaction::Vote, 2).empty());
+    m.finishDefenseLine(1);
+    CHECK(!m.canDefend(1) && m.canDefend(2));
+    m.finishDefenseLine(2); m.update(.1f);
+    CHECK(m.phase() == Phase::Vote && !m.defenseOpen() && m.timeLeft() >= 7.9f);
+    CHECK(m.interact(2, Interaction::Vote, 1).empty());
+    run(m, 8.2f);
+    CHECK(!alive(m,1) && alive(m,2));
+    CHECK(m.viewFor(3).highlights.empty());
+    m.playerLeft(0);
+    runUntil(m, Phase::GameOver);
+    const auto view = m.viewFor(3);
+    CHECK(!view.highlights.empty() && view.highlights.size() <= 3);
+    CHECK(std::any_of(view.highlights.begin(), view.highlights.end(), [](const Text& t) {
+        return t.de.find("P0 stimmte gegen Rudelmitglied P1") != std::string::npos;
+    }));
+    eng::ByteWriter wire; view.write(wire);
+    eng::ByteReader reader(wire.data()); GameView copy;
+    CHECK(copy.read(reader) && copy.highlights == view.highlights);
+}
+
+TEST(DefenseTimesOutWithoutSpeechAndDoesNotChooseArbitraryPairInThreeWayTie) {
+    for (bool three : {false, true}) {
+        auto m = makeMatch({W, V, V, V, V, V});
+        runUntil(m, Phase::Vote);
+        CHECK(m.interact(3, Interaction::Vote, 1).empty());
+        CHECK(m.interact(4, Interaction::Vote, 2).empty());
+        if (three) CHECK(m.interact(5, Interaction::Vote, 0).empty());
+        m.skipPhase(); m.update(.1f);
+        if (!three) {
+            CHECK(m.defenseOpen());
+            run(m, 20.2f);
+            CHECK(m.phase() == Phase::Vote && !m.defenseOpen());
+            run(m, 8);
+        }
+        CHECK(m.phase() == Phase::Execution && alive(m,1) && alive(m,2));
+    }
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

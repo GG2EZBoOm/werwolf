@@ -358,7 +358,7 @@ void Bot::observe(float dt, const Match& match, const GameView& view) {
             continue;
         }
         auto& seen = m_sightings[e.id];
-        if (seen.size() < 400) seen.push_back({{e.x, e.z}, match.clock()});
+        if (seen.size() < 400) seen.push_back({{e.x, e.z}, match.clock(), {me->position.x, me->position.z}});
         if (distanceXZ(pos, me->position) <= 10.0f) ++m_company[e.id];
     }
 }

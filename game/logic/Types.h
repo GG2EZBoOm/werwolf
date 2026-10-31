@@ -82,6 +82,10 @@ enum class Phase : uint8_t {
 };
 
 enum class ChatChannel : uint8_t { Global = 0, Nearby, Wolves, Dead, Family, Vampires };
+inline bool canQuoteAcross(ChatChannel original, ChatChannel current) {
+    auto publicSpeech = [](ChatChannel ch) { return ch == ChatChannel::Global || ch == ChatChannel::Nearby; };
+    return original == current || (publicSpeech(original) && publicSpeech(current));
+}
 
 enum class NoticeKind : uint8_t { Info = 0, Narration, Death, Private, Warning, Victory };
 
@@ -280,6 +284,9 @@ struct GameView {
     uint8_t condemned = kNoPlayer;   // Ergebene Magd: Rolle dieses Hingerichteten übernehmen
     float successorTimeLeft = 0.0f;  // sterbender Hauptmann
     Team winner = Team::None;
+    std::vector<Text> highlights; // Only sent after the match is over.
+    uint8_t defenderA = kNoPlayer, defenderB = kNoPlayer;
+    bool defenseOpen = false;
 
     const PlayerView* player(uint8_t id) const;
     const PlayerView* me() const { return player(you); }

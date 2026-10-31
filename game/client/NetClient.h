@@ -21,6 +21,10 @@ struct LogEntry {
     std::string name;  // leer bei verborgenem Sprecher (das kleine Mädchen hört nur "einen Werwolf")
     Text text;
     double time = 0.0;
+    uint32_t id = 0, replyTo = 0;
+    uint16_t day = 0;
+    std::string quoteName;
+    Text quoteText;
     // Zwischenspeicher für den Zeilenumbruch im Chatfenster
     float wrapWidth = -1.0f;
     Lang wrapLang = Lang::German;
@@ -74,7 +78,7 @@ public:
     std::vector<LogEntry> takeNewEntries();
     void clearLog() { m_log.clear(); }
 
-    void sendChat(const std::string& text, bool wolves);
+    void sendChat(const std::string& text, bool wolves, uint32_t replyTo = 0);
     void sendMove(float x, float z, float yaw, uint8_t flags);
     void sendInteract(Interaction kind, uint8_t target);
     void sendStartGame();

@@ -53,6 +53,8 @@ void App::drawChat(const Rect& area, bool compact) {
         else channel = ChatChannel::Nearby;
     }
 
+    if (m_replyTo && (!canQuoteAcross(m_replyTo->channel, channel) || !focused || in.pressed(eng::Key::Escape))) m_replyTo.reset();
+    const bool interactive = compact && v.phase != Phase::GameOver && m_revealDone && !m_pauseOpen && !m_journalOpen && !m_window.isMouseCaptured();
     if (!compact) {
         Rect header = inner.takeTop(34.0f);
         r.text(m_fonts.handLarge, {header.x, header.y - 4.0f}, L("Dorfgeflüster", "Village whispers"), palette::chalk);
@@ -61,9 +63,17 @@ void App::drawChat(const Rect& area, bool compact) {
         inner.takeTop(10.0f);
     } else if (focused || m_chatScroll > 0.0f) {
         const Rect header = inner.takeTop(26.0f);
-        r.text(m_fonts.smallBold, {header.x, header.y}, L("Dorfgespräch · Mausrad: Verlauf", "Village chat · Scroll: history"), palette::chalk);
+        r.text(m_fonts.smallBold, {header.x, header.y}, L("Klick: nachhaken   ·   Rechtsklick: im Journal merken", "Click to reply   ·   Right-click to pin in journal"), palette::chalk);
     }
 
+    if (m_replyTo) {
+        Rect selection = inner.takeTop(26);
+        const Rect cancel{selection.right() - 28, selection.y, 28, 23};
+        const auto quote = "↳ " + m_replyTo->name + ": " + m_replyTo->text.str();
+        r.text(m_fonts.smallBold, {selection.x, selection.y}, m_fonts.smallBold.ellipsize(quote, selection.w - 36), palette::chalk);
+        if (interactive && m_ui.hovered(cancel) && in.mousePressed()) { m_replyTo.reset(); m_ui.focus("chat"); }
+        r.text(m_fonts.uiBold, {cancel.x + 7, cancel.y}, "×", palette::chalk);
+    }
     const Rect input = inner.takeBottom(compact ? 36.0f : 42.0f);
     inner.takeBottom(8.0f);
     const Rect logArea = inner;
@@ -84,7 +94,8 @@ void App::drawChat(const Rect& area, bool compact) {
             e.wrapLang = language();
         }
         const float lh = font.lineHeight();
-        const float h = static_cast<float>(e.lines.size()) * lh + (e.isChat ? 8.0f : 6.0f);
+        const float quoteHeight = e.quoteName.empty() ? 0.0f : m_fonts.small.lineHeight() + 2.0f;
+        const float h = quoteHeight + static_cast<float>(e.lines.size()) * lh + (e.isChat ? 8.0f : 6.0f);
         total += h;
         y -= h;
         if (y > logArea.bottom() || y + h < logArea.y) continue;
@@ -94,7 +105,29 @@ void App::drawChat(const Rect& area, bool compact) {
         if (compact && !focused && m_chatScroll < 1.0f) alpha = eng::clamp01(1.4f - static_cast<float>(m_time - e.time) / 30.0f);
         if (alpha <= 0.02f) continue;
 
+        if (interactive && e.isChat && e.id) {
+            const Rect row = Rect::intersect(logArea, {logArea.x, y, logArea.w, h});
+            const auto pin = std::find_if(m_pins.begin(), m_pins.end(), [&](const LogEntry& p) { return p.id == e.id; });
+            if (pin != m_pins.end()) r.rect({row.x, row.y, 3, row.h}, palette::chalk.withAlpha(.8f));
+            if (m_ui.hovered(row) && !(m_chatScroll > 4 && row.bottom() > logArea.bottom() - 28 &&
+                                       std::abs(in.mouse.x - logArea.center().x) < 70 && in.mouse.y >= logArea.bottom() - 28)) {
+                r.rect(row, palette::chalk.withAlpha(.12f));
+                m_ui.setCursor(eng::Cursor::Hand);
+                if (in.mousePressed() && e.from != kNoPlayer && canQuoteAcross(e.channel, channel)) {
+                    m_replyTo = e; m_ui.focus("chat");
+                }
+                if (in.mousePressed(eng::MouseButton::Right)) {
+                    if (pin != m_pins.end()) m_pins.erase(pin);
+                    else { m_pins.push_back(e); m_pinPage = (m_pins.size() - 1) / 2; }
+                }
+            }
+        }
         float ly = y + (e.isChat ? 1.0f : 3.0f);
+        if (quoteHeight) {
+            const auto context = "↳ " + e.quoteName + ": " + e.quoteText.str();
+            r.text(m_fonts.small, {logArea.x, ly}, m_fonts.small.ellipsize(context, width), palette::chalk.fade(alpha * .85f));
+            ly += quoteHeight;
+        }
         if (e.isChat) {
             Color nameColor = theme::playerColor(e.from);
             Color textColor = theme::text;
@@ -155,7 +188,8 @@ void App::drawChat(const Rect& area, bool compact) {
     if (submitted && m_time != m_chatFocusTime) {
         if (!m_chatInput.empty()) {
             m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves || channel == ChatChannel::Family || channel == ChatChannel::Vampires ||
-                                            (alive && channel == ChatChannel::Dead));
+                                            (alive && channel == ChatChannel::Dead), m_replyTo ? m_replyTo->id : 0);
+            m_replyTo.reset();
             m_chatInput.clear();
             m_chatScroll = 0.0f;
         }

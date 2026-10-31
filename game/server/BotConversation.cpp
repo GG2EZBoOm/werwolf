@@ -8,6 +8,29 @@
 namespace ww {
 namespace {
 
+dialogue::Place placeAt(const Match& match, Vec2 at, uint8_t home) {
+    const int house = match.world().houseAt(at);
+    if (house >= 0 && house == home) return dialogue::Place::Home;
+    if (house >= 0 && house == match.world().chapelIndex()) return dialogue::Place::Chapel;
+    if (at.length() < 9) return dialogue::Place::Fire;
+    const auto well = match.world().well();
+    if ((at - Vec2{well.x, well.z}).length() < 7) return dialogue::Place::Well;
+    if (at.length() > 48) return dialogue::Place::Forest;
+    return dialogue::Place::Unknown;
+}
+
+std::string shortQuestion(std::string s) {
+    for (char& c : s) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    auto end = s.find_last_not_of(" ?.!");
+    if (end == std::string::npos) return {};
+    return s.substr(s.find_first_not_of(' '), end + 1 - s.find_first_not_of(' '));
+}
+
+bool companyQuestion(const std::string& q) {
+    return q == "allein" || q == "alleine" || q == "mit wem" || q == "wer war dabei" ||
+           q == "warst du allein" || q == "warst du alleine" || q == "alone" || q == "with whom" || q == "were you alone";
+}
+
 bool secretChannel(ChatChannel channel) {
     return channel == ChatChannel::Wolves || channel == ChatChannel::Vampires || channel == ChatChannel::Family || channel == ChatChannel::Dead;
 }
@@ -194,7 +217,7 @@ int Bot::replyPriority(const Match& match, uint8_t speaker, const Text& text, Ch
 }
 
 void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel, bool reply, const Speech* speech,
-               const dialogue::Message* interpreted) {
+               const dialogue::Message* interpreted, const ChatQuote* quote) {
     const auto* me = match.find(m_id);
     const auto* from = match.find(speaker);
     if (!me || !from || !me->alive || !from->alive || speaker == m_id ||
@@ -311,7 +334,9 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         m_reconsiderAfter = match.clock() + 6.0;
     }
     if (message.topic != kNoPlayer) m_topics[speaker] = {message.topic, match.clock()};
-    const int priority = reply ? replyPriority(match, speaker, text, channel, speech, interpreted) : 0;
+    if (!reply) return;
+    const bool directQuote = quote && quote->speaker == m_id && match.chatChannel(m_id, secretChannel(channel)) == channel;
+    const int priority = directQuote && m_replies.size() < 4 ? 100 : replyPriority(match, speaker, text, channel, speech, interpreted);
     if (priority == 0) return;
     std::optional<Evidence> evidence;
     const bool offerToSeer = match.viewFor(m_id).yourRole != Role::Protector &&
@@ -322,10 +347,29 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
                            : heard     ? react(match, speaker, *heard, &evidence)
                                        : answer(match, speaker, message, contradiction, &evidence),
                            m_personality.style);
+    bool fixedQuoteAnswer = false;
+    if (quote) {
+        const auto q = shortQuestion(text.de);
+        if (q == "wann" || q == "wann genau" || q == "when" || q == "which night" || q == "welche nacht") {
+            response = quote->alibiNight > 0 ? tx("In Nacht {}.", "On night {}.", quote->alibiNight)
+                : tx("Gesagt hab ich das an Tag {}.", "I said that on day {}.", quote->day);
+            fixedQuoteAnswer = true;
+        } else if (companyQuestion(q) && quote->alibiNight > 0) {
+            response = {"Ob ich da allein war, kann ich nicht sicher sagen.", "I can't say for sure whether I was alone there."};
+            for (const auto& p : match.players()) if (sawAt(match, p.id, *quote)) {
+                response = tx("{} hab ich dort gesehen.", "I saw {} there.", p.name);
+                break;
+            }
+            fixedQuoteAnswer = true;
+        }
+        if (fixedQuoteAnswer) evidence.reset();
+    }
+    if (quote && !fixedQuoteAnswer && message.intent == dialogue::Intent::Unknown && (!m_language || !m_language->available()))
+        response = {"Welchen Teil meiner Aussage meinst du genau?", "Which part of what I said do you mean?"};
     if (response.empty()) return;
     // Wer dreimal dasselbe fragt, bekommt nicht dreimal denselben Satz
     const Reply* previous = !m_replies.empty() ? &m_replies.back() : m_lastReply ? &*m_lastReply : nullptr;
-    if ((!m_language || !m_language->available()) && previous && previous->speaker == speaker && previous->text == addressTo(from->name, response, match))
+    if (!quote && (!m_language || !m_language->available()) && previous && previous->speaker == speaker && previous->text == addressTo(from->name, response, match))
         response = styled({"Wie gesagt – dazu habe ich gerade nichts Neues.", "Like I said – nothing new from me on that right now."},
                           m_personality.style);
     if (evidence && evidence->kind == Evidence::Kind::RoleClaim) m_publicRole = evidence->role;
@@ -350,7 +394,15 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
     m_replies.push_back(Reply{speaker, channel, match.phase(), match.day(), due, offerToSeer ? response : addressTo(from->name, response, match),
                               message.intent, message.topic, Speech{evidence, true}});
     m_replies.back().question = text;
-    if (!from->bot && m_language && m_language->available()) {
+    if (!quote && message.intent == dialogue::Intent::AskAlibi && (message.topic == kNoPlayer || message.topic == m_id) &&
+        !isEvilRole(me->role) && m_alibiNight > 0) {
+        auto most = std::max_element(m_nightPlaces.begin(), m_nightPlaces.end());
+        if (*most >= 1.0f) {
+            m_replies.back().speech.alibiNight = m_alibiNight;
+            m_replies.back().speech.place = static_cast<dialogue::Place>(most - m_nightPlaces.begin());
+        }
+    }
+    if (!from->bot && !fixedQuoteAnswer && m_language && m_language->available()) {
         auto& pending = m_replies.back();
         // The rules choose facts and strategy; the model may now paraphrase the whole answer.
         const bool reasoning = message.intent == dialogue::Intent::AskReason || message.intent == dialogue::Intent::AskSuspicion ||
@@ -358,6 +410,10 @@ void Bot::hear(const Match& match, uint8_t speaker, const Text& text, ChatChanne
         const bool preserve = evidence.has_value() || (!reasoning && message.intent != dialogue::Intent::Unknown &&
                                                        message.intent != dialogue::Intent::Greeting);
         auto request = languageRequest(match, speaker, channel, response, preserve);
+        if (quote && !request.history.empty()) {
+            request.history.insert(request.history.end() - 1, {match.find(quote->speaker)->name +
+                " (ausgewählte Aussage / quoted message, Tag " + std::to_string(quote->day) + ")", quote->text});
+        }
         if (interpreted) request.focus = message.topic == m_id ? kNoPlayer : message.topic;
         request.chooseReason = !preserve && reasoning;
         request.freeConversation = !preserve && !reasoning;
@@ -779,13 +835,7 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
     if (!me) return;
     if (me->alive && match.phase() == Phase::Night) {
         if (m_alibiNight != match.day()) { m_nightPlaces.fill(0); m_alibiNight = match.day(); }
-        dialogue::Place place = dialogue::Place::Unknown;
-        const int house = match.world().houseAt({me->position.x, me->position.z});
-        if (house >= 0 && house == me->house) place = dialogue::Place::Home;
-        else if (house >= 0 && house == match.world().chapelIndex()) place = dialogue::Place::Chapel;
-        else if (distanceXZ(me->position, {0, 0, 0}) < 9) place = dialogue::Place::Fire;
-        else if (distanceXZ(me->position, match.world().well()) < 7) place = dialogue::Place::Well;
-        else if (Vec2{me->position.x, me->position.z}.length() > 48) place = dialogue::Place::Forest;
+        const auto place = placeAt(match, {me->position.x, me->position.z}, me->house);
         m_nightPlaces[static_cast<size_t>(place)] += dt;
     }
     while (!m_replies.empty() && (!me->alive || m_replies.front().phase != match.phase() || m_replies.front().day != match.day())) {
@@ -835,9 +885,46 @@ void Bot::updateConversation(float dt, const Match& match, const SayFn& say) {
     }
 }
 
+bool Bot::sawAt(const Match& match, uint8_t person, const ChatQuote& quote) const {
+    if (quote.alibiNight < 1 || quote.alibiNight != m_alibiNight || quote.place == dialogue::Place::Unknown) return false;
+    const auto* author = match.find(quote.speaker);
+    const auto it = m_sightings.find(person);
+    if (!author || it == m_sightings.end()) return false;
+    return std::any_of(it->second.begin(), it->second.end(), [&](const Sight& sight) {
+        return (sight.at - sight.observer).length() <= 10 && placeAt(match, sight.at, author->house) == quote.place &&
+               placeAt(match, sight.observer, author->house) == quote.place;
+    });
+}
+
+bool Bot::offerWitness(const Match& match, const ChatQuote& quote) {
+    const auto* me = match.find(m_id);
+    if (!me || !me->alive || m_planned.size() >= 4 || !sawAt(match, quote.speaker, quote)) return false;
+    plan(match.phase(), match.day(), match.clock() + 4,
+         tx("Moment, {} hab ich in Nacht {} dort selbst gesehen.", "Wait, I saw {} there myself on night {}.",
+            match.find(quote.speaker)->name, quote.alibiNight));
+    return true;
+}
+
 void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
-                 eng::Rng& rng, const dialogue::Message* interpreted, const std::vector<uint8_t>* recipients) {
+                 eng::Rng& rng, const dialogue::Message* interpreted, const std::vector<uint8_t>* recipients, const ChatQuote* quote) {
     auto included = [&](uint8_t id) { return !recipients || std::find(recipients->begin(), recipients->end(), id) != recipients->end(); };
+    if (quote) {
+        std::vector<dialogue::Person> people;
+        for (const auto& p : match.players()) people.push_back({p.id, p.name});
+        auto question = dialogue::parse(text.de, people, speaker, quote->speaker, quote->topic);
+        question.addressed = quote->speaker;
+        if (question.question && question.topic == kNoPlayer) question.topic = quote->topic;
+        if (question.intent == dialogue::Intent::AskReason && quote->topic == kNoPlayer) question.intent = dialogue::Intent::Unknown;
+        bool witness = false;
+        for (Bot& bot : bots) {
+            if (!included(bot.id()) || !match.canHear(bot.id(), speaker, channel) || match.hidesSpeaker(bot.id(), channel, speaker)) continue;
+            const bool author = bot.id() == quote->speaker;
+            bot.hear(match, speaker, text, channel, author, nullptr, &question, author ? quote : nullptr);
+            if (!author && !witness && channel == ChatChannel::Global && isGatheringPhase(match.phase()) && companyQuestion(shortQuestion(text.de)))
+                witness = bot.offerWitness(match, *quote);
+        }
+        return;
+    }
     std::optional<Bot::Speech> speech;
     for (const Bot& bot : bots)
         if (bot.id() == speaker && bot.speaking()) speech = *bot.speaking();

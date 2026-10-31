@@ -119,6 +119,7 @@ std::string languagePayload(const LanguageRequest& r, const std::string& feedbac
     const std::string freeConversation =
         "Answer the latest message in antwort_auf directly and helpfully, using your general knowledge. "
         "Use verlauf as conversation history for follow-ups such as why, another one, continue, or make it shorter. "
+        "When a previous entry is marked quoted message, the player selected THAT particular statement. Resolve the follow-up against it even after a topic change. "
         "You are a fellow player with the name and mood given in the context, chatting naturally in a game. "
         "The conversation may be about ANY ordinary topic, not only the game. Do the requested task now. "
         "Give factual explanations to factual questions. Do not replace an explanation with a joke or fantasy. "

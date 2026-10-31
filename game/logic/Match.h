@@ -116,6 +116,9 @@ public:
     const Player* find(uint8_t id) const;
     uint8_t packKillsLeft() const { return m_packKills; }
     uint8_t captain() const { return m_captain; }
+    bool defenseOpen() const { return m_phase == Phase::Vote && m_defenseOpen; }
+    bool canDefend(uint8_t id) const;
+    void finishDefenseLine(uint8_t id);
     bool election() const { return m_election; }
     bool isProtected(uint8_t id) const;
     const std::vector<DoorState>& doors() const { return m_doors; }
@@ -210,6 +213,12 @@ private:
     bool m_poisonAvailable = false;
     bool m_bellRung = false;
     bool m_voteGraceApplied = false;
+    uint8_t m_defenderA = kNoPlayer, m_defenderB = kNoPlayer;
+    bool m_defenseOpen = false;
+    uint32_t m_defenseSpoken = 0;
+    struct Highlight { int importance; Text text; };
+    std::vector<Highlight> m_highlights;
+    void highlight(int importance, const Text& text);
     uint8_t m_jesterWinner = kNoPlayer;
     uint8_t m_angelWinner = kNoPlayer;
     bool m_firstExecution = false;    // die erste Hinrichtung hat stattgefunden

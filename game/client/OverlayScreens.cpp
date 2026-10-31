@@ -259,6 +259,50 @@ void App::drawJournal(const GameView& v) {
     r.triangle({spine + 60.0f, book.y - 6.0f + bh * 0.55f}, {spine + 74.0f, book.y - 6.0f + bh * 0.55f}, {spine + 67.0f, book.y + bh * 0.55f - 14.0f},
                Color::hex(0x4E140F, a));
 
+    const Rect tab{leftPage.right() - 192, leftPage.y + 12, 174, 32};
+    if (m_kit.inkButton("journal/pins", tab, m_showPins ? L("Zum Tagebuch", "Back to journal") : L("Verdachtsbuch", "Pinned statements"))) {
+        m_showPins = !m_showPins; m_pinScroll[0] = m_pinScroll[1] = 0;
+    }
+    if (m_showPins) {
+        const size_t pages = std::max<size_t>(1, (m_pins.size() + 1) / 2);
+        m_pinPage = std::min(m_pinPage, pages - 1);
+        std::optional<size_t> remove;
+        for (int side = 0; side < 2; ++side) {
+            Rect body = (side == 0 ? leftPage : rightPage).shrink(30, 54);
+            if (side == 1) { body.x += 52; body.w -= 52; } // Keep the bookmark out of the text.
+            r.text(m_fonts.script, {body.x, body.y}, L("Gemerkte Aussage", "Pinned statement"), inkRed);
+            const size_t index = m_pinPage * 2 + side;
+            if (index >= m_pins.size()) {
+                if (index == 0) {
+                    float y = body.y + 54;
+                    for (const auto& line : m_fonts.chat.wrap(L("Öffne den Chat mit Enter und merke dir eine Aussage per Rechtsklick.", "Open chat with Enter and right-click a message to pin it."), body.w)) {
+                        r.text(m_fonts.chat, {body.x, y}, line, inkSoft); y += m_fonts.chat.lineHeight();
+                    }
+                }
+                continue;
+            }
+            const auto& pin = m_pins[index];
+            const std::string name = pin.name.empty() ? L("Unbekannt", "Unknown") : pin.name;
+            r.text(m_fonts.uiBold, {body.x, body.y + 44}, Lf("Tag {} · {}", "Day {} · {}", pin.day, name), inkDark);
+            Rect content{body.x, body.y + 84, body.w, std::max(24.0f, body.h - 146)};
+            const auto lines = m_fonts.chat.wrap(pin.text.str(), content.w);
+            if (m_ui.hovered(content)) m_pinScroll[side] -= m_window.input().wheel * 36;
+            m_pinScroll[side] = std::clamp(m_pinScroll[side], 0.0f, std::max(0.0f, lines.size() * m_fonts.chat.lineHeight() - content.h));
+            float y = content.y - m_pinScroll[side];
+            r.pushClip(content);
+            for (const auto& line : lines) { r.text(m_fonts.chat, {content.x, y}, line, inkDark); y += m_fonts.chat.lineHeight(); }
+            r.popClip();
+            if (m_kit.inkButton(side ? "pins/r" : "pins/l", {body.x, body.bottom() - 40, 130, 32}, L("Entfernen", "Unpin"))) remove = index;
+        }
+        if (remove) m_pins.erase(m_pins.begin() + *remove);
+        if (m_kit.inkButton("pins/prev", {book.x + 24, book.bottom() - 38, 128, 30}, L("‹ Zurück", "‹ Previous"), false, m_pinPage > 0)) {
+            --m_pinPage; m_pinScroll[0] = m_pinScroll[1] = 0;
+        }
+        if (m_kit.inkButton("pins/next", {book.right() - 152, book.bottom() - 38, 128, 30}, L("Weiter ›", "Next ›"), false, m_pinPage + 1 < pages)) {
+            ++m_pinPage; m_pinScroll[0] = m_pinScroll[1] = 0;
+        }
+        return;
+    }
     // Linke Seite: ich
     Rect left = leftPage.shrink(46.0f, 40.0f);
     r.text(m_fonts.scriptLarge, {left.x, left.y - 4.0f}, L("Tagebuch", "Journal"), inkRed.withAlpha(a));

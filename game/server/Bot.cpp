@@ -131,6 +131,7 @@ void Bot::chooseWanderTarget(const Match& match) {
 }
 
 void Bot::onPhaseChange(const Match& match, const GameView& view) {
+    m_reviewedDefense = false;
     m_voted = false;
     m_quarry = kNoPlayer;
     m_spared.clear();
@@ -728,6 +729,12 @@ void Bot::act(float dt, Match& match, const GameView& view, const SayFn& say, Ve
         }
         break;
     case Phase::Vote:
+        if (view.defenseOpen) break;
+        if (view.defenderA != kNoPlayer && !m_reviewedDefense) {
+            m_reviewedDefense = true;
+            m_voted = false;
+            m_think = m_rng.uniform(1.0f, 3.0f);
+        }
         m_think -= dt;
         if (!m_voted && m_think <= 0.0f) {
             m_voted = true;

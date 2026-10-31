@@ -76,6 +76,35 @@ std::string chosen(int id) {
 }
 }
 
+TEST(QuotedAlibiUsesTheSpecificNightAndOnlyAnObservedCompanion) {
+    Scene s;
+    // Position the group before the observer's first sample of this night.
+    while (s.match.phase() != Phase::Night) { s.match.skipPhase(); s.match.update(.1f); }
+    const int night = s.match.day();
+    for (const auto& p : s.match.players())
+        s.match.teleport(p.id, s.world.ground(50 + p.id, 8));
+    s.match.teleport(1, s.world.ground(4, 3));
+    s.match.teleport(2, s.world.ground(5, 3));
+    s.advance(1.4f);
+    s.phase(Phase::Assembly);
+    ChatQuote quote{1, s.match.day(), Text::same("Ich war am Feuer."), kNoPlayer, night, dialogue::Place::Fire};
+    dialogue::Message q; q.question = true; q.addressed = 1;
+    s.bot.hear(s.match, 0, Text::same("Allein?"), ChatChannel::Global, true, nullptr, &q, &quote);
+    s.advance(6);
+    if (!s.has("Berta hab ich dort gesehen")) for (const auto& t : s.lines) std::printf("    heard: %s\n", t.de.c_str());
+    CHECK(s.has("Berta hab ich dort gesehen"));
+    s.bot.hear(s.match, 0, Text::same("Wann?"), ChatChannel::Global, true, nullptr, &q, &quote);
+    s.advance(6);
+    CHECK(s.has("Nacht " + std::to_string(night)));
+    quote.speaker = 2;
+    CHECK(s.bot.offerWitness(s.match, quote));
+    quote.place = dialogue::Place::Chapel;
+    CHECK(!s.bot.offerWitness(s.match, quote));
+    quote.place = dialogue::Place::Fire;
+    ++quote.alibiNight;
+    CHECK(!s.bot.offerWitness(s.match, quote));
+}
+
 TEST(KnowledgePreservesSourceTimeAndSurvivesShortConversationHistory) {
     Scene s;
     s.bot.hear(s.match, 0, Text::same("Berta ist ein Wolf"), ChatChannel::Global, false);
@@ -585,6 +614,7 @@ int main(int argc, char** argv) {
             target.name + ", was kann die Hexe im Spiel eigentlich machen?",
             target.name + ", wie viel ist zwei plus zwei?",
             target.name + ", welche Rolle hast du?"};
+        uint32_t mathQuote = 0;
         for (const auto& text : messages) {
             client.takeNewEntries(); client.sendChat(text, false);
             Text received;
@@ -592,6 +622,7 @@ int main(int argc, char** argv) {
                 for (const auto& e : client.takeNewEntries())
                     if (e.isChat && e.from == target.id) {
                         received = e.text;
+                        if (text.find("zwei plus zwei") != std::string::npos) mathQuote = e.id;
                         std::printf("NETWORK BOT: %s | %s\n", e.text.de.c_str(), e.text.en.c_str()); return true;
                     }
                 return false;
@@ -600,6 +631,17 @@ int main(int argc, char** argv) {
             if (text.find("zwei plus zwei") != std::string::npos && received.de.find("vier") == std::string::npos &&
                 received.de.find("Vier") == std::string::npos && received.de.find('4') == std::string::npos) return 1;
         }
+        if (!mathQuote) return 1;
+        client.takeNewEntries(); client.sendChat("Verdopple die Zahl aus der markierten Antwort.", false, mathQuote);
+        bool doubled = false;
+        if (!pump([&] {
+            for (const auto& e : client.takeNewEntries()) if (e.isChat && e.from == target.id) {
+                std::printf("QUOTED REPLY: %s\n", e.text.de.c_str());
+                doubled = e.text.de.find("acht") != std::string::npos || e.text.de.find("Acht") != std::string::npos || e.text.de.find('8') != std::string::npos;
+                return true;
+            }
+            return false;
+        }, 15) || !doubled) return 1;
         client.sendReturnToLobby();
         if (!pump([&] { return client.view().phase == Phase::Lobby; }, 5)) return 1;
         client.disconnect(); server.stop();

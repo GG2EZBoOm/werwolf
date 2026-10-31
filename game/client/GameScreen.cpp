@@ -114,6 +114,8 @@ void App::enterMatch() {
     m_wasAlive = true;
     m_chatWolves = false;
     m_bubbles.clear();
+    m_replyTo.reset(); m_pins.clear(); m_pinPage = 0;
+    m_showRecap = false; m_showPins = false;
     m_chatScroll = 0.0f;
     m_myTransform = 0.0f;
     m_timeOfDay = timeOfDay(v.phase, v.timeLeft, v.phaseDuration);
@@ -853,7 +855,7 @@ void App::drawVotePanel(const GameView& v) {
     m_kit.beginTilt(panel, 0.012f);
     m_kit.paper(panel, 15000u);
     m_kit.nail({panel.center().x, panel.y + 12.0f});
-    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.election ? L("Hauptmannwahl", "Captain election") : L("Wer soll hängen?", "Who shall hang?"),
+    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.defenseOpen ? L("Letzte Worte", "Last words") : v.defenderA != kNoPlayer ? L("Letzte Wahl", "Final vote") : v.election ? L("Hauptmannwahl", "Captain election") : L("Wer soll hängen?", "Who shall hang?"),
            inkRed);
     const bool canVote = v.can(AbilityVote);
     size_t index = 0;
@@ -862,6 +864,7 @@ void App::drawVotePanel(const GameView& v) {
         ++index;
         const Rect row{panel.x + 14.0f + static_cast<float>(column) * (columnW + columnGap), panel.y + 58.0f + static_cast<float>(line) * rowH,
                        columnW, rowH - 2.0f};
+        if (v.defenseOpen && (p->id == v.defenderA || p->id == v.defenderB)) r.roundRect(row, 3, inkRed.withAlpha(.15f));
         const bool mine = v.vote == p->id;
         const bool clickable = canVote && p->id != v.you && !m_window.isMouseCaptured();
         if (m_ui.clickArea(std::format("vote/{}", p->id), row, clickable)) m_net.sendInteract(Interaction::Vote, mine ? kNoPlayer : p->id);
@@ -1080,6 +1083,7 @@ void App::drawGameOver(const GameView& v) {
     std::string title;
     switch (v.winner) {
     case Team::Village: title = L("Das Dorf hat gesiegt", "The village has won"); break;
+    case Team::Vampires: title = L("Der Vampirclan hat gesiegt", "The vampire clan has won"); break;
     case Team::Wolves: title = L("Die Werwölfe haben gesiegt", "The werewolves have won"); break;
     case Team::Lovers: title = L("Die Liebe hat gesiegt", "Love has won"); break;
     case Team::Jester: title = L("Der Narr hat gesiegt", "The jester has won"); break;
@@ -1114,7 +1118,26 @@ void App::drawGameOver(const GameView& v) {
     const int cols = std::max(1, std::min(n, std::max(6, static_cast<int>((W - 80.0f) / (cw + gap)))));
     const int rows = (n + cols - 1) / std::max(1, cols);
     const float gy = head.bottom() + 30.0f;
-    for (int i = 0; i < n; ++i) {
+    if (m_kit.inkButton("over/moments", {head.right() - 182.0f, head.bottom() - 36.0f, 168.0f, 32.0f},
+                        m_showRecap ? L("Rollen ansehen", "Show roles") : L("Rückblick", "Round recap"))) m_showRecap = !m_showRecap;
+    if (m_showRecap) {
+        const float width = std::min(730.0f, W - 48.0f);
+        Rect page{(W - width) * .5f, gy, width, std::min(300.0f, H - gy - 85.0f)};
+        m_kit.paper(page, 21307u, a);
+        Rect body = page.shrink(24, 18);
+        r.text(m_fonts.scriptLarge, {body.x, body.y}, L("Schlüsselmomente", "Turning points"), inkRed);
+        float y = body.y + 50;
+        if (v.highlights.empty()) r.text(m_fonts.ui, {body.x, y}, L("Keine Schlüsselszene aufgezeichnet.", "No key moment recorded."), inkSoft);
+        r.pushClip(body);
+        for (const auto& moment : v.highlights) {
+            for (const auto& line : m_fonts.chat.wrap(moment.str(), body.w)) {
+                r.text(m_fonts.chat, {body.x, y}, line, inkDark); y += m_fonts.chat.lineHeight();
+            }
+            y += 14;
+        }
+        r.popClip();
+    }
+    for (int i = 0; !m_showRecap && i < n; ++i) {
         const PlayerView& p = v.players[static_cast<size_t>(i)];
         const int row = i / cols, col = i % cols;
         const int inRow = std::min(cols, n - row * cols);
@@ -1142,7 +1165,7 @@ void App::drawGameOver(const GameView& v) {
         m_kit.endTilt();
     }
 
-    const float by = std::min(H - 74.0f, gy + static_cast<float>(rows) * (ch + gap) + 16.0f);
+    const float by = std::min(H - 74.0f, gy + (m_showRecap ? 300.0f : static_cast<float>(rows) * (ch + gap)) + 16.0f);
     const Rect slip{W * 0.5f - 260.0f, by, 520.0f, 58.0f};
     m_kit.beginTilt(slip, 0.01f);
     m_kit.paper(slip, 21000u, a);

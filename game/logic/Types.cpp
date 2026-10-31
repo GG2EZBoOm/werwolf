@@ -591,6 +591,9 @@ void GameView::write(eng::ByteWriter& w) const {
     w.u8(condemned);
     w.f32(successorTimeLeft);
     w.u8(static_cast<uint8_t>(winner));
+    w.u8(defenderA); w.u8(defenderB); w.boolean(defenseOpen);
+    w.u8(static_cast<uint8_t>(highlights.size()));
+    for (const Text& moment : highlights) moment.write(w);
 }
 
 bool GameView::read(eng::ByteReader& r) {
@@ -662,7 +665,12 @@ bool GameView::read(eng::ByteReader& r) {
     condemned = r.u8();
     successorTimeLeft = r.f32();
     const uint8_t win = r.u8();
-    winner = win <= static_cast<uint8_t>(Team::Sectarian) ? static_cast<Team>(win) : Team::None;
+    winner = win <= static_cast<uint8_t>(Team::Vampires) ? static_cast<Team>(win) : Team::None;
+    defenderA = r.u8(); defenderB = r.u8(); defenseOpen = r.boolean();
+    const uint8_t moments = r.u8();
+    if (moments > 3 || (moments && phase != Phase::GameOver)) return false;
+    highlights.resize(moments);
+    for (Text& moment : highlights) moment.read(r);
     return r.ok();
 }
 

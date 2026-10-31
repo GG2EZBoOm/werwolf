@@ -95,6 +95,9 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
 
     m_phase = Phase::Lobby;
     m_day = 0;
+    m_highlights.clear();
+    m_defenderA = m_defenderB = kNoPlayer;
+    m_defenseOpen = false;
     m_clock = 0.0;
     m_winner = Team::None;
     m_packKills = 0;
@@ -456,7 +459,7 @@ uint32_t Match::abilitiesFor(uint8_t id) const {
     default:
         break;
     }
-    if (m_phase == Phase::Vote && !p->idiotRevealed) a |= AbilityVote;
+    if (m_phase == Phase::Vote && !m_defenseOpen && !p->idiotRevealed) a |= AbilityVote;
     if (day && m_day >= 2 && !m_bellRung) a |= AbilityRingBell;
     return a;
 }
@@ -762,6 +765,10 @@ GameView Match::viewFor(uint8_t viewer) const {
 
     const Player* me = find(viewer);
     const bool over = m_phase == Phase::GameOver;
+    if (over) for (const auto& moment : m_highlights) v.highlights.push_back(moment.text);
+    if (m_phase == Phase::Vote) {
+        v.defenderA = m_defenderA; v.defenderB = m_defenderB; v.defenseOpen = m_defenseOpen;
+    }
     const bool spectator = !me || !me->alive;
     const bool meWolf = me && isWolfRole(me->role);
     const bool meVampire = me && isVampireRole(me->role);
@@ -967,8 +974,10 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
         break;
     case Interaction::Inspect:
         p->nightAbilityUsed = true;
-        if (std::none_of(p->seerResults.begin(), p->seerResults.end(), [&](const SeerResult& r) { return r.player == t->id; }))
+        if (std::none_of(p->seerResults.begin(), p->seerResults.end(), [&](const SeerResult& r) { return r.player == t->id; })) {
             p->seerResults.push_back({t->id, t->role});
+            if (isWolfRole(t->role)) highlight(4, tx("{} erkannte {} als Werwolf.", "{} identified {} as a werewolf.", p->name, t->name));
+        }
         tell(p->id, tx("Deine Vision zeigt dir: {} ist {}.", "Your vision shows you: {} is {}.", t->name, roleWithArticle(t->role)));
         break;
     case Interaction::Protect:
@@ -990,6 +999,7 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
             tell(r.id, {"Ein bitterer Trank benetzt deine Lippen … du lebst!", "A bitter potion wets your lips … you are alive!"});
         };
         revive(*t);
+        highlight(4, tx("{} rettete {} mit dem Heiltrank.", "{} saved {} with the healing potion.", p->name, t->name));
         if (t->lover != kNoPlayer) {
             Player* l = findMutable(t->lover);
             if (l && !l->alive && l->deathCause == DeathCause::Grief && l->deathDay == m_day) revive(*l);
@@ -1303,6 +1313,8 @@ void Match::playerLeft(uint8_t id) {
 void Match::kill(uint8_t id, DeathCause cause, bool announceNow, uint8_t killer) {
     Player* p = findMutable(id);
     if (!p || !p->alive) return;
+    if (const Player* attacker = find(killer); attacker && (cause == DeathCause::Wolves || cause == DeathCause::Hunter || cause == DeathCause::Knife || cause == DeathCause::Vampire))
+        highlight(2, tx("{} tötete {}.", "{} killed {}.", attacker->name, p->name));
     p->alive = false;
     p->deathPosition = p->position;
     p->deathYaw = p->yaw;
@@ -1655,6 +1667,9 @@ void Match::enterAssembly(const Text& reason, float seconds) {
 }
 
 void Match::enterVote() {
+    m_defenderA = m_defenderB = kNoPlayer;
+    m_defenseOpen = false;
+    m_defenseSpoken = 0;
     m_phase = Phase::Vote;
     m_voteGraceApplied = false;
     for (Player& p : m_players) p.vote = kNoPlayer;
@@ -1680,10 +1695,38 @@ void Match::resolveElection(const std::vector<std::pair<uint8_t, int>>& ranking)
     else if (top.size() > 1)
         text = tx("Gleichstand – das Los entscheidet: {} ist der neue Hauptmann!", "A tie – the lot decides: {} is the new captain!", nameOf(chosen));
     else text = tx("{} ist zum Hauptmann gewählt!", "{} has been elected captain!", nameOf(chosen));
+    highlight(1, text);
     setCaptain(chosen, std::move(text));
 }
 
+bool Match::canDefend(uint8_t id) const {
+    const auto* player = find(id);
+    return id < kMaxPlayers && defenseOpen() && player && player->alive && (id == m_defenderA || id == m_defenderB) && !(m_defenseSpoken & (1u << id));
+}
+
+void Match::finishDefenseLine(uint8_t id) {
+    if (!canDefend(id)) return;
+    m_defenseSpoken |= 1u << id;
+    if (!canDefend(m_defenderA) && !canDefend(m_defenderB)) m_timer = 0;
+    markDirty();
+}
+
+void Match::highlight(int importance, const Text& text) {
+    if (m_highlights.size() == 3) {
+        const auto least = std::min_element(m_highlights.begin(), m_highlights.end(), [](const auto& a, const auto& b) { return a.importance < b.importance; });
+        if (least->importance > importance) return;
+        m_highlights.erase(least);
+    }
+    m_highlights.push_back({importance, tx("Tag {} · {}", "Day {} · {}", m_day, text)});
+}
+
 void Match::resolveVote() {
+    if (m_defenseOpen) {
+        m_defenseOpen = false;
+        setTimer(8);
+        narrate({"Letzte Wahl! Ihr habt acht Sekunden, um eure Stimme zu ändern.", "Final vote! You have eight seconds to change your vote."});
+        return;
+    }
     std::map<uint8_t, int> tally;
     for (const Player& p : m_players) {
         if (!p.alive || p.idiotRevealed || p.vote == kNoPlayer) continue;
@@ -1697,12 +1740,22 @@ void Match::resolveVote() {
     if (!m_election && m_marked != kNoPlayer) {
         const Player* marked = find(m_marked);
         if (marked && marked->alive) tally[m_marked] += 2; // der Rabe
-        m_marked = kNoPlayer;
     }
-    m_phase = Phase::Execution;
-    setTimer(kExecutionSeconds);
     std::vector<std::pair<uint8_t, int>> ranking(tally.begin(), tally.end());
     std::stable_sort(ranking.begin(), ranking.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    if (!m_election && m_defenderA == kNoPlayer && ranking.size() >= 2 && ranking[0].second - ranking[1].second <= 1 &&
+        (ranking.size() == 2 || ranking[1].second > ranking[2].second)) {
+        m_defenderA = ranking[0].first; m_defenderB = ranking[1].first;
+        m_defenseOpen = true;
+        m_voteGraceApplied = true;
+        setTimer(20);
+        narrate(tx("Knappe Wahl! {} und {} haben je eine Nachricht zur Verteidigung. Enter öffnet den Chat.",
+                   "Close vote! {} and {} may each speak once in their defense. Press Enter to chat.", nameOf(m_defenderA), nameOf(m_defenderB)));
+        return;
+    }
+    if (!m_election) m_marked = kNoPlayer;
+    m_phase = Phase::Execution;
+    setTimer(kExecutionSeconds);
     if (!ranking.empty()) {
         std::string summary;
         for (size_t i = 0; i < ranking.size(); ++i) {
@@ -1754,6 +1807,13 @@ void Match::resolveVote() {
         m_servantPending = condemned->id;
         m_servantTook = false;
     }
+    const auto partner = std::find_if(m_players.begin(), m_players.end(), [&](const Player& voter) {
+        return isWolfRole(condemned->role) && voter.alive && !voter.idiotRevealed && voter.id != condemned->id &&
+               isWolfRole(voter.role) && voter.vote == condemned->id;
+    });
+    if (partner != m_players.end())
+        highlight(5, tx("{} stimmte gegen Rudelmitglied {}, das daraufhin hingerichtet wurde.", "{} voted against packmate {}, who was executed.", partner->name, condemned->name));
+    else highlight(3, tx("Das Dorf richtete {} hin. Die Rolle war {}.", "The village executed {}. Their role was {}.", condemned->name, roleText(condemned->role)));
     kill(condemned->id, DeathCause::Vote, true);
     m_firstExecution = true;
 }

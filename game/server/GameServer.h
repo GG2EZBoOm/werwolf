@@ -69,6 +69,8 @@ private:
         std::string name;
         Notice notice;
         Text text;
+        uint32_t id = 0;
+        uint16_t day = 0;
     };
 
     void acceptConnections(double now);
@@ -85,8 +87,8 @@ private:
     void ensureHost();
     void resetIfEmpty();
 
-    void chatFrom(uint8_t memberId, Text text, bool wolves);
-    void queueBotChat(uint8_t speaker, const Text& text, ChatChannel channel);
+    void chatFrom(uint8_t memberId, Text text, bool wolves, uint32_t replyTo = 0, bool defense = false);
+    void queueBotChat(uint8_t speaker, const Text& text, ChatChannel channel, uint32_t id, const ChatQuote* quote);
     void processBotChat(double now);
     void clearBotChat();
     void deliverNotice(const Notice& notice);
@@ -124,6 +126,8 @@ private:
         ChatChannel channel;
         int day;
         std::vector<uint8_t> audience;
+        uint32_t id = 0;
+        ChatQuote quote;
     };
     struct PendingChat {
         HeardChat line;
@@ -131,6 +135,7 @@ private:
         uint64_t ticket;
         double deadline;
     };
+    uint32_t m_nextChatId = 1;
     std::deque<HeardChat> m_languageHistory;
     std::deque<PendingChat> m_languageChats;
     uint8_t m_host = kNoPlayer;

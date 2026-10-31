@@ -21,6 +21,15 @@ struct LanguageRequest;
 
 // KI-Mitspieler für das Echtzeit-Spiel. Bewegt sich wie ein Mensch durchs Dorf und
 // nutzt nur das, was seine persönliche Spielansicht verrät (plus sichtbare Positionen).
+struct ChatQuote {
+    uint8_t speaker = kNoPlayer;
+    int day = 0;
+    Text text;
+    uint8_t topic = kNoPlayer;
+    int alibiNight = -1;
+    dialogue::Place place = dialogue::Place::Unknown;
+};
+
 class Bot {
 public:
     using SayFn = std::function<void(uint8_t botId, const Text& text, bool wolves)>;
@@ -43,6 +52,8 @@ public:
         bool alarm = false;          // "Hilfe, ein Werwolf!": wer es hört, flieht vor topic
         bool protectOffer = false;   // "Seherin, sag mir heimlich, wer du bist – ich passe auf dich auf"
         bool conversation = false;   // fiction and personal chat never reveal a game role
+        int alibiNight = -1;
+        dialogue::Place place = dialogue::Place::Unknown;
     };
 
     // Wie ein Bot spielt und schreibt. Jeder Bot im Spiel bekommt eigene Züge; neutral ist der Standard.
@@ -69,9 +80,11 @@ public:
     const Feelings& feelings() const { return m_feelings; }
     float relationship(uint8_t other) const;
     void update(float dt, Match& match, const SayFn& say);
+    Text lastWords(const Match& match) const;
     // Der Bot hört eine Chatnachricht und passt seinen Verdacht an.
     void hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel = ChatChannel::Global,
-              bool reply = true, const Speech* speech = nullptr, const dialogue::Message* interpreted = nullptr);
+              bool reply = true, const Speech* speech = nullptr, const dialogue::Message* interpreted = nullptr, const ChatQuote* quote = nullptr);
+    bool offerWitness(const Match& match, const ChatQuote& quote);
     int replyPriority(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
                       const Speech* speech = nullptr, const dialogue::Message* interpreted = nullptr) const;
     // Was der Bot gerade sagt; nur während seines say()-Aufrufs gesetzt.
@@ -173,6 +186,7 @@ private:
     uint8_t m_quarry = kNoPlayer;
     std::set<uint8_t> m_spared;           // heute Nacht nicht angreifbar (beschützt, wehrhaft)
     int m_douseHouse = -1;
+    bool m_reviewedDefense = false;
     bool m_voted = false;
     bool m_shot = false;
     float m_shotDelay = 0.0f;
@@ -241,7 +255,9 @@ private:
     struct Sight {
         Vec2 at;
         double clock = 0.0;
+        Vec2 observer{};
     };
+    bool sawAt(const Match& match, uint8_t person, const ChatQuote& quote) const;
     std::map<uint8_t, std::vector<Sight>> m_sightings; // diese Nacht: wann und wo jemand (in Menschengestalt) zu sehen war
     std::vector<Sight> m_beastSights;                   // … und wann und wo eine Bestie zu sehen war
     int m_nightSamples = 0;                             // wie oft der Bot sich nachts umgesehen hat
@@ -294,6 +310,6 @@ private:
 
 // Verteilt eine Chatnachricht an alle Bots, die sie hören; höchstens einer antwortet.
 void deliverChat(std::vector<Bot>& bots, const Match& match, uint8_t speaker, const Text& text, ChatChannel channel,
-                 eng::Rng& rng, const dialogue::Message* interpreted = nullptr, const std::vector<uint8_t>* recipients = nullptr);
+                 eng::Rng& rng, const dialogue::Message* interpreted = nullptr, const std::vector<uint8_t>* recipients = nullptr, const ChatQuote* quote = nullptr);
 
 } // namespace ww

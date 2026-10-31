@@ -275,6 +275,11 @@ private:
     bool m_pauseSettings = false;
     int m_pauseFocus = 0;
     bool m_journalOpen = false;
+    bool m_showRecap = false, m_showPins = false;
+    size_t m_pinPage = 0;
+    float m_pinScroll[2]{};
+    std::vector<LogEntry> m_pins;
+    std::optional<LogEntry> m_replyTo;
     double m_revealStart = -100.0;
     bool m_revealDone = true;
     Text m_subtitle;

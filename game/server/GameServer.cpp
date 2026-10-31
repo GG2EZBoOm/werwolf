@@ -96,7 +96,12 @@ void GameServer::tick() {
         m_match->update(dt);
         processBotChat(now);
         const Bot::SayFn say = [this](uint8_t botId, const Text& text, bool wolves) { chatFrom(botId, text, wolves); };
-        for (Bot& bot : m_bots) bot.update(dt, *m_match, say);
+        for (Bot& bot : m_bots) {
+            if (m_match->defenseOpen()) {
+                if (m_match->canDefend(bot.id()) && m_match->timeLeft() <= 18.0f - (bot.id() % 3))
+                    chatFrom(bot.id(), bot.lastWords(*m_match), false, 0, true);
+            } else bot.update(dt, *m_match, say);
+        }
         routeMatchNotices();
         sendCorrections();
         if (m_match->takeDirty()) m_dirty = true;
@@ -321,13 +326,14 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
     case proto::ClientMsg::Chat: {
         std::string text = eng::utf8::sanitize(r.str(2048), proto::kMaxChatLength);
         const bool wolves = r.boolean();
+        const auto replyTo = r.u32();
         if (text.empty() || !r.ok()) break;
         if (m->chatBudget < 1.0) {
             sendNotice(*m, NoticeKind::Warning, {"Nicht so schnell – das Dorf kommt kaum mit.", "Not so fast – the village can barely keep up."});
             break;
         }
         m->chatBudget -= 1.0;
-        chatFrom(memberId, Text::same(std::move(text)), wolves);
+        chatFrom(memberId, Text::same(std::move(text)), wolves, replyTo);
         break;
     }
     case proto::ClientMsg::Move: {
@@ -517,7 +523,7 @@ bool GameServer::noticeVisible(const Notice& n, uint8_t memberId) const {
     return false;
 }
 
-void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves) {
+void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves, uint32_t replyTo, bool defense) {
     Member* m = member(memberId);
     if (!m) return;
     ChatChannel channel = ChatChannel::Global;
@@ -529,29 +535,55 @@ void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves) {
         if (channel == ChatChannel::Nearby && p && p->wolfForm()) text = {"*knurrt bedrohlich*", "*growls menacingly*"};
     }
 
+    const HeardChat* original = nullptr;
+    if (replyTo) {
+        const auto it = std::find_if(m_languageHistory.begin(), m_languageHistory.end(), [&](const HeardChat& line) { return line.id == replyTo; });
+        if (!m_match || it == m_languageHistory.end() || !canQuoteAcross(it->channel, channel) ||
+            std::find(it->audience.begin(), it->audience.end(), memberId) == it->audience.end() ||
+            !m_match->canHear(it->speaker, memberId, channel) || m_match->hidesSpeaker(it->speaker, channel, memberId)) {
+            sendNotice(*m, NoticeKind::Warning, {"Die Aussage ist hier nicht mehr erreichbar.", "That message is no longer reachable here."});
+            return;
+        }
+        original = &*it;
+    }
+    if (m_match && m_match->defenseOpen() && channel == ChatChannel::Global) {
+        if (!m_match->canDefend(memberId) || (m->bot && !defense)) {
+            if (!m->bot) sendNotice(*m, NoticeKind::Info, {"Das Wort haben gerade die beiden Angeklagten.", "The two defendants have the floor."});
+            return;
+        }
+        m_match->finishDefenseLine(memberId);
+    }
+    const uint32_t id = m_match ? m_nextChatId++ : 0;
+    const uint16_t day = m_match ? static_cast<uint16_t>(m_match->day()) : 0;
     ByteWriter w = proto::begin(proto::ServerMsg::Chat);
     w.u8(static_cast<uint8_t>(channel));
     w.u8(memberId);
     w.str(m->name);
     text.write(w);
+    w.u32(id); w.u16(day);
+    ByteWriter referenced = w;
+    w.u32(0); referenced.u32(replyTo);
     // Für das kleine Mädchen ohne Namen (der Client schreibt "Unbekannter Werwolf")
     ByteWriter anonymous = proto::begin(proto::ServerMsg::Chat);
     anonymous.u8(static_cast<uint8_t>(channel));
     anonymous.u8(kNoPlayer);
     anonymous.str("");
     text.write(anonymous);
+    anonymous.u32(id); anonymous.u16(day); anonymous.u32(0);
     for (auto& target : m_members) {
         if (!target->conn) continue;
         const bool hears = m_match ? m_match->canHear(target->id, memberId, channel) : true;
         if (!hears) continue;
         const bool hidden = m_match && m_match->hidesSpeaker(target->id, channel, memberId);
-        target->conn->send(hidden ? anonymous.data() : w.data());
+        const bool heardOriginal = original && std::find(original->audience.begin(), original->audience.end(), target->id) != original->audience.end();
+        target->conn->send(hidden ? anonymous.data() : heardOriginal ? referenced.data() : w.data());
     }
-    if (m_match) queueBotChat(memberId, text, channel);
+    if (m_match) queueBotChat(memberId, text, channel, id, original ? &original->quote : nullptr);
 
     if (channel != ChatChannel::Nearby && channel != ChatChannel::Family) {
         HistoryEntry e;
         e.isChat = true;
+        e.id = id; e.day = day;
         e.channel = channel;
         e.from = memberId;
         e.name = m->name;
@@ -567,17 +599,41 @@ void GameServer::clearBotChat() {
     m_languageHistory.clear();
 }
 
-void GameServer::queueBotChat(uint8_t speaker, const Text& text, ChatChannel channel) {
+void GameServer::queueBotChat(uint8_t speaker, const Text& text, ChatChannel channel, uint32_t id, const ChatQuote* quote) {
     const auto* from = m_match->find(speaker);
     if (!from) return;
     HeardChat line{speaker, text, channel, m_match->day(), {}};
+    line.id = id;
+    line.quote = {speaker, line.day, text};
+    if (from->bot) {
+        for (const Bot& bot : m_bots) if (bot.id() == speaker && bot.speaking()) {
+            const auto* said = bot.speaking();
+            line.quote.topic = said->evidence ? said->evidence->target : said->topic;
+            line.quote.alibiNight = said->alibiNight;
+            line.quote.place = said->place;
+        }
+    } else {
+        const auto meaning = dialogue::parse(text.de, {}, speaker);
+        if (!meaning.question && meaning.place != dialogue::Place::Unknown &&
+            (text.de.find("letzte Nacht") != std::string::npos || text.de.find("last night") != std::string::npos)) {
+            line.quote.place = meaning.place;
+            line.quote.alibiNight = line.day - 1;
+        }
+    }
     for (const auto& p : m_match->players())
-        if (m_match->canHear(p.id, speaker, channel) && !m_match->hidesSpeaker(p.id, channel, speaker)) line.audience.push_back(p.id);
+        if ((p.connected || p.bot) && m_match->canHear(p.id, speaker, channel) && !m_match->hidesSpeaker(p.id, channel, speaker)) line.audience.push_back(p.id);
     const bool hasListeners = std::any_of(m_bots.begin(), m_bots.end(), [&](const Bot& bot) {
         const auto* p = m_match->find(bot.id());
         return p && p->alive && std::find(line.audience.begin(), line.audience.end(), bot.id()) != line.audience.end();
     });
-    if (!from->bot && from->alive && hasListeners && m_language && m_language->available()) {
+    if (quote) {
+        const auto source = std::find_if(m_languageHistory.begin(), m_languageHistory.end(), [&](const HeardChat& h) { return &h.quote == quote; });
+        std::vector<uint8_t> shared;
+        if (source != m_languageHistory.end())
+            for (uint8_t listener : line.audience)
+                if (std::find(source->audience.begin(), source->audience.end(), listener) != source->audience.end()) shared.push_back(listener);
+        deliverChat(m_bots, *m_match, speaker, text, channel, m_rng, nullptr, &shared, quote);
+    } else if (!from->bot && from->alive && hasListeners && m_language && m_language->available()) {
         // Bound memory under chat spam; drain old entries in order through the classic parser.
         if (m_languageChats.size() >= 16) {
             for (auto& pending : m_languageChats) pending.deadline = 0;
@@ -586,7 +642,9 @@ void GameServer::queueBotChat(uint8_t speaker, const Text& text, ChatChannel cha
         UnderstandingRequest request;
         request.speaker = speaker; request.message = text;
         for (const auto& p : m_match->players()) request.people.push_back({p.id, p.name});
-        for (const auto& previous : m_languageHistory) {
+        const size_t start = m_languageHistory.size() > 32 ? m_languageHistory.size() - 32 : 0;
+        for (size_t i = start; i < m_languageHistory.size(); ++i) {
+            const auto& previous = m_languageHistory[i];
             if (previous.channel != channel || previous.day != line.day) continue;
             // A shared interpretation must not contain anything any current listener failed to hear.
             if (!std::all_of(line.audience.begin(), line.audience.end(), [&](uint8_t id) {
@@ -599,7 +657,7 @@ void GameServer::queueBotChat(uint8_t speaker, const Text& text, ChatChannel cha
         deliverChat(m_bots, *m_match, speaker, text, channel, m_rng);
     }
     m_languageHistory.push_back(std::move(line));
-    while (m_languageHistory.size() > 32) m_languageHistory.pop_front();
+    while (m_languageHistory.size() > 512) m_languageHistory.pop_front();
 }
 
 void GameServer::processBotChat(double now) {
@@ -669,6 +727,12 @@ void GameServer::sendHistory(Member& m) {
             w.u8(hidden ? kNoPlayer : e.from);
             w.str(hidden ? std::string() : e.name);
             e.text.write(w);
+            if (!hidden && e.id) {
+                auto line = std::find_if(m_languageHistory.begin(), m_languageHistory.end(), [&](const HeardChat& h) { return h.id == e.id; });
+                if (line != m_languageHistory.end() && std::find(line->audience.begin(), line->audience.end(), m.id) == line->audience.end())
+                    line->audience.push_back(m.id);
+            }
+            w.u32(e.id); w.u16(e.day); w.u32(0); // History must not expose a reference the viewer never heard.
             m.conn->send(w.data());
         } else {
             if (!noticeVisible(e.notice, m.id)) continue;

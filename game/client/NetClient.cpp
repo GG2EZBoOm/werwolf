@@ -48,6 +48,7 @@ bool NetClient::connect(const std::string& host, uint16_t port, const std::strin
 
 bool NetClient::connect(const std::vector<std::string>& hosts, uint16_t port, const std::string& name, uint64_t token) {
     disconnect();
+    m_log.clear(); m_newEntries.clear();
     m_hosts = hosts;
     m_host = hosts.empty() ? std::string() : hosts.front();
     m_port = port;
@@ -136,6 +137,7 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
     case proto::ServerMsg::State: {
         GameView v;
         if (v.read(r)) {
+            if (v.phase == Phase::Lobby && m_hasView && m_view.inGame()) m_log.clear();
             if (v.phase == Phase::Lobby) {
                 m_snapshots.clear();
                 m_doors.clear();
@@ -151,10 +153,12 @@ void NetClient::handle(const std::vector<uint8_t>& data, double now) {
     case proto::ServerMsg::Chat: {
         LogEntry e;
         e.isChat = true;
-        e.channel = static_cast<ChatChannel>(std::min<uint8_t>(r.u8(), static_cast<uint8_t>(ChatChannel::Family)));
+        e.channel = static_cast<ChatChannel>(std::min<uint8_t>(r.u8(), static_cast<uint8_t>(ChatChannel::Vampires)));
         e.from = r.u8();
         e.name = r.str();
         e.text.read(r);
+        e.id = r.u32(); e.day = r.u16(); e.replyTo = r.u32();
+        if (e.replyTo) for (const auto& previous : m_log) if (previous.id == e.replyTo) { e.quoteName = previous.name; e.quoteText = previous.text; break; }
         e.time = now;
         if (r.ok()) addEntry(std::move(e));
         break;
@@ -248,10 +252,11 @@ float NetClient::timeLeft(double now) const {
     return std::max(0.0f, m_view.timeLeft - static_cast<float>(now - m_viewTime));
 }
 
-void NetClient::sendChat(const std::string& text, bool wolves) {
+void NetClient::sendChat(const std::string& text, bool wolves, uint32_t replyTo) {
     eng::ByteWriter w = proto::begin(proto::ClientMsg::Chat);
     w.str(text);
     w.boolean(wolves);
+    w.u32(replyTo);
     send(w);
 }
 

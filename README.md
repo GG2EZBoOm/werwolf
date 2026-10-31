@@ -171,6 +171,26 @@ Wer öffentlich gegen einen entlarvten Wolf gestimmt hat, gewinnt Vertrauen – 
 Ohne Zusatzpaket ist das lokale, regelbasierte Spiel-KI. Sie erkennt typische Aussagen zum Spiel;
 Ironie und beliebig verschachtelte Sätze werden nicht zuverlässig verstanden.
 
+### Aussagen merken und nachhaken
+
+Öffne den Chat in einer Partie mit **Enter**. Ein Linksklick auf eine namentlich gehörte
+Nachricht wählt sie über dem Eingabefeld aus. Schreibe zum Beispiel „Wann?“ oder „Allein?“.
+Ein Klick auf **×** hebt die Auswahl auf. Bei einer Rückfrage zeigt der Chat denjenigen,
+die das Original gehört haben, einen Ausschnitt daraus. Ein privates Zitat bleibt in
+seinem Kanal. Bots können sich auf die ausgewählte Aussage und die genannte Nacht beziehen.
+Ein weiterer Bot kann sich bei der Versammlung als Zeuge melden, wenn er die Person in
+dieser Nacht tatsächlich am betreffenden Ort aus der Nähe gesehen hat.
+
+Mit **Rechtsklick** merkst du eine Chatnachricht für diese Partie. Unter **J → Verdachtsbuch**
+stehen je zwei Aussagen mit Sprecher und Tag nebeneinander. Dort kannst du blättern
+und Einträge entfernen. Nur du siehst deine gemerkten Aussagen.
+
+Bei einer Hinrichtungswahl mit zwei eindeutigen Führenden und höchstens einer gewichteten
+Stimme Abstand bekommen beide jeweils eine Chatnachricht zur Verteidigung. Sobald beide
+gesprochen haben oder 20 Sekunden vergangen sind, bleiben acht Sekunden zum Umstimmen.
+Bei drei gleichauf liegenden Kandidaten greift die normale Auswertung. Im Epilog öffnet
+**Rückblick** bis zu drei tatsächlich eingetretene Schlüsselmomente der Partie.
+
 ### Optionales lokales KI-Sprachpaket
 
 Ab Version **0.10.0** können Bots Spielernachrichten zusätzlich mit einem lokalen Sprachmodell beantworten.
