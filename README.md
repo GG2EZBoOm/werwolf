@@ -328,6 +328,18 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
 Tote werden zu **Geistern**: sie schweben unsichtbar umher, sehen alle Rollen, lesen den Rudel-Chat
 mit und sprechen im Geisterchat. Vor einer Hinrichtungswahl können sie auf einen Lebenden tippen (anschauen und **E** drücken oder den Namen in der Geisterliste anklicken). Nur die Toten sehen nach dem Urteil das Ergebnis im Geisterchat.
 
+### Gemeinsamer Geisterspuk
+
+Zu Beginn jeder Nacht bekommen die Geister **einen gemeinsamen Spuk**. Der Einsatz ist bis zum
+nächsten Nachtbeginn verfügbar, auch am Tag und während der Versammlung. Mit **1** stimmst du
+für einen einzelnen Schlag der Dorfglocke, mit **2** für fünf Sekunden blaue Kerzen am Feuer.
+Erneutes Drücken derselben Taste zieht deine Stimme zurück.
+
+Die Anzeige nennt Stimmen und benötigte Mehrheit. Mehr als die Hälfte der verbundenen menschlichen
+Geister muss denselben Effekt wählen. Wer dafür gestimmt hat, kann ihn mit **G** im passenden
+Augenblick auslösen. Ein einzelner Geist kann das allein. Lebende erleben nur den Effekt.
+Die Spukglocke ruft keine Versammlung ein.
+
 ### Fußspuren im Schlamm
 
 In der ersten Nacht und danach jede zweite Nacht fällt ein kurzer Regenschauer. Sobald er aufhört,

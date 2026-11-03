@@ -20,6 +20,7 @@ struct SoundCue {
 class SoundEvents {
 public:
     void reset();
+    bool takeHauntBell(const GameView& view, float timeLeft);
     std::vector<SoundCue> update(const World& world, const std::vector<EntityState>& entities,
                                  const std::vector<DoorState>& doors);
 private:
@@ -29,5 +30,6 @@ private:
     };
     std::unordered_map<uint8_t, Actor> m_actors;
     std::vector<DoorState> m_doors;
+    uint32_t m_lastHauntBell = 0;
 };
 } // namespace ww

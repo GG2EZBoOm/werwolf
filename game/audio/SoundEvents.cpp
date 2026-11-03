@@ -9,7 +9,14 @@ float soundPan(Vec2 offset, float cameraYaw) {
                       std::max(1.0f, offset.length()), -0.9f, 0.9f);
 }
 
+bool SoundEvents::takeHauntBell(const GameView& view, float timeLeft) {
+    if (view.haunting != Haunt::Bell || view.hauntSerial == m_lastHauntBell) return false;
+    m_lastHauntBell = view.hauntSerial;
+    return timeLeft > kHauntSeconds - 1.5f;
+}
+
 void SoundEvents::reset() {
+    m_lastHauntBell = 0;
     m_actors.clear();
     m_doors.clear();
 }

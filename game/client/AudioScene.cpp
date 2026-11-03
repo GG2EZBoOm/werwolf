@@ -80,6 +80,11 @@ void App::updateAudio() {
         const Vec2 offset = position - listener;
         return soundPan(offset, yaw);
     };
+    if (match && m_soundEvents.takeHauntBell(m_net.view(), m_net.hauntTimeLeft(m_time))) {
+        const Vec2 bell{m_world.bell().x, m_world.bell().z};
+        const float gain = std::clamp(1.f - (bell - listener).length() / 120.f, .25f, 1.f);
+        playSound(Sound::Bell, .85f * gain, panAt(bell), .84f);
+    }
     const float tod = match ? m_timeOfDay : (sandbox || m_screen == Screen::Preview) ? m_previewTimeOfDay : 0.93f;
     const float elevation = std::sin((tod - 0.25f) * 2.0f * eng::kPi);
     const float night = 1.0f - eng::smoothstep(-0.22f, 0.02f, elevation);

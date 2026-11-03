@@ -31,6 +31,7 @@ constexpr KeyBinding kBindings[] = {
     {"F", "Zweitaktion (Gift, Feuer, …)", "Second action (poison, fire, …)"},
     {"Q", "Tür öffnen / schließen", "Open / close door"},
     {"T", "Fußspur im Schlamm lesen", "Read a muddy footprint"},
+    {"1 / 2 / G", "Geisterspuk wählen / auslösen", "Choose / trigger a haunting"},
     {"R", "Verwandeln (Werwolf)", "Transform (werewolf)"},
     {"Linksklick", "Reißen, erstechen, Tür einschlagen", "Maul, stab, break a door"},
     {"Tab", "Geheimer Chat (Rudel, Geister, Geschwister)", "Secret chat (pack, ghosts, siblings)"},

@@ -1218,6 +1218,77 @@ TEST(RainLeavesAnonymousDirectionalTracksOnlyOnTheShortPath) {
     CHECK(!m.viewFor(2).raining && m.viewFor(2).mudHouse == kNoPlayer);
 }
 
+TEST(GhostsChoosePrivatelyAndTimeOneHauntingPerNight) {
+    auto m = makeMatch({W, V, V, V, V, V, V});
+    constexpr auto bell = static_cast<uint8_t>(Haunt::Bell), candles = static_cast<uint8_t>(Haunt::Candles);
+    for (uint8_t id : std::array<uint8_t, 2>{4, 5}) { m.playerLeft(id); m.setConnected(id, true); }
+    CHECK(!m.interact(4, Interaction::HauntVote, bell).empty()); // before the first night
+    runUntil(m, Phase::Night);
+    CHECK(!m.interact(1, Interaction::HauntVote, bell).empty());
+    CHECK(!m.interact(4, Interaction::HauntVote, 77).empty());
+    CHECK(m.interact(4, Interaction::HauntVote, bell).empty());
+    CHECK(m.interact(4, Interaction::HauntVote, bell).empty());
+    CHECK(m.interact(5, Interaction::HauntVote, candles).empty());
+    CHECK(!m.interact(4, Interaction::HauntTrigger, bell).empty()); // tie
+    CHECK_EQ(m.viewFor(4).hauntBallot.bells, 1);
+    CHECK(m.interact(5, Interaction::HauntVote, 0).empty());
+    CHECK_EQ(m.viewFor(4).hauntBallot.candles, 0);
+    CHECK(m.interact(5, Interaction::HauntVote, bell).empty());
+    runUntil(m, Phase::Assembly); // reserve the bell for someone's speech
+    const auto ghost = m.viewFor(4);
+    CHECK(ghost.hauntBallot.canTrigger() && ghost.haunting == Haunt::None);
+    const auto living = m.viewFor(1);
+    CHECK(living.hauntBallot.voters == 0 && living.hauntBallot.bells == 0 && living.haunting == Haunt::None);
+    eng::ByteWriter bytes; ghost.write(bytes); eng::ByteReader reader(bytes.data()); GameView copy;
+    CHECK(copy.read(reader) && copy.hauntBallot.bells == 2 && copy.hauntBallot.mine == Haunt::Bell);
+    const auto timeBefore = m.timeLeft();
+    CHECK(!m.interact(1, Interaction::HauntTrigger, bell).empty());
+    CHECK(!m.interact(4, Interaction::HauntTrigger, candles).empty());
+    CHECK(m.interact(5, Interaction::HauntTrigger, bell).empty());
+    CHECK(!m.interact(4, Interaction::HauntTrigger, bell).empty());
+    CHECK(m.phase() == Phase::Assembly && m.timeLeft() == timeBefore);
+    CHECK(m.viewFor(1).haunting == Haunt::Bell && m.viewFor(1).hauntSerial == 1);
+    CHECK_EQ(m.viewFor(4).hauntBallot.voters, 0);
+    run(m, 5.2f);
+    CHECK(m.viewFor(1).haunting == Haunt::None && m.viewFor(1).hauntTime == 0);
+    runUntil(m, Phase::Night);
+    CHECK_EQ(m.viewFor(4).hauntBallot.bells, 0);
+    CHECK(m.interact(5, Interaction::HauntVote, bell).empty());
+    m.setConnected(5, false);
+    CHECK_EQ(m.viewFor(4).hauntBallot.voters, 1);
+    CHECK(!m.interact(5, Interaction::HauntTrigger, bell).empty());
+    CHECK(m.interact(4, Interaction::HauntVote, candles).empty());
+    CHECK(m.interact(4, Interaction::HauntTrigger, candles).empty());
+    m.setConnected(5, true);
+    CHECK(!m.interact(5, Interaction::HauntVote, bell).empty());
+    const auto flash = m.viewFor(1);
+    eng::ByteWriter wire; flash.write(wire); eng::ByteReader packet(wire.data());
+    CHECK(copy.read(packet) && copy.haunting == Haunt::Candles && copy.hauntTime == kHauntSeconds && copy.hauntSerial == 2);
+    run(m, kHauntSeconds + .2f);
+    CHECK(m.viewFor(1).haunting == Haunt::None);
+}
+
+TEST(OnlyConnectedHumanGhostsCountIncludingAfterARevival) {
+    std::vector<Match::Seat> seats;
+    for (uint8_t i = 0; i < 7; ++i) seats.push_back({i, "P" + std::to_string(i), i == 6});
+    Match m; Text error;
+    CHECK(m.startWithRoles(seats, {W, Role::Witch, V, V, V, V, V}, quickSettings(), testWorld(), 4, error));
+    runUntil(m, Phase::Night);
+    m.playerLeft(6); m.setConnected(6, true); // bot
+    m.playerLeft(5); m.setConnected(5, true);
+    CHECK(!m.interact(6, Interaction::HauntVote, 1).empty());
+    CHECK_EQ(m.viewFor(5).hauntBallot.voters, 1);
+    placeNear(m, 0, 4); becomeWolf(m, 0);
+    CHECK(m.interact(0, Interaction::Attack, 4).empty());
+    CHECK(m.interact(4, Interaction::HauntVote, 1).empty());
+    CHECK(m.interact(5, Interaction::HauntVote, 2).empty());
+    placeNear(m, 1, 4);
+    CHECK(m.interact(1, Interaction::Heal, 4).empty());
+    CHECK(m.find(4)->alive && m.viewFor(4).hauntBallot.voters == 0);
+    CHECK(!m.interact(4, Interaction::HauntTrigger, 1).empty());
+    CHECK(m.viewFor(5).hauntBallot.canTrigger() && m.viewFor(5).hauntBallot.bells == 0);
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

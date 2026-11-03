@@ -294,6 +294,20 @@ TEST(imported_footsteps_decode_without_silence_or_clipping) {
 #endif
 
 // Optional listening sample containing every effect and an ambience bed.
+TEST(HauntBellSoundsOnceAndDoesNotReplayOldEvents) {
+    SoundEvents events; GameView view;
+    view.haunting = Haunt::Bell; view.hauntSerial = 1;
+    CHECK(events.takeHauntBell(view, kHauntSeconds));
+    CHECK(!events.takeHauntBell(view, kHauntSeconds - .1f));
+    view.haunting = Haunt::Candles; view.hauntSerial = 2;
+    CHECK(!events.takeHauntBell(view, kHauntSeconds));
+    events.reset();
+    view.haunting = Haunt::Bell;
+    CHECK(!events.takeHauntBell(view, .6f)); // reconnect near the end of the sound
+    view.hauntSerial = 3;
+    CHECK(events.takeHauntBell(view, kHauntSeconds - .1f));
+}
+
 // Run: test_audio --demo <file.wav>. Does not require an output device.
 int main(int argc, char** argv) {
     const int result = test::runAll();

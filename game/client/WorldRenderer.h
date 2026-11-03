@@ -26,7 +26,7 @@ public:
 
     // timeOfDay: 0 = Mitternacht, 0.25 = Sonnenaufgang, 0.5 = Mittag, 0.75 = Sonnenuntergang
     eng::Environment environment(float timeOfDay, Vec3 focus, float time) const;
-    void draw(eng::Renderer3D& r, const eng::Environment& env, float time) const;
+    void draw(eng::Renderer3D& r, const eng::Environment& env, float time, float candleTime = 0.f) const;
 
 private:
     struct Chunk {
@@ -63,6 +63,8 @@ private:
     std::vector<Vec3> m_lanterns;
     std::vector<Vec3> m_fireflies;
     Vec3 m_bonfire;
+    std::vector<Vec3> m_squareWicks;
+    eng::Mesh m_candleFlame;
 };
 
 // Wiederverwendbare Bauteile, z. B. für Figuren

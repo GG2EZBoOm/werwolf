@@ -57,6 +57,10 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
     m_mudHouse = kNoPlayer;
     m_raining = false;
     m_footprints.clear();
+    m_hauntAvailable = false;
+    m_haunting = Haunt::None;
+    m_hauntUntil = 0;
+    m_hauntSerial = 0;
     m_world = &world;
     m_settings = settings;
     m_settings.sanitize();
@@ -405,6 +409,19 @@ void Match::movePlayer(uint8_t id, float x, float z, float yaw, uint8_t flags) {
 
 // --- Abfragen ----------------------------------------------------------------
 
+HauntBallot Match::hauntBallot(const Player& viewer) const {
+    HauntBallot ballot;
+    if (!m_hauntAvailable || m_phase == Phase::GameOver || viewer.alive || viewer.bot || !viewer.connected) return ballot;
+    ballot.mine = viewer.hauntVote;
+    for (const Player& p : m_players) {
+        if (p.alive || p.bot || !p.connected) continue;
+        ++ballot.voters;
+        if (p.hauntVote == Haunt::Bell) ++ballot.bells;
+        if (p.hauntVote == Haunt::Candles) ++ballot.candles;
+    }
+    return ballot;
+}
+
 uint32_t Match::abilitiesFor(uint8_t id) const {
     const Player* p = find(id);
     if (!p) return 0;
@@ -539,6 +556,18 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
     };
 
     switch (kind) {
+    case Interaction::HauntVote:
+    case Interaction::HauntTrigger: {
+        const auto ballot = hauntBallot(*p);
+        if (!ballot.voters) return {"Der Spuk ist gerade nicht verfügbar.", "The haunting is unavailable right now."};
+        const auto choice = static_cast<Haunt>(targetId);
+        if (choice > Haunt::Candles) return {"Unbekannter Spuk.", "Unknown haunting."};
+        if (kind == Interaction::HauntTrigger) {
+            if (choice != ballot.mine || !ballot.canTrigger()) return {"Deine Wahl braucht eine Mehrheit der Geister.", "Your choice needs a majority of the ghosts."};
+            if (m_clock < m_hauntUntil) return {"Der vorige Spuk klingt noch nach.", "The previous haunting is still fading."};
+        }
+        return {};
+    }
     case Interaction::ReadFootprint: {
         const auto view = viewFor(id);
         const auto& pos = p->alive ? p->position : p->ghostPosition;
@@ -837,7 +866,15 @@ GameView Match::viewFor(uint8_t viewer) const {
             }
         }
     }
-    if (me && !me->alive) v.ghostTip = me->ghostTip;
+    if (me && !me->alive) {
+        v.ghostTip = me->ghostTip;
+        v.hauntBallot = hauntBallot(*me);
+    }
+    if (!over && m_clock < m_hauntUntil) {
+        v.haunting = m_haunting;
+        v.hauntSerial = m_hauntSerial;
+        v.hauntTime = static_cast<float>(m_hauntUntil - m_clock);
+    }
     if (m_phase == Phase::Night) for (const Player& p : m_players)
         if (p.windowLantern) v.windowLanterns |= 1u << p.id;
     const bool spectator = !me || !me->alive;
@@ -994,6 +1031,18 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
     Player* t = findMutable(targetId);
 
     switch (kind) {
+    case Interaction::HauntVote:
+        p->hauntVote = static_cast<Haunt>(targetId);
+        break;
+    case Interaction::HauntTrigger:
+        m_hauntAvailable = false;
+        m_haunting = static_cast<Haunt>(targetId);
+        ++m_hauntSerial;
+        m_hauntUntil = m_clock + kHauntSeconds;
+        narrate(m_haunting == Haunt::Bell ?
+                Text{"Die Glocke am Dorfplatz schlägt von selbst.", "The bell in the village square rings by itself."} :
+                Text{"Die Kerzen am Dorfplatz flammen blau auf.", "The candles in the village square flare blue."});
+        break;
     case Interaction::ReadFootprint: {
         const auto view = viewFor(id);
         const auto& pos = p->alive ? p->position : p->ghostPosition;
@@ -1075,6 +1124,7 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
         m_healAvailable = false;
         auto revive = [&](Player& r) {
             r.alive = true;
+            r.hauntVote = Haunt::None;
             r.position = r.deathPosition;
             r.needsCorrection = true;
             r.hunterTimer = 0.0f;
@@ -1379,6 +1429,7 @@ void Match::makeLovers(uint8_t a, uint8_t b) {
 void Match::setConnected(uint8_t id, bool connected) {
     if (Player* p = findMutable(id)) {
         p->connected = connected;
+        if (!connected) p->hauntVote = Haunt::None;
         markDirty();
     }
 }
@@ -1387,6 +1438,7 @@ void Match::playerLeft(uint8_t id) {
     Player* p = findMutable(id);
     if (!p) return;
     p->connected = false;
+    p->hauntVote = Haunt::None;
     p->hunterTimer = 0.0f;
     markDirty();
     if (!p->alive || m_phase == Phase::GameOver) return;
@@ -1954,7 +2006,11 @@ void Match::finishServant() {
 
 void Match::enterNight() {
     m_phase = Phase::Night;
-    for (auto& p : m_players) p.windowLantern = false;
+    m_hauntAvailable = !m_case;
+    for (auto& p : m_players) {
+        p.windowLantern = false;
+        p.hauntVote = Haunt::None;
+    }
     setTimer(m_settings.nightSeconds);
     m_footprints.clear();
     m_mudHouse = kNoPlayer;

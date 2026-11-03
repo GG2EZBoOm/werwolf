@@ -65,6 +65,7 @@ public:
     uint16_t port() const { return m_port; }
     const std::string& name() const { return m_name; }
     float timeLeft(double now) const;
+    float hauntTimeLeft(double now) const;
 
     // Positionen aller Figuren, leicht verzögert und weich interpoliert
     std::vector<EntityState> entities(double now) const;

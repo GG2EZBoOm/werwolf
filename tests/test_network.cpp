@@ -436,6 +436,43 @@ TEST(TutorialWitnessesAnswerInOrderAtTheFire) {
     CHECK(pump(client, [&] { return client.view().phase == Phase::Lobby && client.view().players.size() == 1; }, 3));
 }
 
+TEST(HauntingBallotStaysWithGhostsAndCandlesReachTheVillage) {
+    ServerOptions opt; opt.port = kTestPort + 6; opt.timeScale = 16; opt.language.enabled = false; opt.logChat = false;
+    ServerThread server; std::string error;
+    CHECK(server.start(opt, error));
+    if (!server.isRunning()) return;
+    std::array<NetClient, 5> players;
+    for (size_t i = 0; i < players.size(); ++i) {
+        CHECK(players[i].connect("127.0.0.1", opt.port, "Gast" + std::to_string(i)));
+        CHECK(pump(players[i], [&] { return players[i].hasView(); }, 3));
+    }
+    auto until = [&](auto done, double timeout) {
+        const double deadline = eng::nowSeconds() + timeout;
+        while (eng::nowSeconds() < deadline) {
+            for (auto& client : players) client.update(eng::nowSeconds());
+            if (done()) return true;
+            eng::sleepSeconds(.005);
+        }
+        return false;
+    };
+    Settings s; s.roles = 0; s.wolves = 1; s.captain = false;
+    s.daySeconds = 45; s.nightSeconds = 45; s.discussionSeconds = 20; s.voteSeconds = 30;
+    players[0].sendSettings(s); players[0].sendStartGame();
+    if (!until([&]{ return players[0].view().phase == Phase::Vote; }, 18)) { CHECK(false); return; }
+    auto ghost = std::find_if(players.begin(), players.end(), [](const NetClient& p){ return p.view().yourRole == Role::Villager; });
+    if (ghost == players.end()) { CHECK(false); return; }
+    auto& witness = (&players[0] == &*ghost) ? players[1] : players[0];
+    for (auto& client : players) if (&client != &*ghost) client.sendInteract(Interaction::Vote, ghost->myId());
+    if (!until([&]{ return ghost->view().phase == Phase::Night && ghost->view().hauntBallot.voters == 1; }, 5)) { CHECK(false); return; }
+    ghost->sendInteract(Interaction::HauntVote, static_cast<uint8_t>(Haunt::Candles));
+    CHECK(until([&]{ return ghost->view().hauntBallot.canTrigger(); }, 1));
+    CHECK(witness.view().hauntBallot.voters == 0 && witness.view().haunting == Haunt::None);
+    ghost->sendInteract(Interaction::HauntTrigger, static_cast<uint8_t>(Haunt::Candles));
+    CHECK(until([&]{ return witness.view().haunting == Haunt::Candles; }, 1));
+    CHECK(witness.view().phase == Phase::Night && witness.view().hauntSerial != 0);
+    CHECK(until([&]{ return !ghost->view().hauntBallot.voters && witness.view().haunting == Haunt::None; }, 2));
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

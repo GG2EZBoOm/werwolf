@@ -186,6 +186,21 @@ void App::buildPrompts(const GameView& v) {
     if (v.can(AbilityWindowLantern) && v.me() && v.me()->house < m_world.houses().size() && (m_world.doorCenter(v.me()->house) - me2).length() <= kDoorRange)
         add(Interaction::WindowLantern, "G", (v.windowLanterns & (1u << v.you)) ? L("Laterne vom Fenster nehmen", "Take down lantern") :
             L("Laterne ans Fenster hängen", "Hang lantern at the window"), v.me()->house, true);
+    const auto& ballot = v.hauntBallot;
+    if (ballot.voters) {
+        auto hauntOption = [&](const char* key, Haunt effect, int count, const char* name) {
+            const bool mine = ballot.mine == effect;
+            const auto label = std::format("{} · {}/{}{}", name, count, ballot.voters / 2 + 1,
+                                           mine ? L(" (gewählt)", " (chosen)") : "");
+            add(Interaction::HauntVote, key, label, static_cast<uint8_t>(mine ? Haunt::None : effect), true);
+        };
+        hauntOption("1", Haunt::Bell, ballot.bells, L("Spukglocke", "Ghost bell"));
+        hauntOption("2", Haunt::Candles, ballot.candles, L("Blaue Kerzen", "Blue candles"));
+        const bool ready = ballot.canTrigger() && v.haunting == Haunt::None;
+        add(Interaction::HauntTrigger, "G", ready ? (ballot.mine == Haunt::Bell ?
+            L("Jetzt die Glocke läuten", "Ring the bell now") : L("Jetzt Kerzen aufflammen lassen", "Flare the candles now")) :
+            L("Spuk braucht eine Mehrheit", "Haunting needs a majority"), static_cast<uint8_t>(ballot.mine), ready);
+    }
     if (v.can(AbilityGhostTip)) {
         const auto t = aim(100.f, false, any);
         add(Interaction::GhostTip, "E", label(t, "Geistertipp auf {}", "Ghost prediction: {}", "Für einen Tipp einen Lebenden ansehen", "Look at a living player to predict"), t, t != kNoPlayer);
@@ -534,6 +549,8 @@ void App::updateMatch() {
                 return;
             }
         };
+        if (in.pressed(eng::Key::Num1)) trigger("1");
+        if (in.pressed(eng::Key::Num2)) trigger("2");
         if (in.pressed(eng::Key::E)) trigger("E");
         if (in.pressed(eng::Key::F)) trigger("F");
         if (in.pressed(eng::Key::Q)) trigger("Q");
@@ -566,7 +583,8 @@ void App::renderMatch3D() {
         env.gradeTint = mul(env.gradeTint, Vec3{0.85f, 0.95f, 1.2f});
     }
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), m_lastCamera, env);
-    m_worldRenderer.draw(m_renderer3d, env, t);
+    const float candleTime = v.haunting == Haunt::Candles ? m_net.hauntTimeLeft(m_time) : 0.f;
+    m_worldRenderer.draw(m_renderer3d, env, t, candleTime);
     m_worldRenderer.drawMud(m_renderer3d, m_world, v, m_player.position, t);
     const float night = env.emissive;
 

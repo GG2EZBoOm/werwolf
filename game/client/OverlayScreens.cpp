@@ -22,7 +22,12 @@ std::vector<std::pair<std::string, Color>> App::roleStatusLines(const GameView& 
     auto ghostChat = [&] {
         return std::string(m_chatWolves ? L("Chat: Geister (Tab wechselt)", "Chat: ghosts (Tab switches)") : L("Chat: Nähe (Tab: Geister)", "Chat: nearby (Tab: ghosts)"));
     };
-    if (!alive) lines.push_back({L("Du bist tot – als Geist siehst du alles.", "You are dead – as a ghost you see everything."), theme::ghost});
+    if (!alive) {
+        lines.push_back({L("Du bist tot – als Geist siehst du alles.", "You are dead – as a ghost you see everything."), theme::ghost});
+        if (v.phase != Phase::GameOver)
+            lines.push_back({v.hauntBallot.voters ? L("Spuk wählen: 1 / 2. Auslösen: G.", "Choose: 1 / 2. Haunt: G.") :
+                             L("Neuer Spuk bei Nachtbeginn.", "A new haunting at nightfall."), theme::ghost});
+    }
     if (isWolfRole(role)) {
         std::string pack;
         for (const PlayerView& p : v.players)

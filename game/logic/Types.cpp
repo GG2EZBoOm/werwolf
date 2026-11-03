@@ -612,6 +612,12 @@ void GameView::write(eng::ByteWriter& w) const {
         w.u8(static_cast<uint8_t>(footprints.size()));
         for (const auto& step : footprints) { w.f32(step.x); w.f32(step.z); w.f32(step.heading); w.boolean(step.left); }
     }
+    w.u8(hauntBallot.voters);
+    if (hauntBallot.voters) {
+        w.u8(hauntBallot.bells); w.u8(hauntBallot.candles); w.u8(static_cast<uint8_t>(hauntBallot.mine));
+    }
+    w.u8(static_cast<uint8_t>(haunting));
+    if (haunting != Haunt::None) { w.u32(hauntSerial); w.f32(hauntTime); }
 }
 
 bool GameView::read(eng::ByteReader& r) {
@@ -701,6 +707,18 @@ bool GameView::read(eng::ByteReader& r) {
             if (!std::isfinite(step.x) || !std::isfinite(step.z) || !std::isfinite(step.heading)) return false;
             footprints.push_back(step);
         }
+    }
+    hauntBallot = {};
+    hauntBallot.voters = r.u8();
+    if (hauntBallot.voters) {
+        hauntBallot.bells = r.u8(); hauntBallot.candles = r.u8(); hauntBallot.mine = static_cast<Haunt>(r.u8());
+        if (!me() || me()->alive || hauntBallot.voters > kMaxPlayers || hauntBallot.bells + hauntBallot.candles > hauntBallot.voters ||
+            hauntBallot.mine > Haunt::Candles) return false;
+    }
+    haunting = static_cast<Haunt>(r.u8()); hauntTime = 0; hauntSerial = 0;
+    if (haunting != Haunt::None) {
+        hauntSerial = r.u32(); hauntTime = r.f32();
+        if (haunting > Haunt::Candles || !hauntSerial || !std::isfinite(hauntTime) || hauntTime <= 0 || hauntTime > kHauntSeconds) return false;
     }
     return r.ok();
 }

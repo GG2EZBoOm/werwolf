@@ -68,6 +68,7 @@ public:
         float successorTimer = 0.0f;   // sterbender Hauptmann
         uint8_t vote = kNoPlayer;
         uint8_t ghostTip = kNoPlayer;
+        Haunt hauntVote = Haunt::None;
         bool windowLantern = false;
         float nextFootstep = .4f;
         bool leftStep = false;
@@ -209,6 +210,11 @@ private:
 
     const World* m_world = nullptr;
     Settings m_settings;
+    HauntBallot hauntBallot(const Player& viewer) const;
+    bool m_hauntAvailable = false;
+    Haunt m_haunting = Haunt::None;
+    double m_hauntUntil = 0;
+    uint32_t m_hauntSerial = 0;
     uint8_t m_mudHouse = kNoPlayer;
     bool m_raining = false;
     double m_rainEnds = 0, m_mudDries = 0;

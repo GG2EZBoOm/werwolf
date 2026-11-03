@@ -125,6 +125,8 @@ enum class Interaction : uint8_t {
     GhostTip,
     Bite,       // Vampir saugt ein Opfer aus
     ReadFootprint,
+    HauntVote,
+    HauntTrigger,
 };
 
 enum AbilityBits : uint32_t {
@@ -256,6 +258,17 @@ struct PlayerView {
     bool marked = false;       // vom Raben belastet (öffentlich)
 };
 
+enum class Haunt : uint8_t { None, Bell, Candles };
+constexpr float kHauntSeconds = 5.f;
+
+struct HauntBallot {
+    uint8_t voters = 0, bells = 0, candles = 0;
+    Haunt mine = Haunt::None;
+    bool canTrigger() const {
+        return (mine == Haunt::Bell && bells > voters / 2) || (mine == Haunt::Candles && candles > voters / 2);
+    }
+};
+
 struct Footprint {
     float x, z, heading; // Toe direction in world space. Anonymous, including on the wire.
     bool left;
@@ -307,6 +320,10 @@ struct GameView {
     bool raining = false;
     float mudWetness = 0;
     std::vector<Footprint> footprints;
+    HauntBallot hauntBallot; // Private to eligible ghosts while a charge is available.
+    Haunt haunting = Haunt::None;
+    uint32_t hauntSerial = 0;
+    float hauntTime = 0;
     const Footprint* nearestFootprint(float x, float z) const;
 
     const PlayerView* player(uint8_t id) const;

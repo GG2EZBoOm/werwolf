@@ -1137,9 +1137,21 @@ void WorldRenderer::build(const World& world) {
     buildBonfireBase(builders[static_cast<size_t>(chunkOf(0, 0))], m_bonfire);
 
     uint32_t state = world.seed() + 77u;
+    MeshBuilder flame;
+    flame.sphere({0,.055f,0}, .055f, 3, 7);
+    flame.cone({0,.055f,0}, .054f, .15f, 7);
+    flame.uploadTo(m_candleFlame);
+    m_squareWicks.clear();
     m_lanterns.clear();
     for (const Prop& p : world.props()) {
-        buildProp(builders[static_cast<size_t>(chunkOf(p.position.x, p.position.z))], p, state);
+        auto& chunk = builders[static_cast<size_t>(chunkOf(p.position.x, p.position.z))];
+        buildProp(chunk, p, state);
+        if (p.kind == PropKind::LogSeat) {
+            const Vec3 base = eng::trs(p.position, p.yaw).transformPoint({.88f,.55f,0});
+            chunk.setColor(0x73573D);
+            chunk.cylinder(base, .13f, .035f, 8);
+            buildCandle(chunk, base + Vec3{0,.035f,0}, .24f, m_squareWicks);
+        }
         if (p.kind == PropKind::Lantern) m_lanterns.push_back(p.position + eng::Mat4::rotationY(p.yaw).transformDir({0.45f, 2.22f, 0}));
     }
 
@@ -1343,11 +1355,22 @@ void WorldRenderer::drawMud(eng::Renderer3D& r, const World& world, const GameVi
     }
 }
 
-void WorldRenderer::draw(eng::Renderer3D& r, const eng::Environment& env, float time) const {
+void WorldRenderer::draw(eng::Renderer3D& r, const eng::Environment& env, float time, float candleTime) const {
     for (const Chunk& c : m_chunks) r.draw(c.mesh, Mat4::identity());
 
     const float night = env.emissive;
     drawHouses(r, night, time);
+
+    const float blue = smooth(0.f, .7f, candleTime) * smooth(0.f, .18f, kHauntSeconds - candleTime);
+    const Vec3 fireColor = eng::lerp(Vec3{2.3f,.85f,.22f}, Vec3{.08f,.65f,5.6f}, blue);
+    for (const Vec3 wick : m_squareWicks) {
+        const float flicker = .93f + .07f * std::sin(time * 9 + wick.x);
+        const float size = 1.f + blue * 2.5f;
+        const Color flameTint = eng::lerp(hex(0xFFC573), hex(0x468AFF), blue);
+        r.draw(m_candleFlame, eng::trs(wick, 0, {size, size * flicker, size}), flameTint, 1.5f, false);
+        r.particle(wick + Vec3{0,.12f * size,0}, (.22f + .82f * blue) * flicker, fireColor, .85f);
+        r.light({wick, 2.f + 3.5f * blue, fireColor, (.25f + 2.4f * blue) * flicker});
+    }
 
     // Lagerfeuer: Licht, Flammen und Funken
     const float flicker = 0.85f + 0.1f * std::sin(time * 13.0f) * std::sin(time * 7.3f + 1.0f) + 0.05f * std::sin(time * 23.0f);
