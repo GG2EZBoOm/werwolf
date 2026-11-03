@@ -54,6 +54,9 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
         return false;
     }
     m_case.reset();
+    m_mudHouse = kNoPlayer;
+    m_raining = false;
+    m_footprints.clear();
     m_world = &world;
     m_settings = settings;
     m_settings.sanitize();
@@ -325,6 +328,7 @@ Vec3 Match::seatPosition(int index, int count) const {
 
 void Match::teleport(uint8_t id, Vec3 position) {
     if (Player* p = findMutable(id)) {
+        p->nextFootstep = .4f;
         p->position = m_world->ground(position.x, position.z);
         p->lastMoveTime = m_clock;
         p->needsCorrection = true;
@@ -341,6 +345,34 @@ void Match::setCaptain(uint8_t id, Text text) {
 }
 
 // --- Bewegung ----------------------------------------------------------------
+
+void Match::leaveFootprints(Player& p, Vec2 from, Vec2 to) {
+    const Vec2 delta = to - from;
+    const float length = delta.length();
+    if (length < .0001f) return;
+    const Vec2 forward = delta / length;
+    // Sample the walked segment, so pace and heading are independent of packet frequency and camera yaw.
+    while (p.nextFootstep <= length) {
+        p.leftStep = !p.leftStep;
+        const Vec2 side{forward.y, -forward.x};
+        const Vec2 step = from + forward * p.nextFootstep + side * (p.leftStep ? -.11f : .11f);
+        if (m_world->onMudPath(m_mudHouse, step)) {
+            if (m_footprints.size() == kMaxFootprints) m_footprints.erase(m_footprints.begin());
+            m_footprints.push_back({step.x, step.y, std::atan2(forward.x, forward.y)});
+        }
+        p.nextFootstep += .78f;
+    }
+    p.nextFootstep -= length;
+}
+
+Text Match::describeFootprint(const Footprint& step) const {
+    if (!m_world || m_mudHouse >= m_world->houses().size()) return {};
+    const float outward = std::cos(step.heading - m_world->houses()[m_mudHouse].yaw);
+    const Text house = houseLabel(m_mudHouse, true);
+    if (outward > .5f) return tx("Vor {} zeigen die Schuhspitzen vom Eingang weg.", "Outside {}, the toes point away from the entrance.", house);
+    if (outward < -.5f) return tx("Vor {} zeigen die Schuhspitzen auf den Eingang zu.", "Outside {}, the toes point toward the entrance.", house);
+    return tx("Vor {} führen die Abdrücke quer am Eingang vorbei.", "Outside {}, the prints lead across the entrance.", house);
+}
 
 void Match::movePlayer(uint8_t id, float x, float z, float yaw, uint8_t flags) {
     Player* p = findMutable(id);
@@ -365,6 +397,7 @@ void Match::movePlayer(uint8_t id, float x, float z, float yaw, uint8_t flags) {
         p->needsCorrection = true; // durch eine Wand oder geschlossene Tür
         return;
     }
+    if (m_phase == Phase::Night && !m_raining && m_mudHouse != kNoPlayer) leaveFootprints(*p, from, target);
     p->position = m_world->ground(target.x, target.y);
     p->yaw = yaw;
     p->moveFlags = flags & EntitySprint;
@@ -506,6 +539,12 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
     };
 
     switch (kind) {
+    case Interaction::ReadFootprint: {
+        const auto view = viewFor(id);
+        const auto& pos = p->alive ? p->position : p->ghostPosition;
+        if (!view.nearestFootprint(pos.x, pos.z)) return {"Geh näher an einen sichtbaren Abdruck.", "Move closer to a visible print."};
+        return {};
+    }
     case Interaction::WindowLantern:
         if (!(abilities & AbilityWindowLantern) || targetId != p->house)
             return {"Das geht nur nachts am eigenen Haus.", "Only at your own house at night."};
@@ -785,6 +824,19 @@ GameView Match::viewFor(uint8_t viewer) const {
     if (m_phase == Phase::Vote) {
         v.defenderA = m_defenderA; v.defenderB = m_defenderB; v.defenseOpen = m_defenseOpen;
     }
+    if (!over && m_mudHouse != kNoPlayer) {
+        v.mudHouse = m_mudHouse; v.raining = m_raining;
+        v.mudWetness = m_phase == Phase::Night ? 1.f : std::clamp(static_cast<float>(m_mudDries - m_clock) / 24.f, 0.f, 1.f);
+        if (me) {
+            const Vec3 pos = me->alive ? me->position : me->ghostPosition;
+            const Vec2 eye{pos.x, pos.z};
+            const auto closed = closedDoors();
+            for (const auto& step : m_footprints) {
+                const Vec2 at{step.x, step.z};
+                if ((at - eye).length() <= 8.f && !m_world->lineBlocked(eye, at, closed)) v.footprints.push_back(step);
+            }
+        }
+    }
     if (me && !me->alive) v.ghostTip = me->ghostTip;
     if (m_phase == Phase::Night) for (const Player& p : m_players)
         if (p.windowLantern) v.windowLanterns |= 1u << p.id;
@@ -942,6 +994,12 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
     Player* t = findMutable(targetId);
 
     switch (kind) {
+    case Interaction::ReadFootprint: {
+        const auto view = viewFor(id);
+        const auto& pos = p->alive ? p->position : p->ghostPosition;
+        if (const auto* step = view.nearestFootprint(pos.x, pos.z)) tell(id, describeFootprint(*step));
+        break;
+    }
     case Interaction::WindowLantern:
         p->windowLantern = !p->windowLantern;
         break;
@@ -1517,6 +1575,14 @@ void Match::update(float dt) {
     updateFires(dt);
     if (m_phase == Phase::GameOver) return;
     if (m_case) updateTutorial();
+    if (m_raining && m_clock >= m_rainEnds) {
+        m_raining = false;
+        narrate(tx("Der Regen hört auf. Der Weg vor {} ist schlammig.", "The rain stops. The path outside {} is muddy.", houseLabel(m_mudHouse, true)));
+    }
+    if (m_mudHouse != kNoPlayer && m_phase != Phase::Night && m_clock >= m_mudDries) {
+        m_mudHouse = kNoPlayer;
+        m_footprints.clear();
+    }
     if (m_phase == Phase::Night) updateTracking();
     updateBear(dt);
 
@@ -1890,6 +1956,18 @@ void Match::enterNight() {
     m_phase = Phase::Night;
     for (auto& p : m_players) p.windowLantern = false;
     setTimer(m_settings.nightSeconds);
+    m_footprints.clear();
+    m_mudHouse = kNoPlayer;
+    m_raining = false;
+    if (m_day % 2 == 1 && !m_case && !m_players.empty()) {
+        const size_t index = (static_cast<size_t>(m_world->seed()) + m_day / 2) % m_players.size();
+        m_mudHouse = m_players[index].house;
+        if (m_mudHouse != kNoPlayer) {
+            m_raining = true;
+            m_rainEnds = m_clock + 7;
+            narrate({"Ein Regenschauer zieht über das Dorf.", "A rain shower sweeps through the village."});
+        }
+    }
     bool bigBadWolf = false;
     for (const Player& p : m_players)
         if (p.alive && p.role == Role::BigBadWolf) bigBadWolf = true;
@@ -2000,6 +2078,8 @@ void Match::enterMorning() {
     }
 
     m_phase = Phase::Morning;
+    m_raining = false;
+    m_mudDries = m_clock + kMorningSeconds + 60;
     setTimer(kMorningSeconds);
     narrate({"Der Morgen graut über dem Dorf …", "Dawn breaks over the village …"});
     if (m_nightDeaths.empty())

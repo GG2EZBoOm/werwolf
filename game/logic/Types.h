@@ -124,6 +124,7 @@ enum class Interaction : uint8_t {
     WindowLantern,
     GhostTip,
     Bite,       // Vampir saugt ein Opfer aus
+    ReadFootprint,
 };
 
 enum AbilityBits : uint32_t {
@@ -255,6 +256,12 @@ struct PlayerView {
     bool marked = false;       // vom Raben belastet (öffentlich)
 };
 
+struct Footprint {
+    float x, z, heading; // Toe direction in world space. Anonymous, including on the wire.
+};
+constexpr size_t kMaxFootprints = 64;
+constexpr float kReadFootprintRange = 2.5f;
+
 // Personalisierte Momentaufnahme (Regeln, Wissen). Positionen kommen getrennt per Snapshot.
 struct GameView {
     Phase phase = Phase::Lobby;
@@ -294,6 +301,12 @@ struct GameView {
     Text lesson; // Current instructions in the introductory case.
     uint32_t windowLanterns = 0; // Bits by player ID, public only at night.
     uint8_t ghostTip = kNoPlayer; // Only the owner's prediction.
+
+    uint8_t mudHouse = kNoPlayer;
+    bool raining = false;
+    float mudWetness = 0;
+    std::vector<Footprint> footprints;
+    const Footprint* nearestFootprint(float x, float z) const;
 
     const PlayerView* player(uint8_t id) const;
     const PlayerView* me() const { return player(you); }

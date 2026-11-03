@@ -1147,6 +1147,74 @@ TEST(TutorialEndsAfterOneActualVerdictEvenWithWrongChoice) {
     }
 }
 
+TEST(RainLeavesAnonymousDirectionalTracksOnlyOnTheShortPath) {
+    auto m = makeMatch({W, V, V, V, V, V});
+    runUntil(m, Phase::Night);
+    const auto wet = m.viewFor(2);
+    CHECK(wet.raining && wet.mudHouse != kNoPlayer);
+    if (wet.mudHouse == kNoPlayer) return;
+    const World& w = m.world();
+    auto point = [&](float x, float along) { return w.mudPoint(wet.mudHouse, x, along); };
+    auto place = [&](uint8_t who, float x, float along) {
+        const auto at = point(x, along); m.teleport(who, w.ground(at.x, at.y));
+    };
+    auto walk = [&](uint8_t who, float x, float along, float facing) {
+        const auto at = point(x, along); m.update(.15f); m.movePlayer(who, at.x, at.y, facing, 0);
+    };
+    const float outward = w.houses()[wet.mudHouse].yaw;
+    place(1, 0, 1); place(2, .6f, 2);
+    walk(1, 0, 2, outward);
+    CHECK(m.viewFor(2).footprints.empty());
+    run(m, 7.2f);
+    CHECK(!m.viewFor(2).raining);
+    place(1, 3, 1);
+    for (int z = 2; z <= 6; ++z) walk(1, 3, static_cast<float>(z), outward);
+    CHECK(m.viewFor(2).footprints.empty());
+    place(1, 0, 1);
+    for (int z = 2; z <= 6; ++z) walk(1, 0, static_cast<float>(z), outward + eng::kPi);
+    const auto away = m.viewFor(2);
+    CHECK(away.footprints.size() >= 5 && away.footprints.size() <= 7);
+    for (const auto& step : away.footprints) {
+        CHECK(w.onMudPath(wet.mudHouse, {step.x, step.z}));
+        CHECK(std::cos(step.heading - outward) > .99f);
+        CHECK(m.describeFootprint(step).de.find("vom Eingang weg") != std::string::npos);
+    }
+    m.takeNotices();
+    CHECK(m.interact(2, Interaction::ReadFootprint, 0).empty());
+    const auto notices = m.takeNotices();
+    CHECK(notices.size() == 1 && notices[0].audience == Notice::Audience::Player && notices[0].player == 2);
+    // Rotation in place, a rejected jump, a teleport, and a ghost never stamp the path.
+    walk(1, 0, 6, outward);
+    walk(1, 0, -20, outward);
+    place(1, 0, 6);
+    m.playerLeft(4); place(4, 0, 2); walk(4, 0, 3, outward);
+    CHECK_EQ(m.viewFor(2).footprints.size(), away.footprints.size());
+    for (int z = 5; z >= 1; --z) walk(1, 0, static_cast<float>(z), outward);
+    const auto both = m.viewFor(2);
+    CHECK(both.footprints.size() > away.footprints.size());
+    CHECK(m.describeFootprint(both.footprints.back()).de.find("auf den Eingang zu") != std::string::npos);
+    eng::ByteWriter bytes; both.write(bytes); eng::ByteReader wire(bytes.data());
+    GameView copy;
+    CHECK(copy.read(wire) && copy.mudHouse == both.mudHouse && copy.footprints.size() == both.footprints.size());
+    if (!copy.footprints.empty()) CHECK_EQ(copy.footprints.back().heading, both.footprints.back().heading);
+    m.teleport(3, w.houses()[wet.mudHouse].doorInside);
+    CHECK(m.interact(3, Interaction::DoorToggle, wet.mudHouse).empty());
+    CHECK(m.viewFor(3).footprints.empty());
+    m.teleport(3, w.ground(60, 60));
+    CHECK(m.viewFor(3).footprints.empty() && !m.interact(3, Interaction::ReadFootprint, 0).empty());
+    runUntil(m, Phase::Morning);
+    CHECK_EQ(m.viewFor(2).footprints.size(), both.footprints.size());
+    runUntil(m, Phase::Day);
+    walk(1, 0, 2, outward);
+    CHECK_EQ(m.viewFor(2).footprints.size(), both.footprints.size());
+    run(m, 50);
+    CHECK(m.viewFor(2).mudWetness < 1 && m.viewFor(2).mudWetness > 0);
+    run(m, 11);
+    CHECK(m.viewFor(2).mudHouse == kNoPlayer && m.viewFor(2).footprints.empty());
+    runUntil(m, Phase::Night);
+    CHECK(!m.viewFor(2).raining && m.viewFor(2).mudHouse == kNoPlayer);
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

@@ -304,6 +304,7 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
 | **E**            | Hauptaktion auf die angeschaute Person (abstimmen, Vision, …)   |
 | **F**            | Zweitaktion (Gifttrank, Infizieren, Häuser anzünden)            |
 | **G**            | nachts am eigenen Hauseingang die Handlaterne ans Fenster hängen oder wieder mitnehmen |
+| **T**            | aus der Nähe die Laufrichtung eines Fußabdrucks lesen |
 | **Q**            | Tür öffnen/schließen – von innen geschlossen ist sie verriegelt |
 | **R**            | verwandeln (Werwolf, nur nachts)                                |
 | Linksklick       | reißen, erstechen oder eine verriegelte Tür einschlagen          |
@@ -326,6 +327,19 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
 
 Tote werden zu **Geistern**: sie schweben unsichtbar umher, sehen alle Rollen, lesen den Rudel-Chat
 mit und sprechen im Geisterchat. Vor einer Hinrichtungswahl können sie auf einen Lebenden tippen (anschauen und **E** drücken oder den Namen in der Geisterliste anklicken). Nur die Toten sehen nach dem Urteil das Ergebnis im Geisterchat.
+
+### Fußspuren im Schlamm
+
+In der ersten Nacht und danach jede zweite Nacht fällt ein kurzer Regenschauer. Sobald er aufhört,
+nennt der Erzähler das Haus, vor dem der Weg aufgeweicht ist. Auf diesem sieben Meter langen Stück
+hinterlassen Lebende beim Gehen und Rennen Abdrücke. Die breite Vorderseite des Schuhs zeigt die
+Laufrichtung, die schmale Ferse liegt hinten. Auch wer rückwärts geht, hinterlässt eine Spur in Bewegungsrichtung.
+
+Geh nah an einen Abdruck heran und drücke **T**, um zu lesen, ob er auf den Hauseingang zu, davon weg
+oder daran vorbei führt. Jeder Schuh hinterlässt die gleiche Form. Ein Bot kann am Morgen von einem
+Abdruck berichten, den er selbst aus der Nähe gesehen hat. Mit der Morgendämmerung entstehen keine
+neuen Spuren mehr. Die vorhandenen trocknen in der ersten Minute des Tages aus. Der feste Übungsfall
+spielt bei trockenem Wetter.
 
 ### Rollen
 

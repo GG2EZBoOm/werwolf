@@ -1043,6 +1043,23 @@ void buildTree(MeshBuilder& b, const Tree& tree) {
 }
 
 void WorldRenderer::build(const World& world) {
+    MeshBuilder sole;
+    // Two separate impressions. The broad forefoot points along local +Z.
+    auto tread = [&](std::initializer_list<Vec2> outline, float centerZ) {
+        Vec2 prev = *(outline.end() - 1);
+        for (Vec2 next : outline) {
+            sole.triangle({0, 0, centerZ}, {prev.x, 0, prev.y}, {next.x, 0, next.y});
+            prev = next;
+        }
+    };
+    tread({{-.07f,.25f}, {.065f,.25f}, {.125f,.18f}, {.135f,.055f}, {.095f,-.02f},
+           {.06f,-.075f}, {-.075f,-.065f}, {-.125f,.035f}, {-.12f,.155f}}, .08f);
+    tread({{-.074f,-.10f}, {.07f,-.11f}, {.078f,-.195f}, {.045f,-.24f},
+           {-.05f,-.24f}, {-.08f,-.20f}}, -.16f);
+    sole.uploadTo(m_footprint);
+    MeshBuilder rain;
+    rain.beam({0, 0, 0}, {.035f, .42f, 0}, .014f);
+    rain.uploadTo(m_raindrop);
     std::vector<MeshBuilder> builders(static_cast<size_t>(kChunkGrid * kChunkGrid));
     buildTerrain(builders, world);
     buildGrass(builders, world);
@@ -1061,6 +1078,22 @@ void WorldRenderer::build(const World& world) {
             buildChapelShell(shell, glass, h, rise, g.flames);
             buildChapelRoof(roof, h);
         } else {
+            MeshBuilder mud;
+            // Conform the strip to the terrain and give its edges a slightly uneven outline.
+            auto edge = [&](int row, int side) {
+                const float along = row * (World::kMudLength / 20);
+                const float width = World::mudWidthAt(along);
+                const Vec2 p = world.mudPoint(static_cast<int>(i), side * .5f * width, along);
+                return Vec3{p.x, world.terrainHeight(p.x, p.y) + .025f, p.y};
+            };
+            mud.setColorJitter(.035f);
+            for (int row = 0; row < 20; ++row) {
+                for (int side = -2; side < 2; ++side) {
+                    mud.setColor((side == -1 || side == 0) ? 0xD6C8BD : 0xFFF2DE);
+                    mud.quad(edge(row, side), edge(row + 1, side), edge(row + 1, side + 1), edge(row, side + 1));
+                }
+            }
+            mud.uploadTo(g.mud);
             buildHouseShell(shell, h);
             buildHouseRoof(roof, h);
         }
@@ -1278,6 +1311,31 @@ void WorldRenderer::drawHouses(eng::Renderer3D& r, float night, float time) cons
             const Vec3 p = base + Vec3{std::sin(time * 2.0f + fk) * 0.3f, life * 2.8f, std::cos(time * 1.7f + fk) * 0.3f};
             r.particle(p, (1.0f - life) * 1.5f + 0.3f, eng::lerp(Vec3{5.0f, 3.0f, 1.0f}, Vec3{3.0f, 0.5f, 0.08f}, life), 1.0f - life);
         }
+    }
+}
+
+void WorldRenderer::drawMud(eng::Renderer3D& r, const World& world, const GameView& v, Vec3 observer, float time) const {
+    if (v.mudHouse >= m_houses.size()) return;
+    const auto& patch = m_houses[v.mudHouse].mud;
+    if (!patch.valid()) return;
+    const Color mud = eng::lerp(hex(0x887356), hex(0x6E5138), v.mudWetness);
+    r.draw(patch, Mat4::identity(), mud, 0, false);
+    for (const auto& step : v.footprints) {
+        const float y = world.terrainHeight(step.x, step.z);
+        Mat4 pose = eng::trs({step.x, y + .045f, step.z}, step.heading);
+        // Tilt each sole with the local slope so heel and toe stay above the mud.
+        pose.m[1] = (world.terrainHeight(step.x + .25f * pose.m[0], step.z + .25f * pose.m[2]) - y) * 4;
+        pose.m[9] = (world.terrainHeight(step.x + .25f * pose.m[8], step.z + .25f * pose.m[10]) - y) * 4;
+        r.draw(m_footprint, pose, eng::lerp(mud, hex(0x291C15), v.mudWetness), 0, false);
+    }
+    if (!v.raining || world.houseAt({observer.x, observer.z}) >= 0) return;
+    for (int i = 0; i < 75; ++i) {
+        const float x = observer.x + std::fmod(i * 6.019f, 15.f) - 7.5f;
+        const float z = observer.z + std::fmod(i * 3.853f, 15.f) - 7.5f;
+        if (world.houseAt({x, z}) >= 0) continue;
+        const float height = 6.f * (1.f - std::fmod(time * 1.4f + i * .618f, 1.f));
+        r.draw(m_raindrop, Mat4::translation({x + height * .08f, world.terrainHeight(x, z) + height, z}),
+               hex(0x8193A0), .1f, false);
     }
 }
 

@@ -69,6 +69,8 @@ public:
         uint8_t vote = kNoPlayer;
         uint8_t ghostTip = kNoPlayer;
         bool windowLantern = false;
+        float nextFootstep = .4f;
+        bool leftStep = false;
         float burn = 0.0f;             // Sekunden in einem brennenden Haus
 
         // Fährtenleser
@@ -128,6 +130,7 @@ public:
     void finishDefenseLine(uint8_t id);
     void recordVoteTrust(uint8_t observer, uint8_t voter, uint8_t executed);
     void allowWitnessTime() { if (m_phase == Phase::Assembly && m_timer < 28) setTimer(28); }
+    Text describeFootprint(const Footprint& step) const;
     bool election() const { return m_election; }
     bool isProtected(uint8_t id) const;
     const std::vector<DoorState>& doors() const { return m_doors; }
@@ -206,6 +209,11 @@ private:
 
     const World* m_world = nullptr;
     Settings m_settings;
+    uint8_t m_mudHouse = kNoPlayer;
+    bool m_raining = false;
+    double m_rainEnds = 0, m_mudDries = 0;
+    std::vector<Footprint> m_footprints;
+    void leaveFootprints(Player& p, Vec2 from, Vec2 to);
     struct TutorialCase {
         uint8_t learner, wolf, passerby, nearWitness, farWitness, victim;
         bool staged = false, broken = false, gathered = false;

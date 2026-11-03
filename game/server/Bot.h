@@ -265,6 +265,7 @@ private:
     std::vector<Sight> m_beastSights;                   // … und wann und wo eine Bestie zu sehen war
     int m_nightSamples = 0;                             // wie oft der Bot sich nachts umgesehen hat
     std::map<uint8_t, int> m_company;                   // … und wie oft dabei jemand (in Menschengestalt) bei ihm war
+    int m_reportedMudDay = -1;
     float m_sightTimer = 0.0f;
     std::set<uint8_t> m_aliveAtNight;
     std::set<uint8_t> m_reviewed;

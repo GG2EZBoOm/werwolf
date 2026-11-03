@@ -256,6 +256,28 @@ TEST(AngerInfluencesTheNextVoteAndKnownEvidenceStillWins) {
     CHECK_EQ(seer.match.find(1)->vote, 2);
 }
 
+TEST(VillagerReportsOnlyAnAnonymousPrintSeenNearby) {
+    for (bool withinReach : {false, true}) {
+        Scene s; s.phase(Phase::Night);
+        s.advance(8);
+        const auto house = s.match.viewFor(0).mudHouse;
+        CHECK(house != kNoPlayer);
+        if (house == kNoPlayer) return;
+        const auto start = world().mudPoint(house, 0, 2);
+        s.match.teleport(0, world().ground(start.x, start.y));
+        const auto end = world().mudPoint(house, 0, 3.4f);
+        s.match.update(.2f);
+        s.match.movePlayer(0, end.x, end.y, 0, 0);
+        s.match.teleport(1, withinReach ? world().ground(end.x, end.y) : world().ground(60, 60));
+        s.phase(Phase::Morning); s.phase(Phase::Day);
+        s.lines.clear(); s.advance(12);
+        const auto count = std::count_if(s.lines.begin(), s.lines.end(), [](const Scene::Line& line) {
+            return line.text.de.find("vom Eingang weg") != std::string::npos && !line.evidence;
+        });
+        CHECK_EQ(count, withinReach ? 1 : 0);
+    }
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

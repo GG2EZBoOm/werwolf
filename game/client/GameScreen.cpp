@@ -181,6 +181,8 @@ void App::buildPrompts(const GameView& v) {
         return t != kNoPlayer ? Lf(de, en, name(t)) : std::string(L(noneDe, noneEn));
     };
 
+    if (v.nearestFootprint(me.x, me.z))
+        add(Interaction::ReadFootprint, "T", L("Richtung des Abdrucks lesen", "Read the footprint's direction"), 0, true);
     if (v.can(AbilityWindowLantern) && v.me() && v.me()->house < m_world.houses().size() && (m_world.doorCenter(v.me()->house) - me2).length() <= kDoorRange)
         add(Interaction::WindowLantern, "G", (v.windowLanterns & (1u << v.you)) ? L("Laterne vom Fenster nehmen", "Take down lantern") :
             L("Laterne ans Fenster hängen", "Hang lantern at the window"), v.me()->house, true);
@@ -536,6 +538,7 @@ void App::updateMatch() {
         if (in.pressed(eng::Key::F)) trigger("F");
         if (in.pressed(eng::Key::Q)) trigger("Q");
         if (in.pressed(eng::Key::G)) trigger("G");
+        if (in.pressed(eng::Key::T)) trigger("T");
         if (in.pressed(eng::Key::R)) trigger("R");
         if (in.mousePressed()) trigger("Klick");
     }
@@ -564,6 +567,7 @@ void App::renderMatch3D() {
     }
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), m_lastCamera, env);
     m_worldRenderer.draw(m_renderer3d, env, t);
+    m_worldRenderer.drawMud(m_renderer3d, m_world, v, m_player.position, t);
     const float night = env.emissive;
 
     auto drawFigure = [&](uint8_t id, const Mover& m, float transform, uint8_t flags, uint8_t kind) {

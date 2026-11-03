@@ -287,6 +287,26 @@ Collider World::doorCollider(int house) const {
     return c;
 }
 
+namespace {
+float mudStart(const House& h) { return h.depth * .5f + h.ramp + .6f; }
+}
+
+float World::mudWidthAt(float along) {
+    const float end = std::clamp(std::min(along, kMudLength - along) / .95f, 0.f, 1.f);
+    const float bank = kMudHalfWidth + .11f * std::sin(along * 2.f) + .055f * std::sin(along * 4.3f);
+    return bank * std::sqrt(end * (2.f - end));
+}
+
+Vec2 World::mudPoint(int house, float across, float along) const {
+    return houseToWorld(house, {across, mudStart(m_houses[house]) + along});
+}
+
+bool World::onMudPath(int house, Vec2 point) const {
+    const auto local = worldToHouse(house, point);
+    const float along = local.y - mudStart(m_houses[house]);
+    return along > 0 && along < kMudLength && std::abs(local.x) <= mudWidthAt(along);
+}
+
 Vec2 World::doorCenter(int house) const { return doorCollider(house).center; }
 
 Vec2 World::houseToWorld(int house, Vec2 local) const {

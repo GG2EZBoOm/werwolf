@@ -343,6 +343,15 @@ void Bot::observe(float dt, const Match& match, const GameView& view) {
         for (const auto& p : view.players)
             if (p.alive) m_votes[view.day][p.id] = p.vote; // also remember withdrawn votes
     const auto* me = match.find(m_id);
+    if (me && me->alive && (view.phase == Phase::Morning || view.phase == Phase::Day)) {
+        const int day = view.day + (view.phase == Phase::Morning ? 1 : 0);
+        if (m_reportedMudDay != day) {
+            if (const auto* step = view.nearestFootprint(me->position.x, me->position.z)) {
+                plan(Phase::Day, day, match.clock() + 1, match.describeFootprint(*step));
+                m_reportedMudDay = day;
+            }
+        }
+    }
     if (!me || !me->alive || view.phase != Phase::Night) return;
     m_sightTimer -= dt;
     if (m_sightTimer > 0.0f) return;

@@ -17,6 +17,8 @@ public:
     void build(const World& world);
     bool built() const { return !m_chunks.empty(); }
 
+    void drawMud(eng::Renderer3D& r, const World& world, const GameView& view, Vec3 observer, float time) const;
+
     // Türen und Feuer aus dem Spielzustand übernehmen (Index = Haus) und Türen animieren
     void updateHouses(const std::vector<DoorState>& doors, float dt);
     // Dach dieses Hauses ausblenden, weil die Kamera drinnen ist (-1 = keines)
@@ -33,6 +35,7 @@ private:
     struct HouseGfx {
         eng::Mesh shell; // Fundament, Wände, Einrichtung
         eng::Mesh roof;  // Dach und Giebel (ausblendbar)
+        eng::Mesh mud;
         eng::Mesh glass; // Buntglasfenster der Kapelle (leuchten leicht)
         bool chapel = false;
         Vec3 position;
@@ -52,6 +55,7 @@ private:
 
     std::vector<Chunk> m_chunks;
     std::vector<HouseGfx> m_houses;
+    eng::Mesh m_footprint, m_raindrop;
     eng::Mesh m_door;
     eng::Mesh m_doorReinforced;
     eng::Mesh m_chapelDoor;

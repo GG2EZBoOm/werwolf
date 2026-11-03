@@ -147,6 +147,10 @@ public:
     // Lokale Hauskoordinaten (x quer, z zur Tür hin) in Weltkoordinaten
     Vec2 houseToWorld(int house, Vec2 local) const;
     Vec2 worldToHouse(int house, Vec2 world) const;
+    static constexpr float kMudLength = 7.0f, kMudHalfWidth = 1.25f;
+    static float mudWidthAt(float along);
+    Vec2 mudPoint(int house, float across, float along) const;
+    bool onMudPath(int house, Vec2 point) const;
     // Nächster Wegpunkt innerhalb eines Gebäudes, um die Einrichtung herum (z. B. die Kirchenbänke)
     Vec2 routeInside(int house, Vec2 from, Vec2 to) const;
     // Index der Kapelle in houses(), sonst -1
