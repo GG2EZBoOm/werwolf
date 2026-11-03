@@ -229,6 +229,18 @@ void App::drawRoleReveal(const GameView& v) {
     }
 }
 
+void App::removePin(size_t index) {
+    m_pins.erase(m_pins.begin() + index);
+    if (m_pins.size() < 2) { m_pinIndex = {0, 1}; return; }
+    const auto previous = m_pinIndex;
+    for (int side = 0; side < 2; ++side) {
+        if (previous[side] > index) --m_pinIndex[side];
+        else if (previous[side] == index) m_pinIndex[side] = std::min(index, m_pins.size() - 1);
+    }
+    if (m_pinIndex[0] == m_pinIndex[1]) m_pinIndex[previous[0] == index ? 0 : 1] = (m_pinIndex[0] + 1) % m_pins.size();
+    m_pinScroll[0] = m_pinScroll[1] = 0;
+}
+
 void App::drawJournal(const GameView& v) {
     eng::Renderer2D& r = m_renderer;
     const float W = r.width(), H = r.height();
@@ -264,14 +276,12 @@ void App::drawJournal(const GameView& v) {
         m_showPins = !m_showPins; m_pinScroll[0] = m_pinScroll[1] = 0;
     }
     if (m_showPins) {
-        const size_t pages = std::max<size_t>(1, (m_pins.size() + 1) / 2);
-        m_pinPage = std::min(m_pinPage, pages - 1);
         std::optional<size_t> remove;
         for (int side = 0; side < 2; ++side) {
             Rect body = (side == 0 ? leftPage : rightPage).shrink(30, 54);
             if (side == 1) { body.x += 52; body.w -= 52; } // Keep the bookmark out of the text.
             r.text(m_fonts.script, {body.x, body.y}, L("Gemerkte Aussage", "Pinned statement"), inkRed);
-            const size_t index = m_pinPage * 2 + side;
+            const size_t index = m_pinIndex[side];
             if (index >= m_pins.size()) {
                 if (index == 0) {
                     float y = body.y + 54;
@@ -292,14 +302,34 @@ void App::drawJournal(const GameView& v) {
             r.pushClip(content);
             for (const auto& line : lines) { r.text(m_fonts.chat, {content.x, y}, line, inkDark); y += m_fonts.chat.lineHeight(); }
             r.popClip();
-            if (m_kit.inkButton(side ? "pins/r" : "pins/l", {body.x, body.bottom() - 40, 130, 32}, L("Entfernen", "Unpin"))) remove = index;
+            if (m_kit.inkButton(side ? "pins/r" : "pins/l", {body.center().x - 65, body.bottom() - 40, 130, 32}, L("Entfernen", "Unpin"))) remove = index;
+            const float navY = body.bottom() - 40;
+            for (int step : {-1, 1}) {
+                int next = static_cast<int>(index) + step;
+                if (next == static_cast<int>(m_pinIndex[1 - side])) next += step;
+                const Rect arrow{step < 0 ? body.x : body.right() - 48, navY, 48, 30};
+                if (m_kit.inkButton(std::format("pins/{}/{}", side, step), arrow, step < 0 ? "‹" : "›", false,
+                                    next >= 0 && next < static_cast<int>(m_pins.size()))) {
+                    m_pinIndex[side] = static_cast<size_t>(next);
+                    m_pinScroll[side] = 0;
+                }
+            }
         }
-        if (remove) m_pins.erase(m_pins.begin() + *remove);
-        if (m_kit.inkButton("pins/prev", {book.x + 24, book.bottom() - 38, 128, 30}, L("‹ Zurück", "‹ Previous"), false, m_pinPage > 0)) {
-            --m_pinPage; m_pinScroll[0] = m_pinScroll[1] = 0;
-        }
-        if (m_kit.inkButton("pins/next", {book.right() - 152, book.bottom() - 38, 128, 30}, L("Weiter ›", "Next ›"), false, m_pinPage + 1 < pages)) {
-            ++m_pinPage; m_pinScroll[0] = m_pinScroll[1] = 0;
+        if (remove) removePin(*remove);
+        else if (m_pins.size() >= 2) {
+            const auto& first = m_pins[m_pinIndex[0]];
+            const auto& second = m_pins[m_pinIndex[1]];
+            auto available = [&](const LogEntry& line) {
+                const auto* author = v.player(line.from);
+                return author && author->alive && author->connected && (line.channel == ChatChannel::Nearby || line.channel == ChatChannel::Global);
+            };
+            const bool ask = v.phase == Phase::Assembly && v.me() && v.me()->alive && available(first) && available(second) && first.from != second.from;
+            if (m_kit.inkButton("pins/hearing", {book.center().x - 118, book.bottom() - 40, 236, 32},
+                                L("Am Feuer nachfragen", "Ask at the fire"), false, ask)) {
+                m_net.askWitnesses(first.id, second.id);
+                m_journalOpen = false;
+                m_window.setMouseCaptured(true);
+            }
         }
         return;
     }

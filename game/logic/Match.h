@@ -67,6 +67,8 @@ public:
         float hunterTimer = 0.0f;
         float successorTimer = 0.0f;   // sterbender Hauptmann
         uint8_t vote = kNoPlayer;
+        uint8_t ghostTip = kNoPlayer;
+        bool windowLantern = false;
         float burn = 0.0f;             // Sekunden in einem brennenden Haus
 
         // Fährtenleser
@@ -93,6 +95,11 @@ public:
     // Für Tests: feste Rollen (Reihenfolge wie die Plätze)
     bool startWithRoles(const std::vector<Seat>& seats, const std::vector<Role>& roles, const Settings& settings,
                         const World& world, uint64_t seed, Text& error);
+    bool startTutorial(const std::vector<Seat>& seats, const World& world, Text& error);
+    bool tutorial() const { return m_case.has_value(); }
+    uint8_t nextTutorialWitness() const;
+    Text tutorialStatement(uint8_t speaker, bool followup) const;
+    void heardTutorialWitness(uint8_t speaker);
     void update(float dt);
 
     void movePlayer(uint8_t id, float x, float z, float yaw, uint8_t flags);
@@ -119,6 +126,8 @@ public:
     bool defenseOpen() const { return m_phase == Phase::Vote && m_defenseOpen; }
     bool canDefend(uint8_t id) const;
     void finishDefenseLine(uint8_t id);
+    void recordVoteTrust(uint8_t observer, uint8_t voter, uint8_t executed);
+    void allowWitnessTime() { if (m_phase == Phase::Assembly && m_timer < 28) setTimer(28); }
     bool election() const { return m_election; }
     bool isProtected(uint8_t id) const;
     const std::vector<DoorState>& doors() const { return m_doors; }
@@ -176,6 +185,7 @@ private:
     void enterAssembly(const Text& reason, float seconds);
     void enterVote();
     void resolveVote();
+    void settleGhostTips(uint8_t executed);
     void resolveElection(const std::vector<std::pair<uint8_t, int>>& ranking);
     void finishServant();
     void enterNight();
@@ -196,6 +206,15 @@ private:
 
     const World* m_world = nullptr;
     Settings m_settings;
+    struct TutorialCase {
+        uint8_t learner, wolf, passerby, nearWitness, farWitness, victim;
+        bool staged = false, broken = false, gathered = false;
+        unsigned accounts = 0;
+        double nextAccount = 0;
+    };
+    std::optional<TutorialCase> m_case;
+    void updateTutorial();
+    Text tutorialHint() const;
     eng::Rng m_rng;
     std::vector<Player> m_players;
     Phase m_phase = Phase::Lobby;
@@ -216,9 +235,9 @@ private:
     uint8_t m_defenderA = kNoPlayer, m_defenderB = kNoPlayer;
     bool m_defenseOpen = false;
     uint32_t m_defenseSpoken = 0;
-    struct Highlight { int importance; Text text; };
+    struct Highlight { int importance; Text text; uint8_t voter, executed; };
     std::vector<Highlight> m_highlights;
-    void highlight(int importance, const Text& text);
+    void highlight(int importance, const Text& text, uint8_t voter = kNoPlayer, uint8_t executed = kNoPlayer);
     uint8_t m_jesterWinner = kNoPlayer;
     uint8_t m_angelWinner = kNoPlayer;
     bool m_firstExecution = false;    // die erste Hinrichtung hat stattgefunden

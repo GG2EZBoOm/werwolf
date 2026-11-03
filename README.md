@@ -182,14 +182,29 @@ Ein weiterer Bot kann sich bei der Versammlung als Zeuge melden, wenn er die Per
 dieser Nacht tatsächlich am betreffenden Ort aus der Nähe gesehen hat.
 
 Mit **Rechtsklick** merkst du eine Chatnachricht für diese Partie. Unter **J → Verdachtsbuch**
-stehen je zwei Aussagen mit Sprecher und Tag nebeneinander. Dort kannst du blättern
-und Einträge entfernen. Nur du siehst deine gemerkten Aussagen.
+wählst du mit den Pfeilen auf jeder Buchseite unabhängig eine Aussage. So kannst du etwa
+Bertas Aussage von Tag 2 neben ihre Aussage von Tag 4 legen. Nur du siehst deine Sammlung.
+
+Bei der **Versammlung** kannst du einmal pro Tag **Am Feuer nachfragen** wählen. Dazu
+brauchst du Aussagen zweier verschiedener, anwesender und lebender Sprecher aus dem
+Nähe- oder öffentlichen Chat. Beide bekommen nacheinander bis zu zwölf Sekunden für eine
+öffentliche Antwort. Jeder sieht nur sein eigenes Originalzitat als Erinnerung. Ein Bot
+kann erklären, ob er ein Gesicht aus der Nähe oder bloß eine Laterne in der Ferne gesehen hat.
 
 Bei einer Hinrichtungswahl mit zwei eindeutigen Führenden und höchstens einer gewichteten
-Stimme Abstand bekommen beide jeweils eine Chatnachricht zur Verteidigung. Sobald beide
+Stimme Abstand bekommen beide jeweils eine Chatnachricht zur Verteidigung (bis zu 140 Zeichen). Sobald beide
 gesprochen haben oder 20 Sekunden vergangen sind, bleiben acht Sekunden zum Umstimmen.
-Bei drei gleichauf liegenden Kandidaten greift die normale Auswertung. Im Epilog öffnet
-**Rückblick** bis zu drei tatsächlich eingetretene Schlüsselmomente der Partie.
+Bei drei gleichauf liegenden Kandidaten greift die normale Auswertung. Der Epilog zeigt
+bis zu drei tatsächliche Schlüsselmomente. Stimmt ein Wolf gegen ein hingerichtetes
+Rudelmitglied, kann der Rückblick den Dorf-Bot nennen, der ihm dafür mehr vertraute.
+
+### Spielbarer Übungsfall
+
+Öffne als Gastgeber eine leere Lobby und wähle **Übungsfall starten**. Der Fall heißt *Die Tür in der Nacht*.
+Fünf Bots kommen dazu. Mit WASD erkundest du das Dorf. Nachts hörst du eine Tür brechen.
+Am nächsten Tag stehen die beiden Zeugen beim Feuer. Du kannst ihre Aussagen im Nähe-Chat
+anheften und bei der Versammlung nachfragen. Deine erste Wahl entscheidet den Fall.
+Der Rückblick zeigt, wer die Tür aufgebrochen hat und wie es zur Verwechslung kam.
 
 ### Optionales lokales KI-Sprachpaket
 
@@ -288,6 +303,7 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
 | Maus / Mausrad   | umsehen / Kamera-Abstand                                        |
 | **E**            | Hauptaktion auf die angeschaute Person (abstimmen, Vision, …)   |
 | **F**            | Zweitaktion (Gifttrank, Infizieren, Häuser anzünden)            |
+| **G**            | nachts am eigenen Hauseingang die Handlaterne ans Fenster hängen oder wieder mitnehmen |
 | **Q**            | Tür öffnen/schließen – von innen geschlossen ist sie verriegelt |
 | **R**            | verwandeln (Werwolf, nur nachts)                                |
 | Linksklick       | reißen, erstechen oder eine verriegelte Tür einschlagen          |
@@ -309,7 +325,7 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
 * **Morgen** – die Toten der Nacht werden verkündet; Leichen liegen, wo sie gefallen sind.
 
 Tote werden zu **Geistern**: sie schweben unsichtbar umher, sehen alle Rollen, lesen den Rudel-Chat
-mit und sprechen im Geisterchat.
+mit und sprechen im Geisterchat. Vor einer Hinrichtungswahl können sie auf einen Lebenden tippen (anschauen und **E** drücken oder den Namen in der Geisterliste anklicken). Nur die Toten sehen nach dem Urteil das Ergebnis im Geisterchat.
 
 ### Rollen
 
@@ -436,6 +452,7 @@ werwolf.exe --join 127.0.0.1 --name Max              # zweites Fenster tritt bei
 werwolf.exe --autoplay                               # eigene Figur läuft/handelt automatisch
 werwolf.exe --sandbox [--tod 0.9] [--wolf]           # offline herumlaufen (Tageszeit, Wolfsgestalt)
 werwolf.exe --preview --camera 2 --tod 0.75          # Kameravorschau des Dorfs
+werwolf.exe --tutorial                        # spielt den Übungsfall direkt
 werwolf.exe --screenshots C:\temp\shots --shot-every 2 --quit-after 30
 werwolf.exe --no-update                              # Update-Prüfung überspringen
 werwolf.exe --update-url <url> --force-update        # Updater mit anderer Quelle testen

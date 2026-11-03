@@ -81,7 +81,8 @@ public:
     void sendChat(const std::string& text, bool wolves, uint32_t replyTo = 0);
     void sendMove(float x, float z, float yaw, uint8_t flags);
     void sendInteract(Interaction kind, uint8_t target);
-    void sendStartGame();
+    void sendStartGame(bool tutorial = false);
+    void askWitnesses(uint32_t first, uint32_t second);
     void sendSettings(const Settings& settings);
     void sendAddBot();
     void sendKick(uint8_t player);

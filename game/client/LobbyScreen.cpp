@@ -145,6 +145,7 @@ void App::drawJoinRequests(const Rect& area) {
 void App::drawLobby() {
     const GameView& v = m_net.view();
     const bool host = m_net.isHost();
+    const bool solo = host && v.players.size() == 1;
     eng::Renderer2D& r = m_renderer;
     const float W = r.width();
     const float H = r.height();
@@ -195,6 +196,7 @@ void App::drawLobby() {
     }
     if (static_cast<int>(v.players.size()) < kMinPlayers) {
         r.text(m_fonts.paperItalic, {list.x, list.bottom() - 18.0f},
+               solo ? L("Übungsfall für einen Spieler", "Practice case for one player") :
                host ? Lf("Mindestens {} Bewohner nötig – lade Fremde ein!", "At least {} villagers needed – invite strangers!", kMinPlayers)
                     : Lf("Mindestens {} Bewohner nötig.", "At least {} villagers needed.", kMinPlayers),
                inkRed);
@@ -370,12 +372,14 @@ void App::drawLobby() {
     Text error;
     const std::vector<Role> roles = buildRoleList(v.settings, playerCount, &error);
     const std::string summaryText = hoveredSomething ? hoveredText
+                                    : solo ? L("Im Übungsfall spielst du mit fünf Bots. Eine Nacht, zwei Zeugen, eine Wahl.",
+                                               "Play the practice case with five bots. One night, two witnesses, one vote.")
                                     : roles.empty()  ? error.str()
                                                      : Lf("Bei {} Bewohnern: {}.", "With {} villagers: {}.", playerCount, roleSummary(roles));
     float sy = s.y;
     for (const std::string& line : m_fonts.paperItalic.wrap(summaryText, s.w)) {
         if (sy > s.bottom() - 4.0f) break;
-        r.text(m_fonts.paperItalic, {s.x, sy}, line, roles.empty() && !hoveredSomething ? inkRed : inkSoft);
+        r.text(m_fonts.paperItalic, {s.x, sy}, line, roles.empty() && !solo && !hoveredSomething ? inkRed : inkSoft);
         sy += m_fonts.paperItalic.lineHeight();
     }
     m_kit.endTilt();
@@ -400,6 +404,11 @@ void App::drawLobby() {
     if (host) {
         const float pulse = roles.empty() ? 0.0f : 0.5f + 0.5f * std::sin(static_cast<float>(m_time) * 2.2f);
         if (!roles.empty()) m_kit.candleLight({start.x + 30.0f, start.center().y}, 120.0f, 0.6f + 0.4f * pulse, 5.0f);
+        if (solo) {
+            if (m_kit.inkButton("lobby/tutorial", start.shrink(12, 6), L("Übungsfall starten", "Start practice case"), true))
+                m_net.sendStartGame(true);
+            return;
+        }
         // Das große Siegel: die Nacht beginnt
         if (m_kit.inkButton("lobby/start", {start.x + 12.0f, start.y + 6.0f, start.w - 24.0f, 44.0f}, L("Die Nacht beginnen lassen", "Let the night begin"), true,
                             !roles.empty()))

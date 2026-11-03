@@ -13,6 +13,7 @@ namespace {
 std::string chatPrefix(const LogEntry& e) {
     // Leerer Name: Das kleine Mädchen hört den Rudel-Chat, ohne die Sprecher zu kennen
     // Leerer Name im Nähe-Chat: eine verwandelte Bestie, deren Gesicht man nicht erkennt
+    if (e.channel == ChatChannel::Dead && e.name.empty() && !e.id) return L("[Geisterwette] ", "[Ghost predictions] ");
     const std::string name = !e.name.empty() ? e.name
         : e.channel == ChatChannel::Wolves ? std::string(L("Unbekannter Werwolf", "Unknown werewolf"))
                                            : std::string(L("Unbekannte Gestalt", "Unknown figure"));
@@ -117,8 +118,12 @@ void App::drawChat(const Rect& area, bool compact) {
                     m_replyTo = e; m_ui.focus("chat");
                 }
                 if (in.mousePressed(eng::MouseButton::Right)) {
-                    if (pin != m_pins.end()) m_pins.erase(pin);
-                    else { m_pins.push_back(e); m_pinPage = (m_pins.size() - 1) / 2; }
+                    if (pin != m_pins.end()) removePin(static_cast<size_t>(pin - m_pins.begin()));
+                    else {
+                        m_pins.push_back(e);
+                        if (m_pins.size() > 1) m_pinIndex[1] = m_pins.size() - 1;
+                        m_pinScroll[1] = 0;
+                    }
                 }
             }
         }
@@ -183,8 +188,12 @@ void App::drawChat(const Rect& area, bool compact) {
     case ChatChannel::Family: placeholder = L("Nur deine Geschwister hören dich …", "Only your siblings hear you …"); break;
     case ChatChannel::Vampires: placeholder = L("Flüstere deinem Clan zu …", "Whisper to your clan …"); break;
     }
+    const bool defense = v.defenseOpen && channel == ChatChannel::Global;
+    if (defense) placeholder = v.you == v.defenderA || v.you == v.defenderB ?
+        L("Dein letzter Satz (140 Zeichen) …", "Your last words (140 characters) …") :
+        L("Die Angeklagten haben das Wort.", "The defendants have the floor.");
     if (compact && !focused) placeholder = "Enter: " + placeholder;
-    const bool submitted = m_ui.textInput("chat", input, m_chatInput, placeholder, proto::kMaxChatLength, true);
+    const bool submitted = m_ui.textInput("chat", input, m_chatInput, placeholder, defense ? proto::kMaxDefenseLength : proto::kMaxChatLength, true);
     if (submitted && m_time != m_chatFocusTime) {
         if (!m_chatInput.empty()) {
             m_net.sendChat(m_chatInput, channel == ChatChannel::Wolves || channel == ChatChannel::Family || channel == ChatChannel::Vampires ||

@@ -80,7 +80,8 @@ public:
     const Feelings& feelings() const { return m_feelings; }
     float relationship(uint8_t other) const;
     void update(float dt, Match& match, const SayFn& say);
-    Text lastWords(const Match& match) const;
+    void defend(const Match& match, const SayFn& say);
+    Text witnessAnswer(const Match& match, const ChatQuote& quote) const;
     // Der Bot hört eine Chatnachricht und passt seinen Verdacht an.
     void hear(const Match& match, uint8_t speaker, const Text& text, ChatChannel channel = ChatChannel::Global,
               bool reply = true, const Speech* speech = nullptr, const dialogue::Message* interpreted = nullptr, const ChatQuote* quote = nullptr);
@@ -98,7 +99,8 @@ public:
 private:
     enum class Nav { Moving, Arrived, Blocked };
 
-    void onPhaseChange(const Match& match, const GameView& view);
+    Text lastWords(const Match& match, std::optional<Evidence>& evidence) const;
+    void onPhaseChange(Match& match, const GameView& view);
     void chooseWanderTarget(const Match& match);
     void act(float dt, Match& match, const GameView& view, const SayFn& say, Vec2& wish, float& speed);
     bool dayRole(Match& match, const GameView& view, const Match::Player& me, Vec2& wish);
@@ -150,7 +152,7 @@ private:
     Text counterclaim(const Match& match, uint8_t speaker, std::optional<Evidence>* evidence) const;
     // Schlüsse aus dem Spielverlauf und Reaktionen auf Ereignisse
     void observe(float dt, const Match& match, const GameView& view);
-    void review(const Match& match, const GameView& view);
+    void review(Match& match, const GameView& view);
     // Sagt line in der Phase phase ab Tag day (frühestens nach due), z. B. einen Schluss in der nächsten Versammlung
     void plan(Phase phase, int day, double due, Text line, std::optional<Evidence> evidence = {}, uint8_t about = kNoPlayer,
               uint8_t event = kNoPlayer);
@@ -256,6 +258,7 @@ private:
         Vec2 at;
         double clock = 0.0;
         Vec2 observer{};
+        bool lantern = false;
     };
     bool sawAt(const Match& match, uint8_t person, const ChatQuote& quote) const;
     std::map<uint8_t, std::vector<Sight>> m_sightings; // diese Nacht: wann und wo jemand (in Menschengestalt) zu sehen war

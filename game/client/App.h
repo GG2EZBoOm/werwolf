@@ -21,6 +21,7 @@
 #include "engine/platform/Window.h"
 #include "engine/ui/UI.h"
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -77,6 +78,7 @@ private:
         std::string join;
         int bots = 0;
         bool autoStart = false;
+        bool tutorial = false;
         bool autoPlay = false;
         bool preview = false;
         bool sandbox = false;
@@ -276,8 +278,10 @@ private:
     int m_pauseFocus = 0;
     bool m_journalOpen = false;
     bool m_showRecap = false, m_showPins = false;
-    size_t m_pinPage = 0;
+    std::array<size_t, 2> m_pinIndex{0, 1};
+    void removePin(size_t index);
     float m_pinScroll[2]{};
+    float m_recapScroll = 0;
     std::vector<LogEntry> m_pins;
     std::optional<LogEntry> m_replyTo;
     double m_revealStart = -100.0;

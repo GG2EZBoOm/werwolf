@@ -130,7 +130,7 @@ void Bot::chooseWanderTarget(const Match& match) {
     m_target = t;
 }
 
-void Bot::onPhaseChange(const Match& match, const GameView& view) {
+void Bot::onPhaseChange(Match& match, const GameView& view) {
     m_reviewedDefense = false;
     m_voted = false;
     m_quarry = kNoPlayer;
@@ -276,6 +276,11 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
     const Match::Player* me = match.find(m_id);
     if (!me) return;
     const GameView view = match.viewFor(m_id);
+    if (match.tutorial()) {
+        updateConversation(dt, match, say);
+        observe(dt, match, view);
+        return;
+    }
     for (const auto& result : view.seerResults)
         m_checkedNight.try_emplace(result.player, view.phase == Phase::Night ? view.day : std::max(1, view.day - 1));
 

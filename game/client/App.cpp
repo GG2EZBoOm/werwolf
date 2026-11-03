@@ -247,6 +247,7 @@ void App::parseCommandLine() {
         else if (a == "--port" && hasValue) m_portInput = arg(++i);
         else if (a == "--bots" && hasValue) m_dev.bots = std::atoi(arg(++i).c_str());
         else if (a == "--start") m_dev.autoStart = true;
+        else if (a == "--tutorial") { m_dev.autoHost = true; m_dev.autoStart = true; m_dev.tutorial = true; }
         else if (a == "--autoplay") m_dev.autoPlay = true;
         else if (a == "--preview") m_dev.preview = true;
         else if (a == "--sandbox") m_dev.sandbox = true;
@@ -312,7 +313,7 @@ void App::runDevAutomation() {
             m_devBotsSent = true;
         }
         if (m_dev.autoStart && !m_devStarted && static_cast<int>(m_net.view().players.size()) > m_dev.bots) {
-            m_net.sendStartGame();
+            m_net.sendStartGame(m_dev.tutorial);
             m_devStarted = true;
         }
     }

@@ -114,8 +114,9 @@ void App::enterMatch() {
     m_wasAlive = true;
     m_chatWolves = false;
     m_bubbles.clear();
-    m_replyTo.reset(); m_pins.clear(); m_pinPage = 0;
-    m_showRecap = false; m_showPins = false;
+    m_replyTo.reset(); m_pins.clear(); m_pinIndex = {0, 1};
+    m_pinScroll[0] = m_pinScroll[1] = 0;
+    m_showRecap = true; m_showPins = false; m_recapScroll = 0;
     m_chatScroll = 0.0f;
     m_myTransform = 0.0f;
     m_timeOfDay = timeOfDay(v.phase, v.timeLeft, v.phaseDuration);
@@ -180,6 +181,13 @@ void App::buildPrompts(const GameView& v) {
         return t != kNoPlayer ? Lf(de, en, name(t)) : std::string(L(noneDe, noneEn));
     };
 
+    if (v.can(AbilityWindowLantern) && v.me() && v.me()->house < m_world.houses().size() && (m_world.doorCenter(v.me()->house) - me2).length() <= kDoorRange)
+        add(Interaction::WindowLantern, "G", (v.windowLanterns & (1u << v.you)) ? L("Laterne vom Fenster nehmen", "Take down lantern") :
+            L("Laterne ans Fenster hängen", "Hang lantern at the window"), v.me()->house, true);
+    if (v.can(AbilityGhostTip)) {
+        const auto t = aim(100.f, false, any);
+        add(Interaction::GhostTip, "E", label(t, "Geistertipp auf {}", "Ghost prediction: {}", "Für einen Tipp einen Lebenden ansehen", "Look at a living player to predict"), t, t != kNoPlayer);
+    }
     if (v.can(AbilityNameSuccessor)) {
         const uint8_t t = aim(60.0f, false, any);
         add(Interaction::NameSuccessor, "E",
@@ -527,6 +535,7 @@ void App::updateMatch() {
         if (in.pressed(eng::Key::E)) trigger("E");
         if (in.pressed(eng::Key::F)) trigger("F");
         if (in.pressed(eng::Key::Q)) trigger("Q");
+        if (in.pressed(eng::Key::G)) trigger("G");
         if (in.pressed(eng::Key::R)) trigger("R");
         if (in.mousePressed()) trigger("Klick");
     }
@@ -586,13 +595,20 @@ void App::renderMatch3D() {
         if (pose.ghost) m_renderer3d.particle(m.position + Vec3{0, 1.2f, 0}, 2.4f, {0.12f, 0.2f, 0.45f}, 0.3f);
     };
 
+    for (const auto& p : v.players) {
+        if (!(v.windowLanterns & (1u << p.id)) || p.house >= m_world.houses().size()) continue;
+        const auto& h = m_world.houses()[p.house];
+        const Vec2 sill = m_world.houseToWorld(p.house, {h.width * .3f, h.depth * .5f + .25f});
+        const Vec3 pos{sill.x, h.floorY + 1.6f, sill.y};
+        m_characters.drawWindowLantern(m_renderer3d, pos);
+        m_renderer3d.light({pos, 10.f, {1.f, .62f, .28f}, 2.4f * night});
+    }
     // eigene Figur
     {
         uint8_t flags = 0;
         for (const EntityState& e : m_entities)
             if (e.id == v.you && e.kind == EntityLiving) flags = e.flags;
-        const bool lantern = night > 0.3f && m_myTransform < 0.01f && !(flags & EntityRedEyes);
-        if (alive) drawFigure(v.you, m_player, m_myTransform, flags | (lantern ? EntityLantern : 0), EntityLiving);
+        if (alive) drawFigure(v.you, m_player, m_myTransform, flags, EntityLiving);
         else drawFigure(v.you, m_player, 0.0f, 0, EntityGhost);
     }
     for (const auto& [key, f] : m_figures) drawFigure(static_cast<uint8_t>(key / 4), f.mover, f.transform, f.flags, f.kind);
@@ -836,7 +852,8 @@ void App::drawPrompts(const GameView&) {
     }
 }
 void App::drawVotePanel(const GameView& v) {
-    if (v.phase != Phase::Vote && v.phase != Phase::Execution) return;
+    const bool predictions = v.can(AbilityGhostTip);
+    if (!predictions && v.phase != Phase::Vote && v.phase != Phase::Execution) return;
     eng::Renderer2D& r = m_renderer;
     using namespace palette;
     std::map<uint8_t, int> votes;
@@ -855,7 +872,7 @@ void App::drawVotePanel(const GameView& v) {
     m_kit.beginTilt(panel, 0.012f);
     m_kit.paper(panel, 15000u);
     m_kit.nail({panel.center().x, panel.y + 12.0f});
-    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, v.defenseOpen ? L("Letzte Worte", "Last words") : v.defenderA != kNoPlayer ? L("Letzte Wahl", "Final vote") : v.election ? L("Hauptmannwahl", "Captain election") : L("Wer soll hängen?", "Who shall hang?"),
+    r.text(m_fonts.scriptBold, {panel.x + 22.0f, panel.y + 18.0f}, predictions ? L("Geistertipp", "Ghost prediction") : v.defenseOpen ? L("Letzte Worte", "Last words") : v.defenderA != kNoPlayer ? L("Letzte Wahl", "Final vote") : v.election ? L("Hauptmannwahl", "Captain election") : L("Wer soll hängen?", "Who shall hang?"),
            inkRed);
     const bool canVote = v.can(AbilityVote);
     size_t index = 0;
@@ -865,9 +882,9 @@ void App::drawVotePanel(const GameView& v) {
         const Rect row{panel.x + 14.0f + static_cast<float>(column) * (columnW + columnGap), panel.y + 58.0f + static_cast<float>(line) * rowH,
                        columnW, rowH - 2.0f};
         if (v.defenseOpen && (p->id == v.defenderA || p->id == v.defenderB)) r.roundRect(row, 3, inkRed.withAlpha(.15f));
-        const bool mine = v.vote == p->id;
-        const bool clickable = canVote && p->id != v.you && !m_window.isMouseCaptured();
-        if (m_ui.clickArea(std::format("vote/{}", p->id), row, clickable)) m_net.sendInteract(Interaction::Vote, mine ? kNoPlayer : p->id);
+        const bool mine = (predictions ? v.ghostTip : v.vote) == p->id;
+        const bool clickable = (predictions || canVote) && p->id != v.you && !m_window.isMouseCaptured() && !m_journalOpen && !m_pauseOpen;
+        if (m_ui.clickArea(std::format("vote/{}", p->id), row, clickable)) m_net.sendInteract(predictions ? Interaction::GhostTip : Interaction::Vote, mine && !predictions ? kNoPlayer : p->id);
         const bool hover = clickable && m_ui.hovered(row);
         if (hover) m_ui.setCursor(eng::Cursor::Hand);
         std::string name = p->name;
@@ -1126,9 +1143,10 @@ void App::drawGameOver(const GameView& v) {
         m_kit.paper(page, 21307u, a);
         Rect body = page.shrink(24, 18);
         r.text(m_fonts.scriptLarge, {body.x, body.y}, L("Schlüsselmomente", "Turning points"), inkRed);
-        float y = body.y + 50;
+        const Rect content{body.x, body.y + 50, body.w, body.h - 50};
+        float y = content.y - m_recapScroll;
         if (v.highlights.empty()) r.text(m_fonts.ui, {body.x, y}, L("Keine Schlüsselszene aufgezeichnet.", "No key moment recorded."), inkSoft);
-        r.pushClip(body);
+        r.pushClip(content);
         for (const auto& moment : v.highlights) {
             for (const auto& line : m_fonts.chat.wrap(moment.str(), body.w)) {
                 r.text(m_fonts.chat, {body.x, y}, line, inkDark); y += m_fonts.chat.lineHeight();
@@ -1136,6 +1154,12 @@ void App::drawGameOver(const GameView& v) {
             y += 14;
         }
         r.popClip();
+        const float overflow = std::max(0.f, y + m_recapScroll - content.bottom() - 14);
+        if (overflow > 0) {
+            r.text(m_fonts.small, {body.right() - 100, body.y + 8}, L("↕ Scrollen", "↕ Scroll"), inkSoft);
+            if (m_ui.hovered(page)) m_recapScroll -= m_window.input().wheel * 40;
+        }
+        m_recapScroll = std::clamp(m_recapScroll, 0.f, overflow);
     }
     for (int i = 0; !m_showRecap && i < n; ++i) {
         const PlayerView& p = v.players[static_cast<size_t>(i)];
@@ -1228,6 +1252,17 @@ void App::drawMatchHud() {
         m_kit.spacedCentered(m_fonts.display, {0, H * 0.4f, W, 60.0f}, L("DU BIST GESTORBEN", "YOU HAVE DIED"), 8.0f, palette::blood.withAlpha(a));
         r.textCentered(m_fonts.subtitle, {0, H * 0.4f + 70.0f, W, 26.0f},
                        L("Als Geist wanderst du ungesehen durchs Dorf.", "As a ghost you wander the village unseen."), palette::parchment.withAlpha(a));
+    }
+    if (!v.lesson.empty() && !m_journalOpen && !m_pauseOpen) {
+        const float width = std::min(W - 60, 580.f);
+        const auto lines = m_fonts.chat.wrap(v.lesson.str(), width - 20);
+        const Rect note{(W - width) * .5f, 142, width, lines.size() * m_fonts.chat.lineHeight() + 12};
+        r.roundRect(note, 5, palette::ink.withAlpha(.85f));
+        float y = note.y + 6;
+        for (const auto& line : lines) {
+            r.text(m_fonts.chat, {note.x + 10, y}, line, palette::parchment);
+            y += m_fonts.chat.lineHeight();
+        }
     }
     if (m_config.showFps)
         r.text(m_fonts.small, {12.0f, 10.0f}, std::format("{:.0f} FPS", 1.0f / std::max(m_dt, 0.001f)), palette::ash);

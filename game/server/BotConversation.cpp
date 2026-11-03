@@ -896,6 +896,31 @@ bool Bot::sawAt(const Match& match, uint8_t person, const ChatQuote& quote) cons
     });
 }
 
+Text Bot::witnessAnswer(const Match& match, const ChatQuote& quote) const {
+    const int night = quote.alibiNight;
+    if (night <= 0 || night != m_alibiNight)
+        return {"Für diese Nacht kann ich keine eigene Beobachtung nennen.", "I have no firsthand observation for that night."};
+    if (quote.topic != kNoPlayer && quote.topic != m_id) {
+        const auto seen = m_sightings.find(quote.topic);
+        if (seen != m_sightings.end()) {
+            for (const auto& s : seen->second)
+                if ((s.at - s.observer).length() <= 5)
+                    return tx("In Nacht {} stand {} nur ein paar Schritte von mir entfernt. Was später geschah, weiß ich nicht.",
+                              "On night {} I saw {} a few steps away. I don't know what happened later.", night, match.find(quote.topic)->name);
+            if (std::any_of(seen->second.begin(), seen->second.end(), [](const Sight& s) { return s.lantern; }))
+                return {"Ich habe aus der Entfernung eine Laterne gesehen. Für ein Gesicht war ich zu weit weg.",
+                        "I saw a lantern from a distance. I was too far away to make out a face."};
+        }
+    }
+    if (quote.place != dialogue::Place::Unknown) {
+        const auto most = std::max_element(m_nightPlaces.begin(), m_nightPlaces.end());
+        if (*most > 0 && most - m_nightPlaces.begin() == static_cast<int>(quote.place))
+            return tx("Dort habe ich in Nacht {} die meiste Zeit verbracht. Für die ganze Nacht kann ich das nicht behaupten.",
+                      "That is where I spent most of night {}. I can't claim I was there the entire night.", night);
+    }
+    return {"Ich kann dafür keinen Augenzeugen nennen. Das war meine Einschätzung.", "I can't name an eyewitness. That was my interpretation."};
+}
+
 bool Bot::offerWitness(const Match& match, const ChatQuote& quote) {
     const auto* me = match.find(m_id);
     if (!me || !me->alive || m_planned.size() >= 4 || !sawAt(match, quote.speaker, quote)) return false;

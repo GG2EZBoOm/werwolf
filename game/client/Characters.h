@@ -50,6 +50,7 @@ public:
     bool isReady() const { return m_cube.valid(); }
     void draw(eng::Renderer3D& r, const CharacterLook& look, const CharacterPose& pose) const;
     // Position der Laterne in der Hand (für das Punktlicht)
+    void drawWindowLantern(eng::Renderer3D& r, Vec3 position) const;
     Vec3 lanternPosition(const CharacterPose& pose) const;
     // Kopfhöhe über dem Boden (für Namensschilder)
     float headHeight(const CharacterPose& pose) const;

@@ -594,6 +594,7 @@ void GameView::write(eng::ByteWriter& w) const {
     w.u8(defenderA); w.u8(defenderB); w.boolean(defenseOpen);
     w.u8(static_cast<uint8_t>(highlights.size()));
     for (const Text& moment : highlights) moment.write(w);
+    w.u32(windowLanterns); w.u8(ghostTip); lesson.write(w);
 }
 
 bool GameView::read(eng::ByteReader& r) {
@@ -619,6 +620,7 @@ bool GameView::read(eng::ByteReader& r) {
     for (uint8_t i = 0; i < count; ++i) {
         PlayerView p;
         p.id = r.u8();
+        if (p.id >= kMaxPlayers) return false;
         p.name = r.str(128);
         const uint8_t flags = r.u8();
         p.alive = flags & 1;
@@ -671,6 +673,7 @@ bool GameView::read(eng::ByteReader& r) {
     if (moments > 3 || (moments && phase != Phase::GameOver)) return false;
     highlights.resize(moments);
     for (Text& moment : highlights) moment.read(r);
+    windowLanterns = r.u32(); ghostTip = r.u8(); lesson.read(r);
     return r.ok();
 }
 

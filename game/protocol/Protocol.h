@@ -10,10 +10,11 @@
 // Jede Nachricht beginnt mit einem Typ-Byte, danach folgen die Felder.
 namespace ww::proto {
 
-constexpr uint16_t kVersion = 9;
+constexpr uint16_t kVersion = 10;
 constexpr uint16_t kDefaultPort = 27777;
 constexpr size_t kMaxNameLength = 16;  // Codepoints
 constexpr size_t kMaxChatLength = 240; // Codepoints
+constexpr size_t kMaxDefenseLength = 140;
 constexpr double kPingInterval = 2.0;
 constexpr double kTimeout = 15.0;
 constexpr double kMoveInterval = 1.0 / 20.0;     // Client -> Server
@@ -31,6 +32,8 @@ enum class ClientMsg : uint8_t {
     ReturnToLobby,  // – (nur Spielleitung)
     Ping,           // –
     Leave,          // –
+    AskWitnesses,   // u32 first chat ID, u32 second chat ID
+    StartTutorial,  // solo host in the lobby
 };
 
 // Text = str Deutsch + str Englisch (leer, wenn gleich); jeder Client zeigt seine Sprache

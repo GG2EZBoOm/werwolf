@@ -3,6 +3,7 @@ add_library(werwolf_logic STATIC
     i18n/Text.cpp
     logic/Types.cpp
     logic/Match.cpp
+    logic/Tutorial.cpp
     world/World.cpp
     world/Movement.cpp
 )

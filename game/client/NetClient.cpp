@@ -276,7 +276,13 @@ void NetClient::sendInteract(Interaction kind, uint8_t target) {
     send(w);
 }
 
-void NetClient::sendStartGame() { send(proto::begin(proto::ClientMsg::StartGame)); }
+void NetClient::sendStartGame(bool tutorial) { send(proto::begin(tutorial ? proto::ClientMsg::StartTutorial : proto::ClientMsg::StartGame)); }
+
+void NetClient::askWitnesses(uint32_t first, uint32_t second) {
+    auto w = proto::begin(proto::ClientMsg::AskWitnesses);
+    w.u32(first); w.u32(second);
+    send(w);
+}
 
 void NetClient::sendSettings(const Settings& settings) {
     eng::ByteWriter w = proto::begin(proto::ClientMsg::UpdateSettings);

@@ -53,6 +53,7 @@ bool Match::startWithRoles(const std::vector<Seat>& seats, const std::vector<Rol
         error = tx("Es werden mindestens {} Spieler benötigt.", "At least {} players are needed.", kMinPlayers);
         return false;
     }
+    m_case.reset();
     m_world = &world;
     m_settings = settings;
     m_settings.sanitize();
@@ -377,7 +378,11 @@ uint32_t Match::abilitiesFor(uint8_t id) const {
     uint32_t a = 0;
     if (p->hunterTimer > 0.0f) a |= AbilityHunterShot;
     if (p->successorTimer > 0.0f) a |= AbilityNameSuccessor;
-    if (!p->alive) return a;
+    if (!p->alive) {
+        if (!m_election && ((m_phase == Phase::Day && m_day >= 2) || m_phase == Phase::Assembly ||
+                             (m_phase == Phase::Execution && m_secondVote))) a |= AbilityGhostTip;
+        return a;
+    }
     const bool night = m_phase == Phase::Night;
     const bool day = m_phase == Phase::Day;
     const bool firstNight = night && m_day == 1;
@@ -460,6 +465,8 @@ uint32_t Match::abilitiesFor(uint8_t id) const {
         break;
     }
     if (m_phase == Phase::Vote && !m_defenseOpen && !p->idiotRevealed) a |= AbilityVote;
+    if (night && p->house != kNoPlayer && p->transform == 0 && !p->vampireForm &&
+        p->role != Role::SerialKiller && p->role != Role::Arsonist) a |= AbilityWindowLantern;
     if (day && m_day >= 2 && !m_bellRung) a |= AbilityRingBell;
     return a;
 }
@@ -499,6 +506,14 @@ Text Match::checkInteraction(uint8_t id, Interaction kind, uint8_t targetId) con
     };
 
     switch (kind) {
+    case Interaction::WindowLantern:
+        if (!(abilities & AbilityWindowLantern) || targetId != p->house)
+            return {"Das geht nur nachts am eigenen Haus.", "Only at your own house at night."};
+        return checkDoor(*p, targetId, kDoorRange);
+    case Interaction::GhostTip:
+        if (!(abilities & AbilityGhostTip) || !t || !t->alive)
+            return {"Tippe als Geist vor der Wahl auf einen Lebenden.", "As a ghost, pick a living player before the vote."};
+        return {};
     case Interaction::Transform:
         if (!(abilities & AbilityTransform)) return {"Verwandeln kannst du dich nur nachts.", "You can only transform at night."};
         return {};
@@ -723,7 +738,7 @@ std::vector<EntityState> Match::entitiesFor(uint8_t viewer) const {
             e.flags = p.moveFlags;
             if (p.wolfForm()) e.flags |= EntityWolf;
             if (p.attackAnim > 0.0f) e.flags |= EntityAttack;
-            if (night && p.transform < 0.01f && p.role != Role::SerialKiller && p.role != Role::Arsonist && !p.vampireForm)
+            if (night && !p.windowLantern && p.transform < 0.01f && p.role != Role::SerialKiller && p.role != Role::Arsonist && !p.vampireForm)
                 e.flags |= EntityLantern;
             if (night && p.vampireForm) e.flags |= EntityRedEyes;
             out.push_back(e);
@@ -765,10 +780,14 @@ GameView Match::viewFor(uint8_t viewer) const {
 
     const Player* me = find(viewer);
     const bool over = m_phase == Phase::GameOver;
+    if (m_case && !over) v.lesson = tutorialHint();
     if (over) for (const auto& moment : m_highlights) v.highlights.push_back(moment.text);
     if (m_phase == Phase::Vote) {
         v.defenderA = m_defenderA; v.defenderB = m_defenderB; v.defenseOpen = m_defenseOpen;
     }
+    if (me && !me->alive) v.ghostTip = me->ghostTip;
+    if (m_phase == Phase::Night) for (const Player& p : m_players)
+        if (p.windowLantern) v.windowLanterns |= 1u << p.id;
     const bool spectator = !me || !me->alive;
     const bool meWolf = me && isWolfRole(me->role);
     const bool meVampire = me && isVampireRole(me->role);
@@ -923,6 +942,13 @@ Text Match::interact(uint8_t id, Interaction kind, uint8_t targetId) {
     Player* t = findMutable(targetId);
 
     switch (kind) {
+    case Interaction::WindowLantern:
+        p->windowLantern = !p->windowLantern;
+        break;
+    case Interaction::GhostTip:
+        p->ghostTip = targetId;
+        tell(id, tx("Dein geheimer Tipp: {}.", "Your secret prediction: {}.", nameOf(targetId)));
+        break;
     case Interaction::Transform:
         if (isVampireRole(p->role)) p->vampireForm = targetId != 0;
         else p->transformTarget = targetId ? 1.0f : 0.0f;
@@ -1490,6 +1516,7 @@ void Match::update(float dt) {
     for (float& n : m_doorNoise) n = std::max(0.0f, n - dt);
     updateFires(dt);
     if (m_phase == Phase::GameOver) return;
+    if (m_case) updateTutorial();
     if (m_phase == Phase::Night) updateTracking();
     updateBear(dt);
 
@@ -1711,16 +1738,40 @@ void Match::finishDefenseLine(uint8_t id) {
     markDirty();
 }
 
-void Match::highlight(int importance, const Text& text) {
+void Match::recordVoteTrust(uint8_t observer, uint8_t voter, uint8_t executed) {
+    const Player* witness = find(observer);
+    if (!witness || !witness->alive || teamOf(observer) != Team::Village) return;
+    for (auto& moment : m_highlights) {
+        if (moment.voter != voter || moment.executed != executed) continue;
+        moment.text = tx("{} {} vertraute {} danach mehr.", "{} Afterwards {} trusted {} more.", moment.text, witness->name, nameOf(voter));
+        moment.voter = kNoPlayer; // Report the first verified observer only.
+        break;
+    }
+}
+
+void Match::highlight(int importance, const Text& text, uint8_t voter, uint8_t executed) {
     if (m_highlights.size() == 3) {
         const auto least = std::min_element(m_highlights.begin(), m_highlights.end(), [](const auto& a, const auto& b) { return a.importance < b.importance; });
         if (least->importance > importance) return;
         m_highlights.erase(least);
     }
-    m_highlights.push_back({importance, tx("Tag {} · {}", "Day {} · {}", m_day, text)});
+    m_highlights.push_back({importance, tx("Tag {} · {}", "Day {} · {}", m_day, text), voter, executed});
+}
+
+void Match::settleGhostTips(uint8_t executed) {
+    for (Player& p : m_players) {
+        if (p.ghostTip == kNoPlayer) continue;
+        const Text result = executed == kNoPlayer ? Text{"Niemand wurde hingerichtet.", "Nobody was executed."} :
+                            tx("Hingerichtet wurde {}.", "{} was executed.", nameOf(executed));
+        const Text score = p.ghostTip == executed ? Text{"Treffer!", "Correct!"} : Text{"Daneben.", "Missed."};
+        notify(Notice::Audience::Dead, kNoPlayer, NoticeKind::Info,
+               tx("{} tippte auf {}. {} {}", "{} picked {}. {} {}", p.name, nameOf(p.ghostTip), result, score));
+        p.ghostTip = kNoPlayer;
+    }
 }
 
 void Match::resolveVote() {
+    if (m_case && find(m_case->learner)->vote == kNoPlayer && find(m_case->learner)->alive) { setTimer(15); return; }
     if (m_defenseOpen) {
         m_defenseOpen = false;
         setTimer(8);
@@ -1770,6 +1821,7 @@ void Match::resolveVote() {
         return;
     }
     if (ranking.empty()) {
+        settleGhostTips(kNoPlayer);
         narrate({"Niemand hat abgestimmt. Das Dorf geht ratlos auseinander.", "Nobody voted. The village disperses, at a loss."});
         return;
     }
@@ -1779,15 +1831,19 @@ void Match::resolveVote() {
             narrate({"Gleichstand! Das Dorf kann sich nicht einigen – also muss der Sündenbock dran glauben.",
                      "A tie! The village cannot agree – so the scapegoat has to pay."});
             m_firstExecution = true;
+            settleGhostTips(p.id);
             kill(p.id, DeathCause::Scapegoat, true);
             return;
         }
+        settleGhostTips(kNoPlayer);
+        highlight(2, {"Bei Stimmengleichheit wurde niemand hingerichtet.", "A tied vote spared the defendants."});
         narrate({"Gleichstand! Das Dorf kann sich nicht einigen – niemand wird hingerichtet.", "A tie! The village cannot agree – nobody is executed."});
         return;
     }
     Player* condemned = findMutable(ranking[0].first);
     if (!condemned) return;
     if (condemned->role == Role::Idiot && !condemned->idiotRevealed) {
+        settleGhostTips(kNoPlayer);
         condemned->idiotRevealed = true;
         narrate(tx("{} wird zum Galgen geführt … und grinst so harmlos, dass das Dorf begreift: Das ist nur der "
                    "Dorfdepp! Man lässt {} laufen – abstimmen darf {} aber nie wieder.",
@@ -1812,8 +1868,11 @@ void Match::resolveVote() {
                isWolfRole(voter.role) && voter.vote == condemned->id;
     });
     if (partner != m_players.end())
-        highlight(5, tx("{} stimmte gegen Rudelmitglied {}, das daraufhin hingerichtet wurde.", "{} voted against packmate {}, who was executed.", partner->name, condemned->name));
+        highlight(5, tx("{} stimmte gegen Rudelmitglied {}, das daraufhin hingerichtet wurde.", "{} voted against packmate {}, who was executed.", partner->name, condemned->name), partner->id, condemned->id);
     else highlight(3, tx("Das Dorf richtete {} hin. Die Rolle war {}.", "The village executed {}. Their role was {}.", condemned->name, roleText(condemned->role)));
+    if (m_case) highlight(9, tx("Du hast {} gewählt. {} war {}.", "You chose {}. {} was {}.",
+                                condemned->name, condemned->name, roleText(condemned->role)));
+    settleGhostTips(condemned->id);
     kill(condemned->id, DeathCause::Vote, true);
     m_firstExecution = true;
 }
@@ -1829,6 +1888,7 @@ void Match::finishServant() {
 
 void Match::enterNight() {
     m_phase = Phase::Night;
+    for (auto& p : m_players) p.windowLantern = false;
     setTimer(m_settings.nightSeconds);
     bool bigBadWolf = false;
     for (const Player& p : m_players)
@@ -1952,6 +2012,8 @@ void Match::enterMorning() {
 }
 
 Team Match::evaluateWinner() const {
+    if (m_case) for (const auto& p : m_players)
+        if (!p.alive && p.deathCause == DeathCause::Vote) return p.id == m_case->wolf ? Team::Village : Team::Wolves;
     if (m_jesterWinner != kNoPlayer) return Team::Jester;
     if (m_angelWinner != kNoPlayer) return Team::Angel;
     int alive = 0, aliveWolves = 0, wolvesTeam = 0, villageTeam = 0, killers = 0, vampires = 0;
@@ -2020,7 +2082,12 @@ bool Match::checkWin() {
         p.successorTimer = 0.0f;
     }
     markDirty();
-    auto victory = [&](Text text) { notify(Notice::Audience::All, kNoPlayer, NoticeKind::Victory, std::move(text)); };
+    auto victory = [&](Text text) { highlight(0, text); notify(Notice::Audience::All, kNoPlayer, NoticeKind::Victory, std::move(text)); };
+    if (m_case) {
+        victory(w == Team::Village ? Text{"Fall gelöst. Das Dorf hat den Angreifer erkannt.", "Case solved. The village identified the attacker."} :
+                                     Text{"Der Angreifer ist entkommen. Im Rückblick siehst du, was passiert ist.", "The attacker escaped. See what happened in the recap."});
+        return true;
+    }
     switch (w) {
     case Team::Village: victory({"Das Dorf hat gesiegt! Kein Werwolf treibt mehr sein Unwesen.", "The village has won! No werewolf haunts it any longer."}); break;
     case Team::Wolves: victory({"Die Werwölfe haben gesiegt! Das Dorf ist ihrem Hunger erlegen.", "The werewolves have won! The village has fallen to their hunger."}); break;

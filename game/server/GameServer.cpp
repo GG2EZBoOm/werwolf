@@ -94,12 +94,20 @@ void GameServer::tick() {
 
     if (m_match) {
         m_match->update(dt);
+        updateHearing();
+        if (!m_hearing && m_match->tutorial()) {
+            const auto witness = m_match->nextTutorialWitness();
+            if (witness != kNoPlayer) {
+                chatFrom(witness, m_match->tutorialStatement(witness, false), false);
+                m_match->heardTutorialWitness(witness);
+            }
+        }
         processBotChat(now);
         const Bot::SayFn say = [this](uint8_t botId, const Text& text, bool wolves) { chatFrom(botId, text, wolves); };
         for (Bot& bot : m_bots) {
             if (m_match->defenseOpen()) {
                 if (m_match->canDefend(bot.id()) && m_match->timeLeft() <= 18.0f - (bot.id() % 3))
-                    chatFrom(bot.id(), bot.lastWords(*m_match), false, 0, true);
+                    bot.defend(*m_match, [this](uint8_t id, const Text& line, bool) { chatFrom(id, line, false, 0, true); });
             } else bot.update(dt, *m_match, say);
         }
         routeMatchNotices();
@@ -353,6 +361,14 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
         }
         break;
     }
+    case proto::ClientMsg::AskWitnesses: {
+        const auto first = r.u32(), second = r.u32();
+        if (m_match && r.ok()) askWitnesses(*m, first, second);
+        break;
+    }
+    case proto::ClientMsg::StartTutorial:
+        if (isHost && !m_match && m_members.size() == 1) startGame(*m, true);
+        break;
     case proto::ClientMsg::StartGame:
         if (!isHost) sendNotice(*m, NoticeKind::Warning, {"Nur die Spielleitung kann das Spiel starten.", "Only the host can start the game."});
         else if (!m_match) startGame(*m);
@@ -404,16 +420,20 @@ void GameServer::handleMessage(uint8_t memberId, const std::vector<uint8_t>& dat
 
 // --- Spielverwaltung ---------------------------------------------------------
 
-void GameServer::startGame(Member& host) {
+void GameServer::startGame(Member& host, bool tutorial) {
+    if (tutorial) for (int i = 0; i < 5; ++i) addBot();
     std::vector<Match::Seat> seats;
     for (auto& m : m_members) seats.push_back(Match::Seat{m->id, m->name, m->bot});
 
-    const uint32_t worldSeed = static_cast<uint32_t>(m_rng.next64() & 0x7FFFFFFF);
+    const uint32_t worldSeed = tutorial ? 4242u : static_cast<uint32_t>(m_rng.next64() & 0x7FFFFFFF);
     const double t0 = eng::nowSeconds();
     m_world.generate(worldSeed);
     auto match = std::make_unique<Match>();
     Text error;
-    if (!match->start(seats, m_settings, m_world, m_rng.next64(), error)) {
+    const bool started = tutorial ? match->startTutorial(seats, m_world, error) :
+                                    match->start(seats, m_settings, m_world, m_rng.next64(), error);
+    if (!started) {
+        if (tutorial) std::erase_if(m_members, [](const auto& m) { return m->bot; });
         sendNotice(host, NoticeKind::Warning, error);
         return;
     }
@@ -440,6 +460,7 @@ void GameServer::returnToLobby() {
     if (!m_match) return;
     for (auto& b : m_bots) b.cancelLanguageReplies();
     clearBotChat();
+    if (m_match->tutorial()) std::erase_if(m_members, [](const auto& m) { return m->bot; });
     m_match.reset();
     m_bots.clear();
     for (auto& m : m_members)
@@ -546,9 +567,20 @@ void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves, uint32_t rep
         }
         original = &*it;
     }
+    if (m_hearing && m_match->phase() == Phase::Assembly && channel == ChatChannel::Global) {
+        if (m_hearing->lines[m_hearing->turn].speaker != memberId || m_hearing->answered || (m->bot && !defense)) {
+            if (!m->bot) sendNotice(*m, NoticeKind::Info, {"Der aufgerufene Zeuge hat das Wort.", "The witness has the floor."});
+            return;
+        }
+        m_hearing->answered = true;
+    }
     if (m_match && m_match->defenseOpen() && channel == ChatChannel::Global) {
         if (!m_match->canDefend(memberId) || (m->bot && !defense)) {
             if (!m->bot) sendNotice(*m, NoticeKind::Info, {"Das Wort haben gerade die beiden Angeklagten.", "The two defendants have the floor."});
+            return;
+        }
+        if (!m->bot && eng::utf8::length(text.de) > proto::kMaxDefenseLength) {
+            sendNotice(*m, NoticeKind::Info, {"Dein letzter Satz darf höchstens 140 Zeichen haben.", "Your last words may be up to 140 characters."});
             return;
         }
         m_match->finishDefenseLine(memberId);
@@ -593,7 +625,74 @@ void GameServer::chatFrom(uint8_t memberId, Text text, bool wolves, uint32_t rep
     if (m_options.logChat) eng::log::info("[{}] {}: {}", channelName(channel, Lang::German), m->name, text.de);
 }
 
+GameServer::HeardChat* GameServer::findWitnessStatement(uint32_t id) {
+    const auto archived = m_olderStatements.find(id);
+    if (archived != m_olderStatements.end()) return &archived->second;
+    const auto it = std::find_if(m_languageHistory.begin(), m_languageHistory.end(), [&](const HeardChat& h) { return h.id == id; });
+    return it == m_languageHistory.end() ? nullptr : &*it;
+}
+
+void GameServer::askWitnesses(Member& asker, uint32_t first, uint32_t second) {
+    const auto* player = m_match->find(asker.id);
+    if (!player || !player->alive || m_match->phase() != Phase::Assembly) return;
+    if (m_hearingDay == m_match->day()) {
+        sendNotice(asker, NoticeKind::Info, {"Heute wurden bereits zwei Zeugen aufgerufen.", "Two witnesses have already been called today."});
+        return;
+    }
+    Hearing hearing{};
+    for (size_t i = 0; i < 2; ++i) {
+        const auto id = i == 0 ? first : second;
+        const auto* it = findWitnessStatement(id);
+        if (!it || (it->channel != ChatChannel::Global && it->channel != ChatChannel::Nearby) ||
+            std::find(it->audience.begin(), it->audience.end(), asker.id) == it->audience.end() ||
+            !m_match->find(it->speaker)->alive || !m_match->find(it->speaker)->connected ||
+            (i && it->speaker == hearing.lines[0].speaker)) {
+            sendNotice(asker, NoticeKind::Info, {"Dafür braucht ihr zwei erreichbare Zeugen mit hörbaren Aussagen.", "Choose two available witnesses whose statements you heard."});
+            return;
+        }
+        hearing.lines[i] = *it;
+    }
+    m_hearing = std::move(hearing);
+    m_hearingDay = m_match->day();
+    m_match->allowWitnessTime();
+    callWitness();
+}
+
+void GameServer::callWitness() {
+    const auto& line = m_hearing->lines[m_hearing->turn];
+    m_hearing->calledAt = m_match->clock();
+    m_hearing->answered = false;
+    broadcastNotice(NoticeKind::Narration, tx("{} hat das Wort. Was hast du selbst beobachtet?",
+                    "{} has the floor. What did you observe firsthand?", m_match->find(line.speaker)->name));
+    if (auto* author = member(line.speaker); author && !author->bot)
+        sendNotice(*author, NoticeKind::Private, tx("Deine Aussage: „{}“. Antworte mit Enter im öffentlichen Chat.",
+                  "Your statement: “{}”. Press Enter to answer in public chat.", line.text));
+}
+
+void GameServer::updateHearing() {
+    if (!m_hearing) return;
+    if (m_match->phase() != Phase::Assembly) { m_hearing.reset(); return; }
+    const auto& line = m_hearing->lines[m_hearing->turn];
+    const auto* speaker = m_match->find(line.speaker);
+    const double elapsed = m_match->clock() - m_hearing->calledAt;
+    if (m_hearing->answered || !speaker || !speaker->alive || !speaker->connected || elapsed >= 12) {
+        if (++m_hearing->turn == 2) m_hearing.reset();
+        else callWitness();
+    } else if (speaker->bot && elapsed >= 2) {
+        for (const auto& bot : m_bots) if (bot.id() == speaker->id) {
+            Text reply = bot.witnessAnswer(*m_match, line.quote);
+            if (m_match->tutorial() && line.text == m_match->tutorialStatement(bot.id(), false))
+                reply = m_match->tutorialStatement(bot.id(), true);
+            chatFrom(bot.id(), reply, false, 0, true);
+            break;
+        }
+    }
+}
+
 void GameServer::clearBotChat() {
+    m_hearing.reset();
+    m_hearingDay = -1;
+    m_olderStatements.clear();
     if (m_language) for (const auto& pending : m_languageChats) m_language->cancel(pending.ticket);
     m_languageChats.clear();
     m_languageHistory.clear();
@@ -611,6 +710,8 @@ void GameServer::queueBotChat(uint8_t speaker, const Text& text, ChatChannel cha
             line.quote.topic = said->evidence ? said->evidence->target : said->topic;
             line.quote.alibiNight = said->alibiNight;
             line.quote.place = said->place;
+            if (line.quote.alibiNight < 1 && said->evidence && said->evidence->kind == Bot::Evidence::Kind::Sighting)
+                line.quote.alibiNight = line.day - 1;
         }
     } else {
         const auto meaning = dialogue::parse(text.de, {}, speaker);
@@ -657,7 +758,12 @@ void GameServer::queueBotChat(uint8_t speaker, const Text& text, ChatChannel cha
         deliverChat(m_bots, *m_match, speaker, text, channel, m_rng);
     }
     m_languageHistory.push_back(std::move(line));
-    while (m_languageHistory.size() > 512) m_languageHistory.pop_front();
+    if (m_languageHistory.size() > 512) {
+        auto& old = m_languageHistory.front();
+        if ((old.channel == ChatChannel::Global || old.channel == ChatChannel::Nearby) && !old.audience.empty())
+            m_olderStatements.emplace(old.id, std::move(old));
+        m_languageHistory.pop_front();
+    }
 }
 
 void GameServer::processBotChat(double now) {
@@ -677,6 +783,13 @@ void GameServer::processBotChat(double now) {
 }
 
 void GameServer::deliverNotice(const Notice& notice) {
+    if (notice.audience == Notice::Audience::Dead) {
+        auto w = proto::begin(proto::ServerMsg::Chat);
+        w.u8(static_cast<uint8_t>(ChatChannel::Dead)); w.u8(kNoPlayer); w.str("");
+        notice.text.write(w); w.u32(0); w.u16(m_match->day()); w.u32(0);
+        for (auto& m : m_members) if (m->conn && noticeVisible(notice, m->id)) m->conn->send(w.data());
+        return;
+    }
     ByteWriter w = proto::begin(proto::ServerMsg::Notice);
     w.u8(static_cast<uint8_t>(notice.kind));
     notice.text.write(w);
@@ -728,8 +841,8 @@ void GameServer::sendHistory(Member& m) {
             w.str(hidden ? std::string() : e.name);
             e.text.write(w);
             if (!hidden && e.id) {
-                auto line = std::find_if(m_languageHistory.begin(), m_languageHistory.end(), [&](const HeardChat& h) { return h.id == e.id; });
-                if (line != m_languageHistory.end() && std::find(line->audience.begin(), line->audience.end(), m.id) == line->audience.end())
+                auto* line = findWitnessStatement(e.id);
+                if (line && std::find(line->audience.begin(), line->audience.end(), m.id) == line->audience.end())
                     line->audience.push_back(m.id);
             }
             w.u32(e.id); w.u16(e.day); w.u32(0); // History must not expose a reference the viewer never heard.

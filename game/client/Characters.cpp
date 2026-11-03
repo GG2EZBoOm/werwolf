@@ -93,6 +93,10 @@ float CharacterRenderer::headHeight(const CharacterPose& pose) const {
     return eng::lerp(2.0f, 2.55f, pose.wolf);
 }
 
+void CharacterRenderer::drawWindowLantern(eng::Renderer3D& r, Vec3 position) const {
+    r.draw(m_lantern, eng::trs(position, 0), {1, 1, 1, 1}, 0.0f);
+}
+
 Vec3 CharacterRenderer::lanternPosition(const CharacterPose& pose) const {
     const Mat4 root = eng::trs(pose.position, pose.yaw);
     return root.transformPoint({0.36f, 0.62f, 0.12f});

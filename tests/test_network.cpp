@@ -355,7 +355,7 @@ TEST(SpielerChatErreichtGenauEinenPassendenBot) {
 }
 
 TEST(PrivateChatReferenceCannotBeRebroadcastIntoVillage) {
-    ServerOptions opt; opt.port = kTestPort + 4; opt.language.enabled = false; opt.logChat = false;
+    ServerOptions opt; opt.port = kTestPort + 4; opt.timeScale = 8; opt.language.enabled = false; opt.logChat = false;
     ServerThread server; std::string error;
     CHECK(server.start(opt, error));
     if (!server.isRunning()) return;
@@ -364,7 +364,7 @@ TEST(PrivateChatReferenceCannotBeRebroadcastIntoVillage) {
         CHECK(clients[i].connect("127.0.0.1", opt.port, "Gast" + std::to_string(i)));
         CHECK(pump(clients[i], [&] { return clients[i].hasView(); }, 3));
     }
-    Settings settings; settings.roles = 0; settings.wolves = 1;
+    Settings settings; settings.roles = 0; settings.wolves = 1; settings.captain = true; settings.daySeconds = 60; settings.discussionSeconds = 90;
     clients[0].sendSettings(settings); clients[0].sendStartGame();
     NetClient* wolf = nullptr; NetClient* villager = nullptr;
     for (auto& client : clients) {
@@ -386,6 +386,54 @@ TEST(PrivateChatReferenceCannotBeRebroadcastIntoVillage) {
         return std::any_of(client->log().begin(), client->log().end(), [](const LogEntry& e) {return !e.isChat && e.text.de.find("nicht mehr erreichbar") != std::string::npos;});
     }, 3));
     for (const auto& e : villager->log()) CHECK(!e.isChat || (e.id != secret && e.replyTo != secret));
+    CHECK(pump(*villager, [&] { return villager->view().phase == Phase::Assembly; }, 8));
+    villager->sendChat("Ich war am Feuer.", false);
+    uint32_t publicId = 0;
+    CHECK(pump(*wolf, [&] {
+        for (const auto& e : wolf->log()) if (e.text.de == "Ich war am Feuer.") publicId = e.id;
+        return publicId != 0;
+    }, 2));
+    wolf->askWitnesses(secret, publicId);
+    CHECK(pump(*wolf, [&] {
+        return std::any_of(wolf->log().begin(), wolf->log().end(), [](const LogEntry& e) {
+            return e.text.de.find("zwei erreichbare Zeugen") != std::string::npos;
+        });
+    }, 2));
+}
+
+TEST(TutorialWitnessesAnswerInOrderAtTheFire) {
+    ServerOptions opt; opt.port = kTestPort + 5; opt.timeScale = 12; opt.language.enabled = false; opt.logChat = false;
+    ServerThread server; std::string error;
+    CHECK(server.start(opt, error));
+    if (!server.isRunning()) return;
+    NetClient client;
+    CHECK(client.connect("127.0.0.1", opt.port, "Ermittlerin"));
+    CHECK(pump(client, [&] { return client.hasView(); }, 3));
+    client.sendStartGame(true);
+    if (!pump(client, [&] { return client.view().phase == Phase::Assembly; }, 15)) { CHECK(false); return; }
+    CHECK_EQ(client.view().players.size(), 6u);
+    uint32_t a = 0, b = 0;
+    for (const auto& line : client.log()) {
+        if (line.isChat && line.text.de.starts_with("Ich sah ")) a = line.id;
+        if (line.isChat && line.text.de.starts_with("Ich glaube, ")) b = line.id;
+    }
+    CHECK(a && b);
+    client.askWitnesses(a, a);
+    client.askWitnesses(b, a);
+    CHECK(pump(client, [&] {
+        bool first = false;
+        for (const auto& line : client.log()) {
+            if (line.isChat && line.text.de.starts_with("Vom Weg aus")) first = true;
+            if (first && line.isChat && line.text.de.find("direkt neben mir") != std::string::npos) return true;
+        }
+        return false;
+    }, 4));
+    CHECK(pump(client, [&] { return client.view().phase == Phase::Vote; }, 5));
+    client.sendInteract(Interaction::Vote, 1);
+    CHECK(pump(client, [&] { return client.view().phase == Phase::GameOver; }, 5));
+    CHECK_EQ(client.view().highlights.size(), 3u);
+    client.sendReturnToLobby();
+    CHECK(pump(client, [&] { return client.view().phase == Phase::Lobby && client.view().players.size() == 1; }, 3));
 }
 
 int main() {

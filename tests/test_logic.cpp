@@ -1074,6 +1074,79 @@ TEST(DefenseTimesOutWithoutSpeechAndDoesNotChooseArbitraryPairInThreeWayTie) {
     }
 }
 
+TEST(WindowLightReplacesHandLanternForOwnersAndObservers) {
+    auto m = makeMatch({W, V, V, V, V});
+    const uint8_t owner = 1, house = m.find(owner)->house;
+    runUntil(m, Phase::Night);
+    CHECK(!m.interact(owner, Interaction::WindowLantern, m.find(2)->house).empty());
+    m.teleport(owner, testWorld().houses()[house].door);
+    auto carries = [&] {
+        for (const auto& e : m.entitiesFor(2)) if (e.id == owner && e.kind == EntityLiving) return (e.flags & EntityLantern) != 0;
+        return false;
+    };
+    CHECK(carries());
+    CHECK(m.interact(owner, Interaction::WindowLantern, house).empty());
+    CHECK(!carries() && (m.viewFor(2).windowLanterns & (1u << owner)));
+    m.teleport(owner, testWorld().bell());
+    CHECK(!m.interact(owner, Interaction::WindowLantern, house).empty());
+    m.teleport(owner, testWorld().houses()[house].door);
+    CHECK(m.interact(owner, Interaction::WindowLantern, house).empty());
+    CHECK(carries() && m.viewFor(2).windowLanterns == 0);
+}
+
+TEST(GhostPredictionIsPrivateAndSettledOnActualVerdict) {
+    auto m = makeMatch({W, V, V, V, V, V});
+    m.playerLeft(5);
+    runUntil(m, Phase::Assembly);
+    CHECK(!m.interact(4, Interaction::GhostTip, 1).empty());
+    CHECK(!m.interact(5, Interaction::GhostTip, 5).empty());
+    CHECK(m.interact(5, Interaction::GhostTip, 1).empty());
+    CHECK_EQ(m.viewFor(5).ghostTip, 1);
+    CHECK_EQ(m.viewFor(4).ghostTip, kNoPlayer);
+    runUntil(m, Phase::Vote);
+    CHECK(!m.interact(5, Interaction::GhostTip, 2).empty());
+    m.takeNotices();
+    CHECK(m.interact(3, Interaction::Vote, 1).empty());
+    runUntil(m, Phase::Execution);
+    bool result = false;
+    for (const auto& n : m.takeNotices()) if (n.text.de.find("tippte auf") != std::string::npos) {
+        CHECK(n.audience == Notice::Audience::Dead && n.text.de.find("Treffer!") != std::string::npos);
+        result = true;
+    }
+    CHECK(result && m.viewFor(5).ghostTip == kNoPlayer);
+}
+
+TEST(TutorialEndsAfterOneActualVerdictEvenWithWrongChoice) {
+    for (uint8_t chosen : std::array<uint8_t, 2>{1, 2}) {
+        Match m; Text error;
+        std::vector<Match::Seat> seats;
+        for (uint8_t i = 0; i < 6; ++i) seats.push_back({i, "P" + std::to_string(i), i != 0});
+        CHECK(m.startTutorial(seats, testWorld(), error));
+        runUntil(m, Phase::Night);
+        runUntil(m, Phase::Morning);
+        CHECK(!m.find(5)->alive && (m.doors()[m.find(5)->house].flags & DoorBroken));
+        runUntil(m, Phase::Day);
+        run(m, 3);
+        CHECK_EQ(m.nextTutorialWitness(), 3);
+        m.heardTutorialWitness(3); run(m, 5.5f);
+        CHECK_EQ(m.nextTutorialWitness(), 4);
+        m.heardTutorialWitness(4);
+        runUntil(m, Phase::Vote);
+        run(m, 24);
+        CHECK(m.phase() == Phase::Vote && m.viewFor(0).highlights.empty());
+        CHECK(m.interact(0, Interaction::Vote, chosen).empty());
+        runUntil(m, Phase::GameOver);
+        CHECK_EQ(m.winner(), chosen == 1 ? Team::Village : Team::Wolves);
+        auto moments = m.viewFor(0).highlights;
+        CHECK_EQ(moments.size(), 3u);
+        if (moments.size() == 3) {
+            CHECK(moments[0].de.find("P1 schlug") != std::string::npos);
+            CHECK(moments[1].de.find("P4 hielt P2") != std::string::npos);
+            CHECK(moments[2].de.find("Du hast P" + std::to_string(chosen)) != std::string::npos);
+        }
+    }
+}
+
 int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

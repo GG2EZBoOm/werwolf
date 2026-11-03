@@ -358,12 +358,12 @@ void Bot::observe(float dt, const Match& match, const GameView& view) {
             continue;
         }
         auto& seen = m_sightings[e.id];
-        if (seen.size() < 400) seen.push_back({{e.x, e.z}, match.clock(), {me->position.x, me->position.z}});
+        if (seen.size() < 400) seen.push_back({{e.x, e.z}, match.clock(), {me->position.x, me->position.z}, (e.flags & EntityLantern) != 0});
         if (distanceXZ(pos, me->position) <= 10.0f) ++m_company[e.id];
     }
 }
 
-void Bot::review(const Match& match, const GameView& view) {
+void Bot::review(Match& match, const GameView& view) {
     const auto* me = match.find(m_id);
     if (!me) return;
     const bool wolf = isEvilRole(view.yourRole);
@@ -547,6 +547,7 @@ void Bot::review(const Match& match, const GameView& view) {
                 if (!wolf) {
                     m_suspicion[voter] -= 0.4f;
                     changeRelationship(voter, 0.18f);
+                    match.recordVoteTrust(m_id, voter, p.id);
                     m_dialogue.support(voter); // public success builds trust, even if it was a wolf's sacrifice
                 }
             if (const auto* d = match.find(mention))

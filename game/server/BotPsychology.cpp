@@ -139,15 +139,27 @@ Text Bot::emotionalStyle(Text text) const {
     return text;
 }
 
-Text Bot::lastWords(const Match& match) const {
+void Bot::defend(const Match& match, const SayFn& say) {
+    std::optional<Evidence> evidence;
+    const Text words = lastWords(match, evidence);
+    if (evidence && evidence->kind == Evidence::Kind::RoleClaim) m_publicRole = evidence->role;
+    speak(say, words, false, {evidence, true});
+}
+
+Text Bot::lastWords(const Match& match, std::optional<Evidence>& evidence) const {
     const auto view = match.viewFor(m_id);
-    if (view.yourRole == Role::Hunter) return {"Hängt mich, und ich nehme jemanden mit.", "Hang me and someone goes with me."};
+    if (view.yourRole == Role::Hunter || m_publicRole == Role::Hunter) {
+        evidence = Evidence{Evidence::Kind::RoleClaim, m_id, -.5f, Role::Hunter};
+        return {"Ich bin der Jäger und nehme jemanden mit, wenn ihr mich hängt.", "I'm the hunter and I'll take someone with me if you hang me."};
+    }
     if (view.yourRole == Role::Witch && view.healAvailable) return {"Wer soll euch heute Nacht retten, wenn ich weg bin?", "Who saves you tonight if I'm gone?"};
     if (view.yourRole == Role::Witch && view.poisonAvailable) return {"Mein letzter Trank ist noch voll, überlegt euch das gut.", "My last potion is still full, think this through."};
     if (view.yourRole == Role::Seer)
         for (const auto& check : view.seerResults)
-            if (isWolfRole(check.role) && match.find(check.player)->alive)
+            if (isWolfRole(check.role) && match.find(check.player)->alive) {
+                evidence = Evidence{Evidence::Kind::Seer, check.player, dialogue::kSeerWolf};
                 return tx("Ich hab {} geprüft, das ist ein Wolf!", "I checked {}, they're a wolf!", match.find(check.player)->name);
+            }
     if (m_personality.style == Personality::Style::Terse) return {"Wer hat mich denn wirklich gesehen?", "Who actually saw me?"};
     if (m_feelings.anger > .5f) return {"Jetzt mal ehrlich, wer von euch hat überhaupt einen Beleg gegen mich?", "Seriously, which of you actually has evidence against me?"};
     return {"Bevor ihr mich hängt, schaut noch mal, von wem der Vorwurf kam.", "Before you hang me, check who made the accusation."};

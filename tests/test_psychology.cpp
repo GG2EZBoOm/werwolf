@@ -157,6 +157,19 @@ TEST(HunterAndWitchThreatenOnlyWithTheirActualResources) {
     CHECK(witch.has("Leben retten"));
 }
 
+TEST(HuntersLastWordsCarryTheSpokenClaimToOtherBots) {
+    Scene hunter(Role::Hunter);
+    hunter.phase(Phase::Vote);
+    Bot listener(3, 88);
+    hunter.bot.defend(hunter.match, [&](uint8_t id, const Text& words, bool secret) {
+        const auto* speech = hunter.bot.speaking();
+        CHECK(!secret && words.de.find("Jäger") != std::string::npos);
+        CHECK(speech && speech->evidence && speech->evidence->kind == Bot::Evidence::Kind::RoleClaim &&
+              speech->evidence->role == Role::Hunter && speech->evidence->target == id);
+        listener.hear(hunter.match, id, words, ChatChannel::Global, false, speech);
+    });
+}
+
 TEST(SeerHidesSafeChecksUntilAnInnocentNeedsSaving) {
     Scene s(Role::Seer);
     s.inspect(3);
@@ -196,6 +209,12 @@ TEST(WolfSacrificesExposedPartnerAndGainsPublicTrust) {
     observer.update(0.1f, s.match, [](uint8_t, const Text&, bool) {});
     CHECK(!s.match.find(2)->alive);
     CHECK(observer.relationship(1) > trustBefore);
+    CHECK(s.match.viewFor(0).highlights.empty());
+    s.match.playerLeft(1);
+    const auto recap = s.match.viewFor(0).highlights;
+    CHECK(std::any_of(recap.begin(), recap.end(), [](const Text& t) {
+        return t.de.find("Ann vertraute Anton danach mehr.") != std::string::npos;
+    }));
 }
 
 TEST(WolvesDoNotSacrificeWithoutPressureOrNearVictory) {

@@ -9,7 +9,9 @@
 #include "engine/core/Random.h"
 #include "engine/net/Net.h"
 
+#include <array>
 #include <atomic>
+#include <unordered_map>
 #include <deque>
 #include <memory>
 #include <string>
@@ -81,7 +83,7 @@ private:
     void processRemovals();
     void onConnectionLost(Member& m, const std::string& reason);
 
-    void startGame(Member& host);
+    void startGame(Member& host, bool tutorial = false);
     void returnToLobby();
     void addBot();
     void ensureHost();
@@ -90,6 +92,9 @@ private:
     void chatFrom(uint8_t memberId, Text text, bool wolves, uint32_t replyTo = 0, bool defense = false);
     void queueBotChat(uint8_t speaker, const Text& text, ChatChannel channel, uint32_t id, const ChatQuote* quote);
     void processBotChat(double now);
+    void askWitnesses(Member& asker, uint32_t first, uint32_t second);
+    void updateHearing();
+    void callWitness();
     void clearBotChat();
     void deliverNotice(const Notice& notice);
     void broadcastNotice(NoticeKind kind, const Text& text);
@@ -129,12 +134,17 @@ private:
         uint32_t id = 0;
         ChatQuote quote;
     };
+    HeardChat* findWitnessStatement(uint32_t id);
+    std::unordered_map<uint32_t, HeardChat> m_olderStatements;
     struct PendingChat {
         HeardChat line;
         Phase phase;
         uint64_t ticket;
         double deadline;
     };
+    struct Hearing { std::array<HeardChat, 2> lines; size_t turn = 0; double calledAt = 0; bool answered = false; };
+    std::optional<Hearing> m_hearing;
+    int m_hearingDay = -1;
     uint32_t m_nextChatId = 1;
     std::deque<HeardChat> m_languageHistory;
     std::deque<PendingChat> m_languageChats;

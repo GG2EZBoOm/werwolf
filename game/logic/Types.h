@@ -121,6 +121,8 @@ enum class Interaction : uint8_t {
     ChooseSide, // Wolfshund (Ziel 0 = Dorf, 1 = Rudel)
     Mark,       // Rabe
     NameSuccessor, // sterbender Hauptmann
+    WindowLantern,
+    GhostTip,
     Bite,       // Vampir saugt ein Opfer aus
 };
 
@@ -153,6 +155,8 @@ enum AbilityBits : uint32_t {
     AbilityMark = 1u << 25,
     AbilityNameSuccessor = 1u << 26,
     AbilityBetray = 1u << 27, // Weißer Werwolf darf einen Werwolf reißen
+    AbilityWindowLantern = 1u << 29,
+    AbilityGhostTip = 1u << 30,
     AbilityBite = 1u << 28,   // Vampir beißt (einmal je Nacht für den ganzen Clan)
 };
 
@@ -287,6 +291,9 @@ struct GameView {
     std::vector<Text> highlights; // Only sent after the match is over.
     uint8_t defenderA = kNoPlayer, defenderB = kNoPlayer;
     bool defenseOpen = false;
+    Text lesson; // Current instructions in the introductory case.
+    uint32_t windowLanterns = 0; // Bits by player ID, public only at night.
+    uint8_t ghostTip = kNoPlayer; // Only the owner's prediction.
 
     const PlayerView* player(uint8_t id) const;
     const PlayerView* me() const { return player(you); }
