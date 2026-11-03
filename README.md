@@ -333,7 +333,8 @@ mit und sprechen im Geisterchat. Vor einer Hinrichtungswahl können sie auf eine
 In der ersten Nacht und danach jede zweite Nacht fällt ein kurzer Regenschauer. Sobald er aufhört,
 nennt der Erzähler das Haus, vor dem der Weg aufgeweicht ist. Auf diesem sieben Meter langen Stück
 hinterlassen Lebende beim Gehen und Rennen Abdrücke. Die breite Vorderseite des Schuhs zeigt die
-Laufrichtung, die schmale Ferse liegt hinten. Auch wer rückwärts geht, hinterlässt eine Spur in Bewegungsrichtung.
+Laufrichtung, die schmale Ferse liegt hinten. Die Abdrücke liegen einzeln direkt auf dem vorhandenen Boden.
+Auch wer rückwärts geht, hinterlässt eine Spur in Bewegungsrichtung.
 
 Geh nah an einen Abdruck heran und drücke **T**, um zu lesen, ob er auf den Hauseingang zu, davon weg
 oder daran vorbei führt. Jeder Schuh hinterlässt die gleiche Form. Ein Bot kann am Morgen von einem

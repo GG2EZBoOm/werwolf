@@ -1196,7 +1196,10 @@ TEST(RainLeavesAnonymousDirectionalTracksOnlyOnTheShortPath) {
     eng::ByteWriter bytes; both.write(bytes); eng::ByteReader wire(bytes.data());
     GameView copy;
     CHECK(copy.read(wire) && copy.mudHouse == both.mudHouse && copy.footprints.size() == both.footprints.size());
-    if (!copy.footprints.empty()) CHECK_EQ(copy.footprints.back().heading, both.footprints.back().heading);
+    if (!copy.footprints.empty()) {
+        CHECK_EQ(copy.footprints.back().heading, both.footprints.back().heading);
+        CHECK_EQ(copy.footprints.back().left, both.footprints.back().left);
+    }
     m.teleport(3, w.houses()[wet.mudHouse].doorInside);
     CHECK(m.interact(3, Interaction::DoorToggle, wet.mudHouse).empty());
     CHECK(m.viewFor(3).footprints.empty());

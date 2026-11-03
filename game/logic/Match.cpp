@@ -358,7 +358,7 @@ void Match::leaveFootprints(Player& p, Vec2 from, Vec2 to) {
         const Vec2 step = from + forward * p.nextFootstep + side * (p.leftStep ? -.11f : .11f);
         if (m_world->onMudPath(m_mudHouse, step)) {
             if (m_footprints.size() == kMaxFootprints) m_footprints.erase(m_footprints.begin());
-            m_footprints.push_back({step.x, step.y, std::atan2(forward.x, forward.y)});
+            m_footprints.push_back({step.x, step.y, std::atan2(forward.x, forward.y), p.leftStep});
         }
         p.nextFootstep += .78f;
     }

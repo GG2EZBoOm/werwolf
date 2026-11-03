@@ -258,6 +258,7 @@ struct PlayerView {
 
 struct Footprint {
     float x, z, heading; // Toe direction in world space. Anonymous, including on the wire.
+    bool left;
 };
 constexpr size_t kMaxFootprints = 64;
 constexpr float kReadFootprintRange = 2.5f;

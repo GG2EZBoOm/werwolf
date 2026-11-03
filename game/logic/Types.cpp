@@ -610,7 +610,7 @@ void GameView::write(eng::ByteWriter& w) const {
     if (mudHouse != kNoPlayer) {
         w.boolean(raining); w.f32(mudWetness);
         w.u8(static_cast<uint8_t>(footprints.size()));
-        for (const auto& step : footprints) { w.f32(step.x); w.f32(step.z); w.f32(step.heading); }
+        for (const auto& step : footprints) { w.f32(step.x); w.f32(step.z); w.f32(step.heading); w.boolean(step.left); }
     }
 }
 
@@ -697,7 +697,7 @@ bool GameView::read(eng::ByteReader& r) {
         const auto n = r.u8();
         if (mudHouse >= 32 || n > kMaxFootprints || !std::isfinite(mudWetness) || mudWetness < 0 || mudWetness > 1) return false;
         for (uint8_t i = 0; i < n; ++i) {
-            const Footprint step{r.f32(), r.f32(), r.f32()};
+            const Footprint step{r.f32(), r.f32(), r.f32(), r.boolean()};
             if (!std::isfinite(step.x) || !std::isfinite(step.z) || !std::isfinite(step.heading)) return false;
             footprints.push_back(step);
         }

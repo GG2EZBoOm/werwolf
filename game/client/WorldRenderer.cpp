@@ -1,6 +1,7 @@
 #include "client/WorldRenderer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace ww {
@@ -1043,20 +1044,40 @@ void buildTree(MeshBuilder& b, const Tree& tree) {
 }
 
 void WorldRenderer::build(const World& world) {
-    MeshBuilder sole;
-    // Two separate impressions. The broad forefoot points along local +Z.
-    auto tread = [&](std::initializer_list<Vec2> outline, float centerZ) {
-        Vec2 prev = *(outline.end() - 1);
-        for (Vec2 next : outline) {
-            sole.triangle({0, 0, centerZ}, {prev.x, 0, prev.y}, {next.x, 0, next.y});
-            prev = next;
-        }
-    };
-    tread({{-.07f,.25f}, {.065f,.25f}, {.125f,.18f}, {.135f,.055f}, {.095f,-.02f},
-           {.06f,-.075f}, {-.075f,-.065f}, {-.125f,.035f}, {-.12f,.155f}}, .08f);
-    tread({{-.074f,-.10f}, {.07f,-.11f}, {.078f,-.195f}, {.045f,-.24f},
-           {-.05f,-.24f}, {-.08f,-.20f}}, -.16f);
-    sole.uploadTo(m_footprint);
+    // A rounded toe, narrow instep and separate heel. Small gaps in the tread expose the terrain itself.
+    struct SoleRow { float z, inside, outside; };
+    for (int left = 0; left < 2; ++left) {
+        MeshBuilder sole;
+        const float mirror = left ? -1.f : 1.f;
+        auto band = [&](std::initializer_list<SoleRow> rows) {
+            auto section = [&](const SoleRow& row) {
+                const float mid = (row.inside + row.outside) * .5f;
+                const float radius = (row.outside - row.inside) * .5f;
+                std::array<Vec3, 4> points{};
+                constexpr std::array offsets{-1.f, -.78f, .78f, 1.f};
+                for (size_t i = 0; i < points.size(); ++i) {
+                    const float x = mid + radius * offsets[i];
+                    points[i] = {mirror * x, (i == 0 || i == 3) ? .004f : 0.f, row.z + .17f * x};
+                }
+                return points;
+            };
+            auto prev = section(*rows.begin());
+            for (auto row = rows.begin() + 1; row != rows.end(); ++row) {
+                const auto next = section(*row);
+                for (int i = 0; i < 3; ++i) {
+                    sole.setColor(i == 1 ? 0xEFE8DC : (i == 0 ? 0xD5C9BD : 0xFFF6EA));
+                    if (left) sole.quad(prev[i], prev[i+1], next[i+1], next[i]);
+                    else sole.quad(prev[i], next[i], next[i+1], prev[i+1]);
+                }
+                prev = next;
+            }
+        };
+        band({{-.205f,-.037f,.029f}, {-.195f,-.065f,.061f}, {-.160f,-.079f,.080f}, {-.104f,-.073f,.079f}});
+        band({{-.080f,-.030f,.075f}, {-.035f,-.039f,.086f}, {.009f,-.073f,.096f}});
+        band({{.022f,-.082f,.098f}, {.062f,-.094f,.104f}, {.105f,-.093f,.095f}});
+        band({{.117f,-.092f,.091f}, {.157f,-.088f,.073f}, {.186f,-.075f,.049f}, {.202f,-.050f,.015f}});
+        sole.uploadTo(m_footprint[left]);
+    }
     MeshBuilder rain;
     rain.beam({0, 0, 0}, {.035f, .42f, 0}, .014f);
     rain.uploadTo(m_raindrop);
@@ -1078,22 +1099,6 @@ void WorldRenderer::build(const World& world) {
             buildChapelShell(shell, glass, h, rise, g.flames);
             buildChapelRoof(roof, h);
         } else {
-            MeshBuilder mud;
-            // Conform the strip to the terrain and give its edges a slightly uneven outline.
-            auto edge = [&](int row, int side) {
-                const float along = row * (World::kMudLength / 20);
-                const float width = World::mudWidthAt(along);
-                const Vec2 p = world.mudPoint(static_cast<int>(i), side * .5f * width, along);
-                return Vec3{p.x, world.terrainHeight(p.x, p.y) + .025f, p.y};
-            };
-            mud.setColorJitter(.035f);
-            for (int row = 0; row < 20; ++row) {
-                for (int side = -2; side < 2; ++side) {
-                    mud.setColor((side == -1 || side == 0) ? 0xD6C8BD : 0xFFF2DE);
-                    mud.quad(edge(row, side), edge(row + 1, side), edge(row + 1, side + 1), edge(row, side + 1));
-                }
-            }
-            mud.uploadTo(g.mud);
             buildHouseShell(shell, h);
             buildHouseRoof(roof, h);
         }
@@ -1316,17 +1321,16 @@ void WorldRenderer::drawHouses(eng::Renderer3D& r, float night, float time) cons
 
 void WorldRenderer::drawMud(eng::Renderer3D& r, const World& world, const GameView& v, Vec3 observer, float time) const {
     if (v.mudHouse >= m_houses.size()) return;
-    const auto& patch = m_houses[v.mudHouse].mud;
-    if (!patch.valid()) return;
-    const Color mud = eng::lerp(hex(0x887356), hex(0x6E5138), v.mudWetness);
-    r.draw(patch, Mat4::identity(), mud, 0, false);
     for (const auto& step : v.footprints) {
         const float y = world.terrainHeight(step.x, step.z);
-        Mat4 pose = eng::trs({step.x, y + .045f, step.z}, step.heading);
-        // Tilt each sole with the local slope so heel and toe stay above the mud.
+        const float toeOut = step.left ? -.11f : .11f;
+        Mat4 pose = eng::trs({step.x, y + .012f, step.z}, step.heading + toeOut);
+        // Lay the imprint on the ground's slope and soften its contrast as the soil dries.
         pose.m[1] = (world.terrainHeight(step.x + .25f * pose.m[0], step.z + .25f * pose.m[2]) - y) * 4;
         pose.m[9] = (world.terrainHeight(step.x + .25f * pose.m[8], step.z + .25f * pose.m[10]) - y) * 4;
-        r.draw(m_footprint, pose, eng::lerp(mud, hex(0x291C15), v.mudWetness), 0, false);
+        const Color ground = terrainColor(world, {step.x, y, step.z}, {0, 1, 0});
+        const Color pressed{ground.r * .52f + .025f, ground.g * .46f + .016f, ground.b * .43f + .012f};
+        r.draw(m_footprint[step.left], pose, eng::lerp(ground, pressed, v.mudWetness), 0, false);
     }
     if (!v.raining || world.houseAt({observer.x, observer.z}) >= 0) return;
     for (int i = 0; i < 75; ++i) {
