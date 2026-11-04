@@ -66,6 +66,7 @@ public:
     const std::string& name() const { return m_name; }
     float timeLeft(double now) const;
     float hauntTimeLeft(double now) const;
+    float gallowsTime(double now) const; // Sekunden seit Beginn des aktuellen Abschnitts am Galgen
 
     // Positionen aller Figuren, leicht verzögert und weich interpoliert
     std::vector<EntityState> entities(double now) const;

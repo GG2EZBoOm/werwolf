@@ -856,6 +856,99 @@ void buildBell(MeshBuilder& b, Vec3 pos) {
     b.setTransform(Mat4::identity());
 }
 
+// --- Galgen --------------------------------------------------------------------
+
+constexpr uint32_t kRopeColor = 0x8A7350;
+
+void buildGallows(MeshBuilder& b, const World& world) {
+    using namespace gallows;
+    const Gallows& g = world.gallows();
+    if (!g.built) return;
+    const float top = g.floorY - g.position.y; // Plattform über dem Fuß (lokal)
+    const float hw = kWidth * 0.5f, hd = kDepth * 0.5f, hx = kTrapHalfX, hz = kTrapHalfZ;
+    const Vec2 trap = kTrapdoor;
+    auto groundAt = [&](Vec2 local) {
+        const Vec2 w = world.gallowsToWorld(local);
+        return world.terrainHeight(w.x, w.y) - g.position.y;
+    };
+    b.setTransform(eng::trs(g.position, g.yaw));
+    b.setColorJitter(0.07f);
+
+    // Eckpfosten, ein Stück eingegraben
+    b.setColor(0x4A3727);
+    for (float x : {-hw + 0.12f, hw - 0.12f})
+        for (float z : {-hd + 0.12f, hd - 0.12f}) {
+            const float foot = groundAt({x, z}) - 0.25f;
+            b.box({x, (foot + top) * 0.5f, z}, {0.24f, top - foot, 0.24f});
+        }
+    // Andreaskreuze links, rechts und hinten; vorn nur ein Riegel, damit das Dorf sieht, was geschieht
+    b.setColor(0x56402E);
+    const float low = 0.35f, high = top - 0.32f;
+    for (float x : {-hw + 0.12f, hw - 0.12f}) {
+        b.beam({x, low, -hd + 0.25f}, {x, high, hd - 0.25f}, 0.1f);
+        b.beam({x, high, -hd + 0.25f}, {x, low, hd - 0.25f}, 0.1f);
+    }
+    b.beam({-hw + 0.25f, low, -hd + 0.12f}, {hw - 0.25f, high, -hd + 0.12f}, 0.1f);
+    b.beam({-hw + 0.25f, high, -hd + 0.12f}, {hw - 0.25f, low, -hd + 0.12f}, 0.1f);
+    b.box({0, top * 0.42f, hd - 0.12f}, {kWidth - 0.3f, 0.14f, 0.1f});
+    // Balkenlage unter den Dielen, ringsum um die Falltür
+    b.setColor(0x4A3727);
+    for (float z : {-hd + 0.12f, trap.y - hz - 0.06f, trap.y + hz + 0.06f, hd - 0.12f}) b.box({0, top - 0.18f, z}, {kWidth, 0.16f, 0.12f});
+    for (float x : {trap.x - hx - 0.06f, trap.x + hx + 0.06f}) b.box({x, top - 0.18f, 0}, {0.12f, 0.16f, kDepth});
+
+    // Dielen mit Fugen; über der Falltür fehlen sie
+    b.setColor(0x7A5E42);
+    constexpr int kPlanks = 10;
+    const float pw = kWidth / static_cast<float>(kPlanks);
+    for (int i = 0; i < kPlanks; ++i) {
+        const float x = -hw + pw * (static_cast<float>(i) + 0.5f);
+        if (std::fabs(x - trap.x) > hx) {
+            b.box({x, top - 0.05f, 0}, {pw - 0.025f, 0.1f, kDepth});
+            continue;
+        }
+        const float back = trap.y - hz, front = trap.y + hz;
+        b.box({x, top - 0.05f, (-hd + back) * 0.5f}, {pw - 0.025f, 0.1f, back + hd});
+        b.box({x, top - 0.05f, (front + hd) * 0.5f}, {pw - 0.025f, 0.1f, hd - front});
+    }
+
+    // Galgen: zwei Pfosten, Querbalken mit Kopfbändern, Haken für das Seil
+    b.setColor(0x45332A);
+    const float beamY = top + kBeamHeight;
+    for (float s : {-1.0f, 1.0f}) {
+        b.box({s * kPostX, top + (kBeamHeight + 0.26f) * 0.5f, trap.y}, {0.24f, kBeamHeight + 0.26f, 0.24f});
+        b.beam({s * kPostX, beamY - 0.8f, trap.y}, {s * (kPostX - 0.62f), beamY + 0.02f, trap.y}, 0.12f);
+        b.beam({s * kPostX, top + 0.55f, trap.y}, {s * kPostX, top + 0.02f, trap.y - 0.5f}, 0.1f);
+        b.beam({s * kPostX, top + 0.55f, trap.y}, {s * kPostX, top + 0.02f, trap.y + 0.5f}, 0.1f);
+    }
+    b.box({0, beamY + 0.13f, trap.y}, {kPostX * 2.0f + 0.6f, 0.26f, 0.26f});
+    b.setColor(0x2A2522);
+    b.box({trap.x, beamY - 0.04f, trap.y}, {0.07f, 0.08f, 0.07f});
+    // Sockel des Hebels
+    b.setColor(0x3A2C22);
+    b.box({trap.x + hx + 0.45f, top + 0.12f, trap.y + hz - 0.1f}, {0.22f, 0.24f, 0.22f});
+
+    // Treppe an der rechten Seite: Wangen, Stufen und ein Handlauf
+    const float x0 = hw, x1 = hw + kStairLength;
+    const float foot = groundAt({x1, kStairZ});
+    b.setColor(0x56402E);
+    for (float s : {-1.0f, 1.0f}) {
+        const float z = kStairZ + s * (kStairWidth * 0.5f - 0.06f);
+        b.beam({x1 + 0.05f, foot - 0.08f, z}, {x0, top - 0.1f, z}, 0.12f);
+    }
+    b.setColor(0x7A5E42);
+    for (int i = 0; i < kSteps; ++i) {
+        const float f = (static_cast<float>(i) + 0.5f) / static_cast<float>(kSteps);
+        b.box({x1 - f * kStairLength, eng::lerp(foot, top, f) - 0.035f, kStairZ},
+              {kStairLength / static_cast<float>(kSteps) * 0.92f, 0.07f, kStairWidth - 0.1f});
+    }
+    b.setColor(0x4A3727);
+    const float railZ = kStairZ - kStairWidth * 0.5f - 0.02f;
+    b.box({x1 - 0.15f, foot + 0.5f, railZ}, {0.08f, 1.0f, 0.08f});
+    b.box({x0 + 0.1f, top + 0.5f, railZ}, {0.08f, 1.0f, 0.08f});
+    b.beam({x1 - 0.15f, foot + 0.95f, railZ}, {x0 + 0.1f, top + 0.95f, railZ}, 0.07f);
+    b.setTransform(Mat4::identity());
+}
+
 void buildBonfireBase(MeshBuilder& b, Vec3 pos) {
     b.setTransform(Mat4::translation(pos));
     b.setColorJitter(0.15f);
@@ -1133,6 +1226,49 @@ void WorldRenderer::build(const World& world) {
     chapelReinforced.uploadTo(m_chapelDoorReinforced);
     buildWell(builders[static_cast<size_t>(chunkOf(world.well().x, world.well().z))], world.well());
     buildBell(builders[static_cast<size_t>(chunkOf(world.bell().x, world.bell().z))], world.bell());
+    {
+        const Gallows& g = world.gallows();
+        m_hasGallows = g.built;
+        m_gallowsFrame = eng::trs(g.position, g.yaw);
+        m_gallowsTop = g.floorY - g.position.y;
+        buildGallows(builders[static_cast<size_t>(chunkOf(g.position.x, g.position.z))], world);
+        using namespace gallows;
+        MeshBuilder leaf, lever, rope, noose, coil;
+        // ein Flügel der Falltür: Angel bei x = 0, zwei Dielen zur Mitte hin, darunter Eisenbänder
+        leaf.setColorJitter(0.06f);
+        leaf.setColor(0x7A5E42);
+        for (int i = 0; i < 2; ++i)
+            leaf.box({kTrapHalfX * (0.25f + 0.5f * static_cast<float>(i)), -0.05f, 0}, {kTrapHalfX * 0.5f - 0.02f, 0.1f, kTrapHalfZ * 2.0f - 0.02f});
+        leaf.setColor(0x2A2522);
+        for (float z : {-kTrapHalfZ + 0.15f, kTrapHalfZ - 0.15f}) leaf.box({kTrapHalfX * 0.5f, -0.11f, z}, {kTrapHalfX - 0.06f, 0.025f, 0.07f});
+        leaf.uploadTo(m_trapLeaf);
+        lever.setColor(0x4A3727);
+        lever.box({0, 0.5f, 0}, {0.07f, 1.0f, 0.07f});
+        lever.setColor(0x2A2522);
+        lever.box({0, 0.02f, 0}, {0.13f, 0.06f, 0.13f});
+        lever.box({0, 0.98f, 0}, {0.2f, 0.05f, 0.05f});
+        lever.uploadTo(m_lever);
+        rope.setColor(kRopeColor);
+        rope.cylinder({0, 0, 0}, 1.0f, 1.0f, 6, false);
+        rope.uploadTo(m_ropeUnit);
+        // Schlinge: Ring um den Hals, der Knoten mit seinen Wicklungen seitlich
+        noose.setColor(kRopeColor);
+        for (int i = 0; i < 14; ++i) {
+            const float a0 = static_cast<float>(i) / 14.0f * 2.0f * kPi, a1 = static_cast<float>(i + 1) / 14.0f * 2.0f * kPi;
+            noose.beam({std::cos(a0) * kNooseRadius, 0, std::sin(a0) * kNooseRadius}, {std::cos(a1) * kNooseRadius, 0, std::sin(a1) * kNooseRadius}, 0.035f);
+        }
+        noose.setColor(0x7A6446);
+        noose.cylinder({kNooseKnot.x, kNooseKnot.y - 0.13f, kNooseKnot.z}, 0.045f, 0.17f, 7);
+        noose.uploadTo(m_noose);
+        coil.setColor(kRopeColor);
+        for (int k = 0; k < 3; ++k)
+            for (int i = 0; i < 10; ++i) {
+                const float a0 = static_cast<float>(i) / 10.0f * 2.0f * kPi, a1 = static_cast<float>(i + 1) / 10.0f * 2.0f * kPi;
+                const float y = -0.06f * static_cast<float>(k);
+                coil.beam({std::cos(a0) * 0.12f, y, std::sin(a0) * 0.12f}, {std::cos(a1) * 0.12f, y, std::sin(a1) * 0.12f}, 0.04f);
+            }
+        coil.uploadTo(m_ropeCoil);
+    }
     m_bonfire = world.bonfire();
     buildBonfireBase(builders[static_cast<size_t>(chunkOf(0, 0))], m_bonfire);
 
@@ -1329,6 +1465,41 @@ void WorldRenderer::drawHouses(eng::Renderer3D& r, float night, float time) cons
             r.particle(p, (1.0f - life) * 1.5f + 0.3f, eng::lerp(Vec3{5.0f, 3.0f, 1.0f}, Vec3{3.0f, 0.5f, 0.08f}, life), 1.0f - life);
         }
     }
+}
+
+void WorldRenderer::drawGallows(eng::Renderer3D& r, const GallowsMotion& motion) const {
+    if (!m_hasGallows) return;
+    using namespace gallows;
+    // die Flügel hängen an den Außenkanten und klappen nach unten
+    for (float s : {-1.0f, 1.0f})
+        r.draw(m_trapLeaf, m_gallowsFrame * Mat4::translation({kTrapdoor.x + s * kTrapHalfX, m_gallowsTop, kTrapdoor.y}) *
+                               Mat4::rotationY(s > 0.0f ? kPi : 0.0f) * Mat4::rotationZ(-motion.trapdoor));
+    r.draw(m_lever, m_gallowsFrame * Mat4::translation({kTrapdoor.x + kTrapHalfX + 0.45f, m_gallowsTop + 0.24f, kTrapdoor.y + kTrapHalfZ - 0.1f}) *
+                        Mat4::rotationX(-0.25f + 1.1f * motion.lever));
+}
+
+void WorldRenderer::drawRope(eng::Renderer3D& r, Vec3 from, Vec3 to) const {
+    const Vec3 d = to - from;
+    const float len = d.length();
+    if (len < 0.01f || !m_hasGallows) return;
+    const Vec3 up = d / len;
+    const Vec3 side = eng::cross(std::fabs(up.y) < 0.9f ? Vec3{0, 1, 0} : Vec3{1, 0, 0}, up).normalized();
+    const Vec3 forward = eng::cross(side, up);
+    constexpr float kThick = 0.018f;
+    Mat4 m;
+    m.m[0] = side.x * kThick; m.m[1] = side.y * kThick; m.m[2] = side.z * kThick;
+    m.m[4] = up.x * len; m.m[5] = up.y * len; m.m[6] = up.z * len;
+    m.m[8] = forward.x * kThick; m.m[9] = forward.y * kThick; m.m[10] = forward.z * kThick;
+    m.m[12] = from.x; m.m[13] = from.y; m.m[14] = from.z;
+    r.draw(m_ropeUnit, m);
+}
+
+void WorldRenderer::drawNoose(eng::Renderer3D& r, const Mat4& frame) const {
+    if (m_hasGallows) r.draw(m_noose, frame);
+}
+
+void WorldRenderer::drawRopeCoil(eng::Renderer3D& r, Vec3 at) const {
+    if (m_hasGallows) r.draw(m_ropeCoil, Mat4::translation(at));
 }
 
 void WorldRenderer::drawMud(eng::Renderer3D& r, const World& world, const GameView& v, Vec3 observer, float time) const {

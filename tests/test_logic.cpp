@@ -62,12 +62,22 @@ void runUntil(Match& m, Phase target, float maxSeconds = 900.0f) {
     for (float t = 0; t < maxSeconds && m.phase() != target; t += 0.1f) m.update(0.1f);
 }
 
+// Wartet, bis das Urteil am Galgen vollstreckt ist (oder der Dorfdepp wieder unten steht)
+void untilVerdict(Match& m, float maxSeconds = 60.0f) {
+    auto walking = [&] {
+        const GallowsStage s = m.gallowsStage();
+        return s == GallowsStage::Led || s == GallowsStage::Noose || s == GallowsStage::Pardoned;
+    };
+    for (float t = 0; t < maxSeconds && m.phase() == Phase::Execution && walking(); t += 0.1f) m.update(0.1f);
+}
+
 // Lässt alle Lebenden gegen ein Ziel stimmen (außer dem Ziel selbst) und wartet auf das Urteil
 void voteOut(Match& m, uint8_t target) {
     runUntil(m, Phase::Vote);
     for (const auto& p : m.players())
         if (p.alive && p.id != target) m.interact(p.id, Interaction::Vote, target);
     runUntil(m, Phase::Execution);
+    untilVerdict(m);
 }
 
 // Stellt zwei Spieler nebeneinander (auf freien Platz neben dem Feuer)
@@ -354,7 +364,7 @@ TEST(GlockeVersammlungUndAbstimmung) {
     CHECK(!m.interact(0, Interaction::Vote, 0).empty()); // nicht für sich selbst
     m.interact(0, Interaction::Vote, 1);
     CHECK(m.timeLeft() <= 4.01f);
-    runUntil(m, Phase::GameOver, 30.0f);
+    runUntil(m, Phase::GameOver, 60.0f);
     CHECK(!alive(m, 0));
     CHECK(m.winner() == Team::Village);
 }
@@ -520,6 +530,7 @@ TEST(BuergermeisterDorfdeppUndNarr) {
         m.interact(5, Interaction::Vote, 3);
         m.interact(3, Interaction::Vote, 2);
         runUntil(m, Phase::Execution);
+        untilVerdict(m);
         CHECK(alive(m, 2)); // der Dorfdepp wird begnadigt
         CHECK(m.find(2)->idiotRevealed);
         CHECK(m.viewFor(4).players[2].role == Role::Idiot);
@@ -659,6 +670,7 @@ TEST(DiebUndSuendenbock) {
         m.interact(5, Interaction::Vote, 2);
         m.interact(0, Interaction::Vote, 5);
         runUntil(m, Phase::Execution); // 3 und 5 je zwei Stimmen
+        untilVerdict(m);
         CHECK(!alive(m, 1));
         CHECK(alive(m, 3) && alive(m, 5));
         CHECK(m.find(1)->deathCause == DeathCause::Scapegoat);
@@ -682,6 +694,7 @@ TEST(FuchsUndRabe) {
     runUntil(m, Phase::Vote);
     m.interact(4, Interaction::Vote, 5);
     runUntil(m, Phase::Execution);
+    untilVerdict(m);
     CHECK(!alive(m, 3)); // 2 Rabenstimmen gegen 1
     CHECK(alive(m, 5));
     // In der nächsten Nacht findet der Fuchs keinen Wolf und verliert seine Nase
@@ -731,6 +744,7 @@ TEST(RichterVerlangtZweiteAbstimmung) {
     CHECK(!m.viewFor(1).can(AbilitySecondVote));
     for (int id : {0, 1, 2, 4, 5, 6}) m.interact(static_cast<uint8_t>(id), Interaction::Vote, 3);
     runUntil(m, Phase::Execution);
+    untilVerdict(m);
     CHECK(!alive(m, 3));
     runUntil(m, Phase::Vote, 30.0f);
     CHECK(m.phase() == Phase::Vote); // gleich noch einmal
@@ -1042,6 +1056,7 @@ TEST(CloseVoteAllowsOneDefenseEachThenAChangeOfVoteAndPrivateEpilogue) {
     CHECK(m.phase() == Phase::Vote && !m.defenseOpen() && m.timeLeft() >= 7.9f);
     CHECK(m.interact(2, Interaction::Vote, 1).empty());
     run(m, 8.2f);
+    untilVerdict(m);
     CHECK(!alive(m,1) && alive(m,2));
     CHECK(m.viewFor(3).highlights.empty());
     m.playerLeft(0);
@@ -1108,6 +1123,7 @@ TEST(GhostPredictionIsPrivateAndSettledOnActualVerdict) {
     m.takeNotices();
     CHECK(m.interact(3, Interaction::Vote, 1).empty());
     runUntil(m, Phase::Execution);
+    untilVerdict(m);
     bool result = false;
     for (const auto& n : m.takeNotices()) if (n.text.de.find("tippte auf") != std::string::npos) {
         CHECK(n.audience == Notice::Audience::Dead && n.text.de.find("Treffer!") != std::string::npos);
@@ -1287,6 +1303,97 @@ TEST(OnlyConnectedHumanGhostsCountIncludingAfterARevival) {
     CHECK(m.find(4)->alive && m.viewFor(4).hauntBallot.voters == 0);
     CHECK(!m.interact(4, Interaction::HauntTrigger, 1).empty());
     CHECK(m.viewFor(5).hauntBallot.canTrigger() && m.viewFor(5).hauntBallot.bells == 0);
+}
+
+TEST(GalgenMitFalltuer) {
+    // Der Galgen steht frei am Rand des Platzes; hinauf führt nur die Treppe
+    const World& w = testWorld();
+    const Gallows& g = w.gallows();
+    CHECK(g.built);
+    const Vec3 trap = w.gallowsTrapdoor();
+    const Vec2 center{g.position.x, g.position.z};
+    CHECK(std::fabs(w.height(trap.x, trap.z) - g.floorY) < 0.001f);
+    CHECK(g.floorY - w.terrainHeight(trap.x, trap.z) > 2.0f);
+    CHECK(w.blocked({trap.x, trap.z}, kPlayerRadius));
+    for (const House& h : w.houses()) CHECK((Vec2{h.position.x, h.position.z} - center).length() > 9.0f);
+    for (const Prop& p : w.props()) CHECK((Vec2{p.position.x, p.position.z} - center).length() > 3.5f);
+    const auto route = w.gallowsRoute({7.0f, 0.0f});
+    CHECK(route.size() >= 4);
+    const Vec2 approach = route[route.size() - 4], foot = route[route.size() - 3], top = route[route.size() - 2];
+    CHECK(!w.blocked(approach, kPlayerRadius));
+    CHECK(std::fabs(w.height(foot.x, foot.y) - w.terrainHeight(foot.x, foot.y)) < 0.4f);
+    CHECK(std::fabs(w.height(top.x, top.y) - g.floorY) < 0.05f);
+    for (const Vec2 p : route) CHECK(p.length() > World::kSquareRadius - 0.1f); // nicht quer durchs Feuer
+
+    Match m = makeMatch({W, V, V, V, V, V});
+    runUntil(m, Phase::Vote);
+    for (uint8_t id : {0, 1, 2, 4, 5}) m.interact(id, Interaction::Vote, 3);
+    runUntil(m, Phase::Execution);
+    CHECK(alive(m, 3));
+    CHECK(m.gallowsStage() == GallowsStage::Led && m.gallowsPlayer() == 3);
+    // Wer geführt wird, steuert sich nicht selbst
+    const Vec3 before = m.find(3)->position;
+    m.movePlayer(3, before.x + 1.0f, before.z, 0.0f, 0);
+    CHECK(distanceXZ(m.find(3)->position, before) < 0.01f);
+    // die Treppe hinauf bis auf die Falltür
+    float highest = 0.0f;
+    for (float t = 0; t < 40.0f && m.gallowsStage() == GallowsStage::Led; t += 0.1f) {
+        m.update(0.1f);
+        highest = std::max(highest, m.find(3)->position.y);
+    }
+    CHECK(m.gallowsStage() == GallowsStage::Noose && alive(m, 3));
+    CHECK(distanceXZ(m.find(3)->position, trap) < 0.05f);
+    CHECK(std::fabs(highest - g.floorY) < 0.01f);
+    CHECK(std::fabs(wrapAngle(m.find(3)->yaw - g.yaw)) < 0.01f); // Blick zur Menge
+    // Der Spielzustand nennt den Verurteilten und den Abschnitt
+    {
+        const GameView v = m.viewFor(1);
+        eng::ByteWriter out;
+        v.write(out);
+        eng::ByteReader in(out.data());
+        GameView copy;
+        CHECK(copy.read(in));
+        CHECK(copy.gallows == GallowsStage::Noose && copy.gallowsPlayer == 3 && copy.gallowsTime < 1.0f);
+    }
+    run(m, 3.0f);
+    CHECK(alive(m, 3)); // noch unter der Schlinge
+    untilVerdict(m);
+    CHECK(!alive(m, 3));
+    CHECK(m.find(3)->deathCause == DeathCause::Vote);
+    CHECK(m.gallowsStage() == GallowsStage::Hanged && m.phase() == Phase::Execution);
+    CHECK(m.timeLeft() >= 6.0f); // der Körper hängt noch eine Weile
+    bool corpse = false;
+    for (const auto& e : m.entitiesFor(1)) corpse = corpse || (e.id == 3 && e.kind == EntityCorpse);
+    CHECK(corpse);
+    runUntil(m, Phase::Night);
+    CHECK(m.find(3)->buried);
+    CHECK(m.gallowsStage() == GallowsStage::Idle);
+
+    // Der Dorfdepp wird unter der Schlinge erkannt, geht die Treppe wieder hinunter und ist frei
+    Match idiot = makeMatch({W, Role::Idiot, V, V, V, V});
+    runUntil(idiot, Phase::Vote);
+    for (uint8_t id : {0, 2, 3, 4, 5}) idiot.interact(id, Interaction::Vote, 1);
+    runUntil(idiot, Phase::Execution);
+    for (float t = 0; t < 40.0f && idiot.gallowsStage() == GallowsStage::Led; t += 0.1f) idiot.update(0.1f);
+    CHECK(!idiot.find(1)->idiotRevealed); // erst unter der Schlinge
+    untilVerdict(idiot);
+    CHECK(alive(idiot, 1) && idiot.find(1)->idiotRevealed);
+    CHECK(idiot.gallowsStage() == GallowsStage::Idle && idiot.phase() == Phase::Execution);
+    const Vec3 down = idiot.find(1)->position;
+    CHECK(std::fabs(down.y - testWorld().terrainHeight(down.x, down.z)) < 0.05f);
+    idiot.update(0.5f);
+    idiot.movePlayer(1, down.x + 0.5f, down.z, 0.0f, 0);
+    CHECK(distanceXZ(idiot.find(1)->position, down) > 0.4f);
+
+    // Wer sich während der Abstimmung weit entfernt hat, wird geholt
+    Match distant = makeMatch({W, V, V, V, V, V});
+    runUntil(distant, Phase::Vote);
+    distant.teleport(4, testWorld().ground(-40.0f, 5.0f));
+    for (uint8_t id : {0, 1, 2, 3, 5}) distant.interact(id, Interaction::Vote, 4);
+    runUntil(distant, Phase::Execution);
+    CHECK(Vec2(distant.find(4)->position.x, distant.find(4)->position.z).length() < World::kSquareRadius + 1.0f);
+    untilVerdict(distant);
+    CHECK(!alive(distant, 4));
 }
 
 int main() {

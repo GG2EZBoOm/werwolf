@@ -306,6 +306,18 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
     speakPlanned(match, say);
     whisper(match, say);
 
+    // Am Galgen: letzte Worte unter der Schlinge; nach dem Fall reagiert das Dorf auf das Urteil
+    if (view.phase == Phase::Execution && view.gallowsPlayer != kNoPlayer) {
+        if (me->alive && view.gallowsPlayer == m_id && view.gallows == GallowsStage::Noose && m_lastWordsDay != view.day) {
+            m_lastWordsDay = view.day;
+            if (m_rng.chance(0.75f)) speak(say, lastWords(view), false);
+        }
+        if (view.gallows == GallowsStage::Hanged && m_hangingReviewDay != view.day) {
+            m_hangingReviewDay = view.day;
+            review(match, view);
+        }
+    }
+
     // Augenzeuge: wer nachts als (halbe) Bestie gesehen wird, ist verdächtig
     if (me->alive && view.phase == Phase::Night) {
         for (const EntityState& p : match.entitiesFor(m_id)) {
@@ -477,8 +489,16 @@ void Bot::update(float dt, Match& match, const SayFn& say) {
     }
 
     const bool ghost = !me->alive;
+    if (!ghost && match.gallowsPlayer() == m_id) {
+        // wird zum Galgen geführt: der Server bewegt die Figur
+        m_mover.position = me->position;
+        m_mover.yaw = me->yaw;
+        m_mover.velocity = {0, 0};
+        return;
+    }
     m_mover.move(wish, ghost ? kGhostSpeed * 0.5f : speed, dt, match.world(), !ghost, match.closedDoors());
-    if (!ghost) faceSomeone(dt, match); // stehend dreht man sich zu dem, der gerade spricht
+    if (!ghost && view.phase == Phase::Execution && match.gallowsPlayer() != kNoPlayer) faceGallows(dt, match);
+    else if (!ghost) faceSomeone(dt, match); // stehend dreht man sich zu dem, der gerade spricht
     match.movePlayer(m_id, m_mover.position.x, m_mover.position.z, m_mover.yaw, speed > kWalkSpeed ? EntitySprint : 0);
 }
 

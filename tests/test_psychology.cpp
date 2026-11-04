@@ -47,6 +47,11 @@ struct Scene {
     void advance(float seconds) {
         for (float t = 0; t < seconds; t += 0.1f) { match.update(0.1f); bot.update(0.1f, match, say); }
     }
+    // Am Galgen stirbt der Verurteilte erst, wenn nach dem Gang dorthin die Falltür aufgeht
+    void untilHanged() {
+        for (float t = 0; t < 60.0f && match.phase() == Phase::Execution && match.gallowsStage() != GallowsStage::Hanged; t += 0.1f)
+            advance(0.1f);
+    }
     void hear(const std::string& text, bool reply = true) {
         bot.hear(match, 0, Text::same(text), *match.chatChannel(0, false), reply);
     }
@@ -127,6 +132,7 @@ TEST(WrongfulExecutionCreatesAngerAndEnemiesWithoutHiddenKnowledge) {
         CHECK(s.match.interact(4, Interaction::Vote, 3).empty());
         s.advance(0.2f); // observe public votes before execution
         s.phase(Phase::Execution);
+        s.untilHanged();
         CHECK(!s.match.find(3)->alive);
         if (reveal) {
             CHECK(s.bot.feelings().anger >= 0.39f);
@@ -206,6 +212,7 @@ TEST(WolfSacrificesExposedPartnerAndGainsPublicTrust) {
     observer.update(0.1f, s.match, [](uint8_t, const Text&, bool) {});
     const float trustBefore = observer.relationship(1);
     s.phase(Phase::Execution);
+    s.untilHanged();
     observer.update(0.1f, s.match, [](uint8_t, const Text&, bool) {});
     CHECK(!s.match.find(2)->alive);
     CHECK(observer.relationship(1) > trustBefore);
@@ -238,6 +245,7 @@ TEST(AngerInfluencesTheNextVoteAndKnownEvidenceStillWins) {
         s.match.interact(4, Interaction::Vote, 3);
         s.advance(0.2f);
         s.phase(Phase::Execution);
+        s.untilHanged();
         s.phase(Phase::Assembly);
         s.phase(Phase::Vote);
         s.advance(8);

@@ -666,6 +666,7 @@ TEST(ExecutionsTeachFromVotes) {
         for (uint8_t voter : voters) v.match.interact(voter, Interaction::Vote, 3); // Ann is a villager
         v.advance(1.0f);
         phase(v.match, Phase::Execution);
+        for (float t = 0; t < 60.0f && v.match.gallowsStage() != GallowsStage::Hanged; t += 0.1f) v.advance(0.1f);
         v.advance(5.0f);
         CHECK(!v.match.find(3)->alive);
         for (const auto& [id, text] : v.said)

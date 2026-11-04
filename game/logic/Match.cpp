@@ -12,6 +12,11 @@ namespace ww {
 namespace {
 
 constexpr float kExecutionSeconds = 7.0f;
+// Galgen: gemessener Schritt zum Galgen, langsamer auf der Treppe; Schlinge und letzte Worte, dann hängt der Körper
+constexpr float kLeadSpeed = 2.3f;
+constexpr float kClimbSpeed = 1.1f;
+constexpr float kNooseSeconds = 4.5f;
+constexpr float kHangSeconds = 7.0f;
 constexpr float kMorningSeconds = 8.0f;
 constexpr float kVoteGraceSeconds = 4.0f;
 constexpr float kRangeTolerance = 0.8f; // Spielraum für Netzwerkverzögerung
@@ -381,6 +386,7 @@ Text Match::describeFootprint(const Footprint& step) const {
 void Match::movePlayer(uint8_t id, float x, float z, float yaw, uint8_t flags) {
     Player* p = findMutable(id);
     if (!p || m_phase == Phase::GameOver) return;
+    if (p->alive && m_gallows.player == id && m_gallows.stage != GallowsStage::Idle && m_gallows.stage != GallowsStage::Hanged) return; // wird geführt
     Vec2 target{x, z};
     if (target.length() > World::kBoundary) target = target * (World::kBoundary / target.length());
     if (!p->alive) {
@@ -869,6 +875,11 @@ GameView Match::viewFor(uint8_t viewer) const {
     if (me && !me->alive) {
         v.ghostTip = me->ghostTip;
         v.hauntBallot = hauntBallot(*me);
+    }
+    if (m_gallows.stage != GallowsStage::Idle && find(m_gallows.player)) {
+        v.gallows = m_gallows.stage;
+        v.gallowsPlayer = m_gallows.player;
+        v.gallowsTime = static_cast<float>(std::clamp(m_clock - m_gallows.since, 0.0, 600.0));
     }
     if (!over && m_clock < m_hauntUntil) {
         v.haunting = m_haunting;
@@ -1636,6 +1647,7 @@ void Match::update(float dt) {
         m_footprints.clear();
     }
     if (m_phase == Phase::Night) updateTracking();
+    if (m_phase == Phase::Execution) updateGallows(dt);
     updateBear(dt);
 
     m_phaseElapsed += dt;
@@ -1721,6 +1733,7 @@ void Match::advance() {
     case Phase::Assembly: enterVote(); break;
     case Phase::Vote: resolveVote(); break;
     case Phase::Execution:
+        endGallows();
         finishServant();
         if (m_election) {
             m_election = false;
@@ -1948,9 +1961,7 @@ void Match::resolveVote() {
             if (!p.alive || p.role != Role::Scapegoat) continue;
             narrate({"Gleichstand! Das Dorf kann sich nicht einigen – also muss der Sündenbock dran glauben.",
                      "A tie! The village cannot agree – so the scapegoat has to pay."});
-            m_firstExecution = true;
-            settleGhostTips(p.id);
-            kill(p.id, DeathCause::Scapegoat, true);
+            startGallows(p.id, DeathCause::Scapegoat, false);
             return;
         }
         settleGhostTips(kNoPlayer);
@@ -1961,25 +1972,8 @@ void Match::resolveVote() {
     Player* condemned = findMutable(ranking[0].first);
     if (!condemned) return;
     if (condemned->role == Role::Idiot && !condemned->idiotRevealed) {
-        settleGhostTips(kNoPlayer);
-        condemned->idiotRevealed = true;
-        narrate(tx("{} wird zum Galgen geführt … und grinst so harmlos, dass das Dorf begreift: Das ist nur der "
-                   "Dorfdepp! Man lässt {} laufen – abstimmen darf {} aber nie wieder.",
-                   "{} is led to the gallows … and grins so harmlessly that the village realises: it's only the village "
-                   "idiot! They let {} go – but {} may never vote again.",
-                   condemned->name, condemned->name, condemned->name));
-        markDirty();
+        startGallows(condemned->id, DeathCause::Vote, true);
         return;
-    }
-    if (condemned->role == Role::Jester)
-        narrate(tx("{} lacht schallend, als sich die Schlinge zuzieht …", "{} laughs out loud as the noose tightens …", condemned->name));
-    // Die ergebene Magd darf noch eingreifen – bis dahin bleibt die Rolle geheim
-    const bool servant = std::any_of(m_players.begin(), m_players.end(), [&](const Player& p) {
-        return p.alive && p.role == Role::Servant && p.id != condemned->id;
-    });
-    if (servant) {
-        m_servantPending = condemned->id;
-        m_servantTook = false;
     }
     const auto partner = std::find_if(m_players.begin(), m_players.end(), [&](const Player& voter) {
         return isWolfRole(condemned->role) && voter.alive && !voter.idiotRevealed && voter.id != condemned->id &&
@@ -1990,9 +1984,167 @@ void Match::resolveVote() {
     else highlight(3, tx("Das Dorf richtete {} hin. Die Rolle war {}.", "The village executed {}. Their role was {}.", condemned->name, roleText(condemned->role)));
     if (m_case) highlight(9, tx("Du hast {} gewählt. {} war {}.", "You chose {}. {} was {}.",
                                 condemned->name, condemned->name, roleText(condemned->role)));
-    settleGhostTips(condemned->id);
-    kill(condemned->id, DeathCause::Vote, true);
-    m_firstExecution = true;
+    startGallows(condemned->id, DeathCause::Vote, false);
+}
+
+// --- Galgen ------------------------------------------------------------------
+
+float Match::routeSeconds(Vec2 from, const std::vector<Vec2>& route) const {
+    float seconds = 0.0f;
+    for (const Vec2& to : route) {
+        const Vec2 mid = (from + to) * 0.5f;
+        const bool raised = m_world->height(mid.x, mid.y) - m_world->terrainHeight(mid.x, mid.y) > 0.3f;
+        seconds += (to - from).length() / (raised ? kClimbSpeed : kLeadSpeed);
+        from = to;
+    }
+    return seconds;
+}
+
+void Match::startGallows(uint8_t id, DeathCause cause, bool pardon) {
+    Player* p = findMutable(id);
+    if (!p) return;
+    // Wer am Morgen schon einmal hier hing, wird abgeschnitten und fortgetragen
+    if (m_gallows.stage == GallowsStage::Hanged)
+        if (Player* before = findMutable(m_gallows.player); before && !before->alive) before->buried = true;
+    Vec2 from{p->position.x, p->position.z};
+    // Wer sich während der Abstimmung weit entfernt hat, wird erst auf den Platz geholt
+    if (from.length() > World::kSquareRadius + 4.0f) {
+        from = from * ((World::kSquareRadius + 0.5f) / from.length());
+        teleport(id, m_world->ground(from.x, from.y));
+    }
+    m_gallows = {};
+    m_gallows.player = id;
+    m_gallows.stage = GallowsStage::Led;
+    m_gallows.since = m_clock;
+    m_gallows.route = m_world->gallowsRoute(from);
+    m_gallows.cause = cause;
+    m_gallows.pardon = pardon;
+    p->transform = p->transformTarget = 0.0f;
+    p->vampireForm = false;
+    setTimer(routeSeconds(from, m_gallows.route) + kNooseSeconds + kHangSeconds + 1.0f);
+    narrate(tx("{} wird mit gefesselten Händen zum Galgen geführt.", "{} is led to the gallows with bound hands.", p->name));
+}
+
+void Match::updateGallows(float dt) {
+    if (m_gallows.stage == GallowsStage::Idle) return;
+    Player* p = findMutable(m_gallows.player);
+    if (!p || (!p->alive && m_gallows.stage != GallowsStage::Hanged)) {
+        m_gallows = {}; // hat das Spiel verlassen
+        markDirty();
+        return;
+    }
+    switch (m_gallows.stage) {
+    case GallowsStage::Led:
+    case GallowsStage::Pardoned: {
+        Vec2 pos{p->position.x, p->position.z};
+        float budget = dt;
+        while (budget > 0.0f && m_gallows.next < m_gallows.route.size()) {
+            const Vec2 to = m_gallows.route[m_gallows.next];
+            const Vec2 d = to - pos;
+            const float len = d.length();
+            const Vec2 mid = (pos + to) * 0.5f;
+            const bool raised = m_world->height(mid.x, mid.y) - m_world->terrainHeight(mid.x, mid.y) > 0.3f;
+            const float speed = raised ? kClimbSpeed : kLeadSpeed;
+            if (len > 0.001f) p->yaw = std::atan2(d.x, d.y);
+            if (len <= speed * budget) {
+                pos = to;
+                budget -= len / speed;
+                ++m_gallows.next;
+            } else {
+                pos = pos + d * (speed * budget / len);
+                budget = 0.0f;
+            }
+        }
+        p->position = m_world->ground(pos.x, pos.y);
+        p->lastMoveTime = m_clock;
+        p->moveFlags = 0;
+        if (m_gallows.next < m_gallows.route.size()) break;
+        if (m_gallows.stage == GallowsStage::Pardoned) {
+            p->needsCorrection = true; // unten angekommen: frei
+            m_gallows = {};
+            markDirty();
+            break;
+        }
+        // auf der Falltür: Blick zur Menge, die Schlinge wird gelegt
+        m_gallows.stage = GallowsStage::Noose;
+        m_gallows.since = m_clock;
+        p->yaw = m_world->gallows().yaw;
+        markDirty();
+        if (p->role == Role::Jester)
+            narrate(tx("{} lacht schallend, als sich die Schlinge zuzieht …", "{} laughs out loud as the noose tightens …", p->name));
+        else
+            narrate(tx("Die Schlinge legt sich um den Hals von {}. Ein letzter Blick in die Runde …",
+                       "The noose is laid around {}'s neck. One last look at the crowd …", p->name));
+        break;
+    }
+    case GallowsStage::Noose:
+        if (m_clock - m_gallows.since < kNooseSeconds) break;
+        if (m_gallows.pardon) pardonIdiot(*p);
+        else hang(*p);
+        break;
+    default:
+        break;
+    }
+}
+
+void Match::hang(Player& p) {
+    const uint8_t id = p.id;
+    // Die ergebene Magd darf noch eingreifen – bis dahin bleibt die Rolle geheim
+    const bool servant = std::any_of(m_players.begin(), m_players.end(), [&](const Player& o) {
+        return o.alive && o.role == Role::Servant && o.id != id;
+    });
+    if (servant) {
+        m_servantPending = id;
+        m_servantTook = false;
+    }
+    m_gallows.stage = GallowsStage::Hanged;
+    m_gallows.since = m_clock;
+    // Die Falltür springt auf
+    if (m_gallows.cause == DeathCause::Scapegoat) {
+        m_firstExecution = true;
+        settleGhostTips(id);
+        kill(id, DeathCause::Scapegoat, true);
+    } else {
+        settleGhostTips(id);
+        kill(id, DeathCause::Vote, true);
+        m_firstExecution = true;
+    }
+    m_timer = std::max(m_timer, kHangSeconds);
+    markDirty();
+}
+
+void Match::pardonIdiot(Player& p) {
+    settleGhostTips(kNoPlayer);
+    p.idiotRevealed = true;
+    narrate(tx("Unter der Schlinge grinst {} so harmlos, dass das Dorf begreift: Das ist nur der Dorfdepp! Man nimmt die "
+               "Schlinge wieder ab und lässt {} laufen – abstimmen darf {} aber nie wieder.",
+               "Under the noose, {} grins so harmlessly that the village realises: it's only the village idiot! They take "
+               "the noose off again and let {} go – but {} may never vote again.",
+               p.name, p.name, p.name));
+    m_gallows.stage = GallowsStage::Pardoned;
+    m_gallows.since = m_clock;
+    m_gallows.route = m_world->gallowsWayDown();
+    m_gallows.next = 0;
+    m_timer = std::max(m_timer, routeSeconds({p.position.x, p.position.z}, m_gallows.route) + 2.0f);
+    markDirty();
+}
+
+void Match::endGallows() {
+    if (m_gallows.stage == GallowsStage::Idle || m_gallows.stage == GallowsStage::Hanged) return;
+    // Das Urteil wird nie vergessen, auch wenn die Zeit knapp wurde
+    if (Player* p = findMutable(m_gallows.player); p && p->alive) {
+        if (m_gallows.pardon) {
+            if (m_gallows.stage != GallowsStage::Pardoned) pardonIdiot(*p);
+            const Vec2 end = m_world->gallowsWayDown().back();
+            teleport(p->id, m_world->ground(end.x, end.y));
+            m_gallows = {};
+        } else {
+            hang(*p);
+            return;
+        }
+    }
+    m_gallows = {};
+    markDirty();
 }
 
 void Match::finishServant() {
@@ -2006,6 +2158,7 @@ void Match::finishServant() {
 
 void Match::enterNight() {
     m_phase = Phase::Night;
+    m_gallows = {};
     m_hauntAvailable = !m_case;
     for (auto& p : m_players) {
         p.windowLantern = false;

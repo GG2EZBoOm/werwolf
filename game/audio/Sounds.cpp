@@ -31,6 +31,9 @@ eng::audio::ClipPtr synthesize(Sound sound) {
     case Sound::Dawn: case Sound::Reveal: case Sound::Magic: duration = 1.5f; break;
     case Sound::Death: duration = 1.6f; break;
     case Sound::Warning: case Sound::Chat: duration = 0.24f; break;
+    case Sound::Drumroll: duration = 4.4f; break;
+    case Sound::Trapdoor: duration = 1.8f; break;
+    case Sound::NeckBreak: duration = 0.35f; break;
     default: break;
     }
     if (loop) duration = 8.0f;
@@ -115,6 +118,29 @@ eng::audio::ClipPtr synthesize(Sound sound) {
         case Sound::Chat:
             value = (0.2f * tone(660.0f * t) + 0.1f * tone(990.0f * t)) * decay(t, 22.0f);
             break;
+        case Sound::Drumroll: {
+            // Trommelwirbel: dichte Schläge, die langsam anschwellen
+            const float hit = std::fmod(t * 17.0f, 1.0f) / 17.0f;
+            const float swell = 0.3f + 0.7f * t / duration;
+            value = swell * (0.55f * body * decay(hit, 55.0f) + 0.28f * tone(185.0f * t) * decay(hit, 40.0f) + 0.15f * high * decay(hit, 90.0f));
+            break;
+        }
+        case Sound::Trapdoor:
+            // die Flügel schlagen auf, dann strafft sich knarrend das Seil
+            value = (0.7f * tone(62.0f * t) + 0.5f * body) * decay(t, 9.0f) + 0.35f * high * decay(t, 30.0f);
+            for (float at : {0.05f, 0.12f})
+                if (t > at) value += 0.4f * body * decay(t - at, 14.0f);
+            if (t > 0.95f) {
+                const float s = t - 0.95f;
+                value += 0.16f * tone(290.0f * s + 60.0f * s * s + 0.4f * tone(31.0f * s)) * pulse(t, 0.95f, 0.8f);
+            }
+            break;
+        case Sound::NeckBreak:
+            // Ersatz, falls keine Aufnahme eingebettet ist: ein trockenes Knacken
+            value = 0.8f * high * decay(t, 70.0f) + 0.5f * body * decay(t, 25.0f) + 0.3f * tone(140.0f * t) * decay(t, 30.0f);
+            for (float at : {0.012f, 0.03f})
+                if (t > at) value += 0.5f * high * decay(t - at, 90.0f);
+            break;
         case Sound::Wind:
             value = 1.8f * low * (0.55f + 0.15f * tone(t * 0.25f) + 0.12f * tone(t * 0.63f));
             break;
@@ -164,7 +190,16 @@ bool SoundBank::setFootsteps(std::vector<eng::audio::ClipPtr> clips) {
     return true;
 }
 
+bool SoundBank::setVariants(Sound sound, std::vector<eng::audio::ClipPtr> clips) {
+    if (clips.empty() || isFootstep(sound) || std::any_of(clips.begin(), clips.end(), [](const auto& clip) {
+        return !clip || clip->samples.empty();
+    })) return false;
+    m_variants[static_cast<size_t>(sound)] = std::move(clips);
+    return true;
+}
+
 eng::audio::ClipPtr SoundBank::choose(Sound sound, eng::Rng& rng) {
+    if (const auto& variants = m_variants[static_cast<size_t>(sound)]; !variants.empty()) return rng.pick(variants);
     if (!isFootstep(sound) || m_footsteps.empty()) return (*this)[sound];
     if (m_nextStep == kFootstepCount) {
         rng.shuffle(m_stepOrder);

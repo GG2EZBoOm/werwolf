@@ -259,6 +259,8 @@ struct PlayerView {
 };
 
 enum class Haunt : uint8_t { None, Bell, Candles };
+// Hinrichtung am Galgen: gefesselt hingeführt, unter der Schlinge, gehängt – oder als Dorfdepp wieder laufen gelassen
+enum class GallowsStage : uint8_t { Idle, Led, Noose, Hanged, Pardoned };
 constexpr float kHauntSeconds = 5.f;
 
 struct HauntBallot {
@@ -324,6 +326,9 @@ struct GameView {
     Haunt haunting = Haunt::None;
     uint32_t hauntSerial = 0;
     float hauntTime = 0;
+    GallowsStage gallows = GallowsStage::Idle;
+    uint8_t gallowsPlayer = kNoPlayer; // wer zum Galgen geführt wird, unter der Schlinge steht oder dort hängt
+    float gallowsTime = 0;             // Sekunden seit Beginn dieses Abschnitts
     const Footprint* nearestFootprint(float x, float z) const;
 
     const PlayerView* player(uint8_t id) const;

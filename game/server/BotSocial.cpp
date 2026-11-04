@@ -608,6 +608,28 @@ void Bot::lookAt(uint8_t player, double until) {
     m_lookUntil = until;
 }
 
+void Bot::faceGallows(float dt, const Match& match) {
+    const auto* condemned = match.find(match.gallowsPlayer());
+    if (!condemned || m_mover.velocity.length() > 0.3f) return;
+    const Vec3 at = condemned->alive ? condemned->position : match.world().gallowsTrapdoor();
+    const Vec2 d{at.x - m_mover.position.x, at.z - m_mover.position.z};
+    if (d.length() < 0.5f || d.length() > 40.0f) return;
+    m_mover.yaw += wrapAngle(std::atan2(d.x, d.y) - m_mover.yaw) * std::min(1.0f, dt * 3.0f);
+}
+
+Text Bot::lastWords(const GameView& view) const {
+    if (view.yourRole == Role::Jester) return {"Hahaha! Genau so habe ich es gewollt!", "Hahaha! Exactly as I wanted it!"};
+    if (view.yourRole == Role::Idiot) return {"Hihi … das kitzelt am Hals.", "Hehe … that tickles my neck."};
+    // Wölfe und Vampire lügen bis zuletzt – ihre letzten Worte klingen wie die der Unschuldigen
+    static const std::array<Text, 5> lines = {{
+        {"Ich bin unschuldig! Ihr hängt den Falschen.", "I'm innocent! You're hanging the wrong one."},
+        {"Merkt euch, wer mich hier hinaufgebracht hat.", "Remember who brought me up here."},
+        {"Findet den echten Wolf – sonst seid ihr die Nächsten.", "Find the real wolf – or you'll be next."},
+        {"Ich verzeihe euch. Aber ihr irrt euch.", "I forgive you. But you are wrong."},
+        {"Ihr macht einen Fehler, und ihr werdet es heute Nacht merken.", "You're making a mistake, and you'll notice tonight."}}};
+    return variant(lines, m_salt, static_cast<uint64_t>(view.day));
+}
+
 void Bot::faceSomeone(float dt, const Match& match) {
     const auto* other = match.find(m_lookAt);
     if (!other || match.clock() > m_lookUntil || m_mover.velocity.length() > 0.3f) return;

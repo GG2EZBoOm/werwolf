@@ -41,6 +41,9 @@ struct CharacterPose {
     bool lantern = false;   // trägt nachts eine Laterne
     float redEyes = 0.0f;   // Vampir: Augen glühen nachts rot (0..1)
     bool ghost = false;     // Geist eines Verstorbenen (nur für andere Tote sichtbar)
+    bool bound = false;     // Hände auf dem Rücken gefesselt (auf dem Weg zum Galgen)
+    bool hanging = false;   // hängt am Galgen; neckFrame gibt Lage und Drehung des Halses vor
+    eng::Mat4 neckFrame;
 };
 
 // Zeichnet Figuren aus wiederverwendeten Grundkörpern mit Gelenk-Animation.

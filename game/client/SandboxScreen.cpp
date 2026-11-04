@@ -54,6 +54,16 @@ void App::enterSandbox() {
             m_camera.yaw = m_player.yaw;
         }
     }
+    if (m_dev.gallows) {
+        // vor dem Galgen, mit Blick auf die Falltür; eine Figur wird vom Feuer hinaufgeführt
+        const Vec2 spot = m_world.gallowsToWorld({-2.6f, gallows::kDepth * 0.5f + 4.8f});
+        const Vec3 trap = m_world.gallowsTrapdoor();
+        m_player.position = m_world.ground(spot.x, spot.y);
+        m_player.yaw = std::atan2(trap.x - spot.x, trap.z - spot.y);
+        m_camera.yaw = m_player.yaw - 0.32f; // der Galgen rechts neben der eigenen Figur
+        m_camera.pitch = 0.16f;
+        m_gallowsDemo = {};
+    }
     m_npcs.clear();
     for (int i = 1; i < 9; ++i) {
         SandboxNpc npc;
@@ -64,7 +74,7 @@ void App::enterSandbox() {
         m_npcs.push_back(npc);
     }
     m_screen = Screen::Sandbox;
-    m_window.setMouseCaptured(true);
+    m_window.setMouseCaptured(m_dev.shotDir.empty()); // automatische Screenshots lassen die Maus frei
 }
 
 void App::updateSandbox() {
@@ -121,6 +131,7 @@ void App::updateSandbox() {
     m_worldRenderer.updateHouses(m_sandboxDoors, dt);
     m_worldRenderer.setHiddenRoof(m_world.houseAt({m_player.position.x, m_player.position.z}, 0.25f));
 
+    if (m_dev.gallows) updateGallowsDemo(dt);
     for (SandboxNpc& npc : m_npcs) {
         const Vec2 pos{npc.mover.position.x, npc.mover.position.z};
         if (npc.idle > 0.0f) {
@@ -142,6 +153,62 @@ void App::updateSandbox() {
             npc.stuck = 0.0f;
         }
     }
+}
+
+void App::updateGallowsDemo(float dt) {
+    GallowsDemo& d = m_gallowsDemo;
+    d.time += dt;
+    if (d.stage == GallowsStage::Idle || (d.stage == GallowsStage::Hanged && d.time > 10.0f)) {
+        // vom Rand des Platzes aus, wie nach der Abstimmung
+        const Vec3 start = m_world.ground(-4.0f, 7.5f);
+        d = {};
+        d.mover.position = start;
+        d.route = m_world.gallowsRoute({start.x, start.z});
+        d.stage = GallowsStage::Led;
+        return;
+    }
+    if (d.stage == GallowsStage::Led) {
+        Vec2 pos{d.mover.position.x, d.mover.position.z};
+        float yaw = d.mover.yaw;
+        float budget = dt;
+        while (budget > 0.0f && d.next < d.route.size()) {
+            const Vec2 to = d.route[d.next], step = to - pos;
+            const float len = step.length();
+            const Vec2 mid = (pos + to) * 0.5f;
+            const float speed = m_world.height(mid.x, mid.y) - m_world.terrainHeight(mid.x, mid.y) > 0.3f ? 1.1f : 2.3f;
+            if (len > 0.001f) yaw = std::atan2(step.x, step.y);
+            if (len <= speed * budget) {
+                pos = to;
+                budget -= len / speed;
+                ++d.next;
+            } else {
+                pos = pos + step * (speed * budget / len);
+                budget = 0.0f;
+            }
+        }
+        if (d.next >= d.route.size()) {
+            yaw = m_world.gallows().yaw;
+            d.stage = GallowsStage::Noose;
+            d.time = 0.0f;
+            playGallowsSound(Sound::Drumroll, 0.8f);
+        }
+        d.mover.animateTo(m_world.ground(pos.x, pos.y), yaw, dt);
+        return;
+    }
+    if (d.stage == GallowsStage::Noose && d.time > 4.5f) {
+        d.stage = GallowsStage::Hanged;
+        d.time = 0.0f;
+        playGallowsSound(Sound::Trapdoor, 0.95f);
+    }
+    if (d.stage == GallowsStage::Hanged && d.time - dt < gallowsCatchTime() && d.time >= gallowsCatchTime())
+        playGallowsSound(Sound::NeckBreak, 0.9f);
+    d.mover.animateTo(d.mover.position, d.mover.yaw, dt);
+}
+
+void App::playGallowsSound(Sound sound, float gain) {
+    const Vec3 trap = m_world.gallowsTrapdoor();
+    const Vec2 offset = Vec2{trap.x, trap.z} - Vec2{m_player.position.x, m_player.position.z};
+    playSound(sound, gain * std::clamp(1.3f - offset.length() / 45.0f, 0.15f, 1.0f), soundPan(offset, m_camera.yaw));
 }
 
 void App::drawCharacters3D(float night) {
@@ -170,6 +237,18 @@ void App::drawCharacters3D(float night) {
     };
     drawOne(0, m_player, m_playerWolf, m_playerAttack);
     for (const SandboxNpc& npc : m_npcs) drawOne(npc.id, npc.mover, 0.0f, 0.0f);
+    if (m_gallowsDemo.stage != GallowsStage::Idle) {
+        constexpr uint8_t kCondemned = 12;
+        const bool hanged = m_gallowsDemo.stage == GallowsStage::Hanged;
+        CharacterPose pose;
+        pose.position = m_gallowsDemo.mover.position;
+        pose.yaw = m_gallowsDemo.mover.yaw;
+        pose.walkPhase = m_gallowsDemo.mover.walkPhase;
+        pose.speed = m_gallowsDemo.mover.speed;
+        pose.time = t;
+        poseAtGallows(pose, kCondemned, hanged ? EntityCorpse : EntityLiving, m_gallowsDemo.stage, m_gallowsDemo.time);
+        m_characters.draw(m_renderer3d, characterLook(kCondemned), pose);
+    }
 }
 
 void App::renderSandbox3D() {
@@ -179,6 +258,7 @@ void App::renderSandbox3D() {
     applyGraphics(env);
     m_renderer3d.beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight(), m_lastCamera, env);
     m_worldRenderer.draw(m_renderer3d, env, t);
+    drawGallowsRigging(m_gallowsDemo.stage, 12, m_gallowsDemo.time, t);
     drawCharacters3D(env.emissive);
     m_renderer3d.endFrame();
 }
@@ -216,7 +296,7 @@ void App::drawSandboxOverlay() {
               "Esc release mouse",
               hours, minutes, 1.0f / std::max(m_dt, 0.001f)),
            Color::hex(0xFFFFFF, 0.75f));
-    if (!m_window.isMouseCaptured()) {
+    if (!m_window.isMouseCaptured() && m_dev.shotDir.empty()) {
         const Rect hint{r.width() * 0.5f - 160.0f, r.height() * 0.5f - 24.0f, 320.0f, 48.0f};
         r.roundRect(hint, 12.0f, Color::hex(0x0A0D1A, 0.75f));
         r.textCentered(m_fonts.ui, hint, L("Klicken, um weiterzuspielen", "Click to continue"), theme::text);

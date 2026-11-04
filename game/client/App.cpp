@@ -251,6 +251,7 @@ void App::parseCommandLine() {
         else if (a == "--autoplay") m_dev.autoPlay = true;
         else if (a == "--preview") m_dev.preview = true;
         else if (a == "--sandbox") m_dev.sandbox = true;
+        else if (a == "--gallows") m_dev.sandbox = m_dev.gallows = true;
         else if (a == "--indoors") m_dev.indoors = true;
         else if (a == "--chapel") m_dev.chapel = 1;
         else if (a == "--chapel-outside") m_dev.chapel = 2;
@@ -611,7 +612,7 @@ void App::frame() {
     }
     m_kit.clawWipe(static_cast<float>((now - m_transitionStart) / 1.1));
     m_ui.setCustomCursor(true);
-    if (!m_window.isMouseCaptured() && m_window.hasFocus()) m_kit.cursor(in.mouse, m_ui.cursor());
+    if (!m_window.isMouseCaptured() && m_window.hasFocus() && m_dev.shotDir.empty()) m_kit.cursor(in.mouse, m_ui.cursor());
     m_ui.endFrame();
     m_renderer.endFrame();
 
@@ -694,7 +695,7 @@ void App::onPhaseChanged(const GameView& v) {
     switch (v.phase) {
     case Phase::Assembly: playSound(Sound::Bell, 0.8f); break;
     case Phase::Vote: playSound(Sound::Vote, 0.75f); break;
-    case Phase::Execution: playSound(Sound::Death, 0.65f); break;
+    case Phase::Execution: if (v.gallows == GallowsStage::Idle) playSound(Sound::Death, 0.65f); break; // am Galgen kommt der Trommelwirbel
     case Phase::Night: if (!m_music[2]) playSound(Sound::Night, 0.7f); break;
     case Phase::Morning: playSound(Sound::Dawn, 0.65f); break;
     case Phase::GameOver: {

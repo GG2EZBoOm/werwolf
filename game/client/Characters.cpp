@@ -103,6 +103,13 @@ Vec3 CharacterRenderer::lanternPosition(const CharacterPose& pose) const {
 }
 
 void CharacterRenderer::draw(eng::Renderer3D& r, const CharacterLook& look, const CharacterPose& pose) const {
+    if (pose.hanging) {
+        // Der Hals hängt in der Schlinge, der Körper darunter
+        constexpr float kNeckModel = 0.86f + 0.62f; // Hüfte + Rumpf, wie in drawHuman
+        const float h = look.height;
+        drawHuman(r, look, pose, pose.neckFrame * T(0, -kNeckModel * h, 0) * S(h, h, h));
+        return;
+    }
     Mat4 root = eng::trs(pose.position, pose.yaw);
     if (pose.dead) {
         // Liegend auf dem Rücken
@@ -137,13 +144,16 @@ void CharacterRenderer::drawHuman(eng::Renderer3D& r, const CharacterLook& look,
             r.draw(mesh, m, spirit, 0.1f + glow, false);
             return;
         }
-        r.draw(mesh, m, pose.dead ? shade(c, 0.75f) : c, glow);
+        r.draw(mesh, m, pose.dead ? shade(c, 0.75f) : pose.hanging ? shade(c, 0.82f) : c, glow);
     };
-    const float walk = std::min(pose.speed, 1.0f);
-    const float run = std::max(pose.speed - 1.0f, 0.0f);
+    // Gehängte hängen schlaff, Gefesselte schwingen die Arme nicht
+    const bool limp = pose.hanging;
+    const bool bound = pose.bound || pose.hanging;
+    const float walk = limp ? 0.0f : std::min(pose.speed, 1.0f);
+    const float run = limp ? 0.0f : std::max(pose.speed - 1.0f, 0.0f);
     const float swing = std::sin(pose.walkPhase) * (0.55f * walk + 0.3f * run);
     const float bob = std::fabs(std::sin(pose.walkPhase)) * (0.05f * walk + 0.04f * run);
-    const float breathe = std::sin(pose.time * 2.2f) * 0.012f * (1.0f - walk);
+    const float breathe = limp ? 0.0f : std::sin(pose.time * 2.2f) * 0.012f * (1.0f - walk);
     const float lean = 0.04f * walk + 0.16f * run;
     const float hipY = 0.86f;
     const float legLen = 0.82f;
@@ -151,9 +161,10 @@ void CharacterRenderer::drawHuman(eng::Renderer3D& r, const CharacterLook& look,
     const Mat4 body = root * T(0, bob, 0);
     for (int side = -1; side <= 1; side += 2) {
         const float s = static_cast<float>(side);
-        const Mat4 hip = body * T(s * 0.11f, hipY, 0) * Rx(s * swing);
+        const Mat4 hip = body * T(s * 0.11f, hipY, 0) * (limp ? Rx(0.05f * s) * Rz(0.03f * s) : Rx(s * swing));
         part(m_cube, hip * T(0, -legLen * 0.5f, 0) * S(0.17f, legLen, 0.19f), look.pants);
-        part(m_cube, hip * T(0, -legLen + 0.05f, 0.05f) * S(0.19f, 0.12f, 0.29f), look.boots);
+        if (limp) part(m_cube, hip * T(0, -legLen + 0.11f, 0) * Rx(0.75f) * T(0, -0.06f, 0.05f) * S(0.19f, 0.12f, 0.29f), look.boots);
+        else part(m_cube, hip * T(0, -legLen + 0.05f, 0.05f) * S(0.19f, 0.12f, 0.29f), look.boots);
     }
 
     const Mat4 torso = body * T(0, hipY, 0) * Rx(lean) * S(1.0f + breathe, 1.0f, 1.0f + breathe);
@@ -165,13 +176,19 @@ void CharacterRenderer::drawHuman(eng::Renderer3D& r, const CharacterLook& look,
     for (int side = -1; side <= 1; side += 2) {
         const float s = static_cast<float>(side);
         const float armSwing = -s * swing * 0.8f;
-        const Mat4 shoulder = torso * T(s * 0.31f, 0.56f, 0) * Rx(armSwing) * Rz(s * 0.07f);
+        // gefesselt: die Hände liegen hinter dem Rücken zusammen
+        const Mat4 shoulder = bound ? torso * T(s * 0.31f, 0.56f, 0) * Rx(0.32f) * Rz(-s * 0.28f)
+                                    : torso * T(s * 0.31f, 0.56f, 0) * Rx(armSwing) * Rz(s * 0.07f);
         part(m_cube, shoulder * T(0, -0.29f, 0) * S(0.13f, 0.58f, 0.14f), shade(look.shirt, 0.88f));
         part(m_cube, shoulder * T(0, -0.62f, 0) * S(0.11f, 0.12f, 0.11f), look.skin);
-        if (side == 1 && pose.lantern) r.draw(m_lantern, shoulder * T(0, -0.95f, 0.02f), {1, 1, 1, 1}, 0.0f);
+        if (side == 1 && pose.lantern && !bound) r.draw(m_lantern, shoulder * T(0, -0.95f, 0.02f), {1, 1, 1, 1}, 0.0f);
     }
+    if (bound) part(m_cube, torso * T(0, -0.01f, -0.19f) * S(0.3f, 0.07f, 0.09f), Color::hex(0x8A7350)); // Strick um die Handgelenke
 
-    const Mat4 head = torso * T(0, 0.62f, 0) * Ry(std::sin(pose.time * 0.7f) * 0.08f * (1.0f - walk));
+    // Der Kopf eines Gehängten neigt sich vom Knoten weg nach vorn
+    const Mat4 head = limp    ? torso * T(0, 0.62f, 0) * Rz(-0.42f) * Rx(0.38f)
+                      : bound ? torso * T(0, 0.62f, 0) * Rx(0.12f)
+                              : torso * T(0, 0.62f, 0) * Ry(std::sin(pose.time * 0.7f) * 0.08f * (1.0f - walk));
     part(m_cube, head * T(0, 0.19f, 0) * S(0.33f, 0.36f, 0.32f), look.skin);
     const Color eyes = pose.redEyes > 0.0f ? eng::lerp(Color::hex(0x1A1410), Color::hex(0xFF2A1A), pose.redEyes) : Color::hex(0x1A1410);
     part(m_cube, head * T(0.08f, 0.22f, 0.163f) * S(0.05f, 0.05f, 0.02f), eyes, 1.5f * pose.redEyes);

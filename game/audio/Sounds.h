@@ -8,7 +8,7 @@ namespace ww {
 
 enum class Sound {
     Click, StepGrass, StepStone, StepWood, DoorOpen, DoorClose, DoorHit, DoorBreak,
-    Transform, Attack, Bell, Night, Dawn, Vote, Death, Victory, Reveal, Magic, Warning, Chat,
+    Transform, Attack, Bell, Night, Dawn, Vote, Death, Victory, Reveal, Magic, Warning, Chat, Drumroll, Trapdoor, NeckBreak,
     Wind, Crickets, Birds, Fire, Count
 };
 
@@ -23,10 +23,13 @@ public:
     SoundBank();
     const eng::audio::ClipPtr& operator[](Sound sound) const { return m_clips[static_cast<size_t>(sound)]; }
     bool setFootsteps(std::vector<eng::audio::ClipPtr> clips);
+    // Aufnahmen ersetzen einen prozeduralen Klang; bei mehreren Varianten wird zufällig gewählt
+    bool setVariants(Sound sound, std::vector<eng::audio::ClipPtr> clips);
     eng::audio::ClipPtr choose(Sound sound, eng::Rng& rng);
 private:
     std::array<eng::audio::ClipPtr, static_cast<size_t>(Sound::Count)> m_clips;
     std::vector<eng::audio::ClipPtr> m_footsteps;
+    std::array<std::vector<eng::audio::ClipPtr>, static_cast<size_t>(Sound::Count)> m_variants;
     std::vector<size_t> m_stepOrder;
     size_t m_nextStep = kFootstepCount;
     size_t m_lastStep = kFootstepCount;

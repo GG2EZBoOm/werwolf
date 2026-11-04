@@ -318,6 +318,14 @@ beim Spielen nicht nötig. Hinweise zum lokalen Musikimport stehen in `game/asse
   Ab Tag 2 kann jeder an der **Glocke** auf dem Dorfplatz eine Versammlung einberufen.
 * **Versammlung** – alle sitzen am Feuer und hören sich gegenseitig. Danach folgt die
   **Abstimmung**: Person anschauen und **E** drücken (oder in der Stimmenliste klicken).
+* **Hinrichtung** – wer die meisten Stimmen hat, wird mit gefesselten Händen zum **Galgen** am Rand des
+  Dorfplatzes geführt, außen um das Feuer herum und die Treppe hinauf; steuern kann man sich dabei nicht mehr,
+  reden schon. Auf der Falltür legt sich die Schlinge um den Hals, ein Trommelwirbel setzt ein, dann wird der
+  Hebel gezogen: Die Falltür springt auf, das Seil fängt den Fallenden mit einem Ruck auf. Erst in diesem
+  Moment stirbt er; der Körper hängt bis zum Einbruch der Nacht und wird dann begraben. Der Sündenbock geht
+  den gleichen Weg, der Narr lacht unter der Schlinge, der Dorfdepp wird dort erkannt und darf die Treppe wieder
+  hinuntergehen, und die ergebene Magd entscheidet sich erst nach dem Fall. Bots schauen zum Galgen, sagen
+  unter der Schlinge manchmal letzte Worte und reagieren erst nach dem Fall auf das Urteil.
 * **Nacht** – dunkel; wer lebt, trägt eine Laterne. Jeder hat ein eigenes **Haus** (auf der Karte
   markiert) und kann sich darin einschließen. Werwölfe verwandeln sich (R), reißen ein Opfer pro Nacht
   und brechen dafür auch Türen auf – das Krachen hört man in der Nachbarschaft. Sonderrollen handeln nachts.
@@ -478,6 +486,7 @@ werwolf.exe --host --bots 7 --start --timescale 3   # sofort eine Bot-Runde im Z
 werwolf.exe --join 127.0.0.1 --name Max              # zweites Fenster tritt bei
 werwolf.exe --autoplay                               # eigene Figur läuft/handelt automatisch
 werwolf.exe --sandbox [--tod 0.9] [--wolf]           # offline herumlaufen (Tageszeit, Wolfsgestalt)
+werwolf.exe --gallows [--tod 0.75]                    # offline vor dem Galgen: eine Hinrichtung in Schleife
 werwolf.exe --preview --camera 2 --tod 0.75          # Kameravorschau des Dorfs
 werwolf.exe --tutorial                        # spielt den Übungsfall direkt
 werwolf.exe --screenshots C:\temp\shots --shot-every 2 --quit-after 30

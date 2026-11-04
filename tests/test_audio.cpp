@@ -260,6 +260,49 @@ TEST(recorded_footsteps_replace_every_surface_and_do_not_repeat) {
     CHECK(std::find(recordings.begin(), recordings.end(), preserved) != recordings.end());
 }
 
+TEST(recorded_variants_replace_a_procedural_sound) {
+    SoundBank sounds;
+    eng::Rng rng(7);
+    CHECK(sounds.choose(Sound::NeckBreak, rng) == sounds[Sound::NeckBreak]); // ohne Aufnahme der prozedurale Ersatz
+    CHECK(sounds[Sound::NeckBreak] && !sounds[Sound::NeckBreak]->samples.empty());
+    const std::vector<ClipPtr> takes = {constantClip(0.2f), constantClip(0.3f), constantClip(0.4f)};
+    CHECK(sounds.setVariants(Sound::NeckBreak, takes));
+    std::set<const Clip*> used;
+    for (int i = 0; i < 60; ++i) {
+        const auto chosen = sounds.choose(Sound::NeckBreak, rng);
+        CHECK(std::find(takes.begin(), takes.end(), chosen) != takes.end());
+        used.insert(chosen.get());
+    }
+    CHECK_EQ(used.size(), takes.size());
+    CHECK(sounds.choose(Sound::Bell, rng) == sounds[Sound::Bell]);
+    CHECK(!sounds.setVariants(Sound::NeckBreak, {}));
+    CHECK(!sounds.setVariants(Sound::NeckBreak, {ClipPtr{}}));
+    CHECK(!sounds.setVariants(Sound::StepGrass, takes)); // Schritte haben ihren eigenen Weg
+}
+
+#ifdef WERWOLF_TEST_FOOTSTEP_DIR
+TEST(imported_gallows_takes_decode_when_present) {
+    int found = 0;
+    for (int take = 1; take <= 4; ++take) {
+        std::ifstream file(std::string(WERWOLF_TEST_FOOTSTEP_DIR) + "/gallows_neck_" + std::to_string(take) + ".wav", std::ios::binary);
+        if (!file) continue; // nicht jeder Entwickler hat die Aufnahme importiert
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const auto clip = readWav(bytes);
+        CHECK(clip != nullptr);
+        if (!clip) continue;
+        ++found;
+        CHECK_EQ(clip->channels, 1u);
+        CHECK(clip->seconds() > 0.1f && clip->seconds() < 1.0f);
+        CHECK(std::all_of(clip->samples.begin(), clip->samples.end(), [](float x) { return std::isfinite(x) && std::fabs(x) <= 0.86f; }));
+        // der Knacks kommt sofort, damit er mit dem Ruck des Seils zusammenfällt
+        const size_t onset = static_cast<size_t>(kSampleRate * 0.03);
+        CHECK(std::any_of(clip->samples.begin(), clip->samples.begin() + std::min(onset, clip->samples.size()),
+                          [](float x) { return std::fabs(x) > 0.1f; }));
+    }
+    std::printf("    %d Galgen-Aufnahmen gefunden\n", found);
+}
+#endif
+
 #ifdef WERWOLF_TEST_FOOTSTEP_DIR
 TEST(imported_footsteps_decode_without_silence_or_clipping) {
     SoundBank sounds;

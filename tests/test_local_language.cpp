@@ -51,6 +51,11 @@ struct Scene {
     void advance(float seconds) {
         for (float t = 0; t < seconds; t += 0.1f) { match.update(0.1f); bot.update(0.1f, match, say); }
     }
+    // Am Galgen stirbt der Verurteilte erst, wenn nach dem Gang dorthin die Falltür aufgeht
+    void untilHanged() {
+        for (float t = 0; t < 60.0f && match.phase() == Phase::Execution && match.gallowsStage() != GallowsStage::Hanged; t += 0.1f)
+            advance(0.1f);
+    }
     void phase(Phase target) {
         for (int i = 0; i < 12 && match.phase() != target; ++i) { match.skipPhase(); match.update(.1f); }
         CHECK_EQ(match.phase(), target);
@@ -174,6 +179,7 @@ TEST(KnowledgeExplainsWrongfulVotesOnlyWithPubliclyRevealedRole) {
         for (uint8_t voter : std::array<uint8_t,4>{0,1,3,4}) CHECK(s.match.interact(voter, Interaction::Vote, 5).empty());
         s.bot.update(.01f, s.match, s.say);
         s.phase(Phase::Execution);
+        s.untilHanged();
         const auto r = s.knowledge();
         CHECK_EQ(std::any_of(r.reasons.begin(), r.reasons.end(), [](const auto& n) { return n.kind == "abstimmung" && n.target == 0 && n.weight > 0; }), reveal);
     }

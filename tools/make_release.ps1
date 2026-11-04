@@ -32,6 +32,9 @@ foreach ($track in @("day_contemplation_1", "day_contemplation_2", "night_foresh
         throw "Musikdatei $track.wav fehlt. Vor dem Release tools/import_music.py mit den beiden lizenzierten Paketen ausführen."
     }
 }
+if (-not (Test-Path (Join-Path $musicDir "gallows_neck_1.wav"))) {
+    throw "Galgen-Aufnahme fehlt. Vor dem Release tools/import_gallows_sound.py ausführen."
+}
 foreach ($step in 1..20) {
     $footstepName = 'footstep_{0:D2}.wav' -f $step
     if (-not (Test-Path (Join-Path $musicDir $footstepName))) {

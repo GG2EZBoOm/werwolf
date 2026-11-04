@@ -71,6 +71,28 @@ constexpr float kTowerSize = 4.0f;        // Turm hinter der Altarwand
 constexpr float pewZ(int row) { return kPewFirstZ + kPewSpacing * static_cast<float>(row); }
 } // namespace chapel
 
+// Galgen am Rand des Dorfplatzes (lokal: x quer, z zum Feuer hin). Kollision, Gehhöhe und Grafik nutzen dieselben Maße.
+namespace gallows {
+constexpr float kWidth = 3.4f, kDepth = 3.0f;     // Plattform
+constexpr float kHeight = 2.3f;                   // Oberkante der Plattform über dem höchsten Bodenpunkt darunter
+constexpr float kBeamHeight = 3.2f;               // Unterkante des Querbalkens über der Plattform
+constexpr float kPostX = 1.35f;                   // Galgenpfosten links und rechts der Falltür
+constexpr Vec2 kTrapdoor{0.0f, 0.15f};            // Mitte der Falltür, genau darüber hängt die Schlinge
+constexpr float kTrapHalfX = 0.68f, kTrapHalfZ = 0.6f; // halbe Kantenlängen der Falltür (zwei Flügel, je zwei Dielen breit)
+constexpr float kStairWidth = 1.0f, kStairLength = 2.9f, kStairZ = -0.8f; // Treppe an der rechten Seite
+constexpr int kSteps = 7;
+constexpr float kDrop = 2.0f;                     // so tief fällt der Verurteilte durch die Falltür
+constexpr float kNeck = 1.48f;                    // Halshöhe einer Figur der Größe 1
+} // namespace gallows
+
+struct Gallows {
+    Vec3 position;      // Mitte der Plattform am Boden
+    float yaw = 0.0f;   // lokale +Z-Achse zeigt zum Feuer
+    float floorY = 0.0f; // Oberkante der Plattform
+    float baseY = 0.0f;  // tiefster Bodenpunkt unter der Plattform (dort enden die Pfosten)
+    bool built = false;
+};
+
 enum class TreeKind : uint8_t { Pine, Broadleaf, Dead };
 
 struct Tree {
@@ -162,6 +184,15 @@ public:
     Vec3 bell() const { return m_bell; }
     Vec3 chapel() const { return m_chapel; }
     float chapelYaw() const { return m_chapelYaw; }
+    const Gallows& gallows() const { return m_gallows; }
+    // Galgenkoordinaten (x quer, z zum Feuer hin) in Weltkoordinaten
+    Vec2 gallowsToWorld(Vec2 local) const;
+    // Weg vom Platz zur Falltür: außen um das Feuer herum, die Treppe hinauf
+    std::vector<Vec2> gallowsRoute(Vec2 from) const;
+    // Die Treppe wieder hinunter bis vor den Galgen
+    std::vector<Vec2> gallowsWayDown() const;
+    Vec3 gallowsTrapdoor() const;    // Mitte der Falltür auf der Plattform
+    Vec3 gallowsRopeAnchor() const;  // wo das Seil am Querbalken hängt
 
     const std::vector<House>& houses() const { return m_houses; }
     const std::vector<Tree>& trees() const { return m_trees; }
@@ -175,6 +206,8 @@ private:
     void buildHeights();
     void placeVillage();
     void placeChapel(Vec2 at, float yaw);
+    void placeGallows(Vec2 at);
+    float gallowsHeight(float x, float z, float terrain) const; // < -1e8, wenn nicht auf Plattform oder Treppe
     void placeNature();
     void addCircle(Vec2 c, float r);
     void addBox(Vec2 c, Vec2 half, float yaw, bool opaque = false);
@@ -197,6 +230,7 @@ private:
     std::vector<Vec2> m_pathPoints; // Polylinien als Paare (Start, Ende)
     Vec3 m_well, m_bell, m_chapel;
     float m_chapelYaw = 0.0f;
+    Gallows m_gallows;
     int m_chapelIndex = -1;
 
     // Wegenetz in der Kapelle: Knoten (Welt), kürzeste Abstände zwischen allen Knoten

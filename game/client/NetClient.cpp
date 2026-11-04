@@ -251,6 +251,10 @@ float NetClient::hauntTimeLeft(double now) const {
     return m_hasView ? std::max(0.f, m_view.hauntTime - static_cast<float>(now - m_viewTime)) : 0.f;
 }
 
+float NetClient::gallowsTime(double now) const {
+    return m_hasView && m_view.gallows != GallowsStage::Idle ? m_view.gallowsTime + static_cast<float>(now - m_viewTime) : 0.f;
+}
+
 float NetClient::timeLeft(double now) const {
     if (!m_hasView) return 0.0f;
     return std::max(0.0f, m_view.timeLeft - static_cast<float>(now - m_viewTime));

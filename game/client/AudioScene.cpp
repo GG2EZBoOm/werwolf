@@ -1,6 +1,7 @@
 #include "client/App.h"
 #include "client/MusicResources.h"
 #include "client/FootstepResources.h"
+#include "client/GallowsSoundResources.h"
 #include "engine/core/Log.h"
 
 #include <windows.h>
@@ -10,7 +11,7 @@
 
 namespace ww {
 namespace {
-#if defined(WERWOLF_HAS_MUSIC) || defined(WERWOLF_HAS_FOOTSTEPS)
+#if defined(WERWOLF_HAS_MUSIC) || defined(WERWOLF_HAS_FOOTSTEPS) || defined(WERWOLF_GALLOWS_TAKES)
 eng::audio::ClipPtr readAudioResource(int id) {
     const HMODULE module = GetModuleHandleW(nullptr);
     const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(id), RT_RCDATA);
@@ -42,6 +43,12 @@ void App::initAudio() {
         eng::log::info("Schrittaufnahmen geladen: {} Varianten", SoundBank::kFootstepCount);
     else eng::log::warn("Schrittaufnahmen konnten nicht vollständig gelesen werden");
 #endif
+#ifdef WERWOLF_GALLOWS_TAKES
+    std::vector<eng::audio::ClipPtr> necks;
+    for (int i = 0; i < WERWOLF_GALLOWS_TAKES; ++i) necks.push_back(readAudioResource(WW_GALLOWS_NECK_FIRST + i));
+    if (m_sounds->setVariants(Sound::NeckBreak, std::move(necks))) eng::log::info("Galgen-Aufnahmen geladen: {}", WERWOLF_GALLOWS_TAKES);
+    else eng::log::warn("Galgen-Aufnahmen konnten nicht gelesen werden");
+#endif
     const Sound loops[] = {Sound::Wind, Sound::Crickets, Sound::Birds, Sound::Fire};
     for (size_t i = 0; i < m_ambienceVoices.size(); ++i)
         m_ambienceVoices[i] = m_audio.play((*m_sounds)[loops[i]], eng::audio::Bus::Ambience, 0.0f, 0.0f, 1.0f, true);
@@ -60,7 +67,8 @@ void App::playSound(Sound sound, float gain, float pan, float pitch) {
     if (!m_audioReady || m_config.muted || m_config.masterVolume == 0 || m_config.effectsVolume == 0 ||
         (m_config.muteUnfocused && (!m_window.hasFocus() || m_window.isMinimized()))) return;
     m_audio.play(m_sounds->choose(sound, m_audioRng), eng::audio::Bus::Effects, gain, pan, pitch);
-    if (sound == Sound::Bell || sound == Sound::Death || sound == Sound::Reveal || sound == Sound::Magic || sound == Sound::Victory)
+    if (sound == Sound::Bell || sound == Sound::Death || sound == Sound::Reveal || sound == Sound::Magic || sound == Sound::Victory ||
+        sound == Sound::Drumroll || sound == Sound::Trapdoor || sound == Sound::NeckBreak)
         m_musicDuckUntil = m_time + 2.0;
 }
 
@@ -80,6 +88,30 @@ void App::updateAudio() {
         const Vec2 offset = position - listener;
         return soundPan(offset, yaw);
     };
+    // Galgen: Trommelwirbel unter der Schlinge, dann schlägt die Falltür auf
+    if (match && m_net.view().gallows != m_gallowsHeard) {
+        const GallowsStage stage = m_net.view().gallows;
+        const Vec3 trap = m_world.gallowsTrapdoor();
+        const Vec2 at{trap.x, trap.z};
+        const float gain = std::clamp(1.3f - (at - listener).length() / 45.0f, 0.15f, 1.0f);
+        if (m_net.gallowsTime(m_time) < 1.5f) {
+            if (stage == GallowsStage::Noose) playSound(Sound::Drumroll, 0.8f * gain, panAt(at));
+            if (stage == GallowsStage::Hanged) playSound(Sound::Trapdoor, 0.95f * gain, panAt(at));
+        }
+        m_gallowsHeard = stage;
+        m_neckHeard = false;
+    }
+    // … und wenn das Seil den Fallenden auffängt, bricht das Genick
+    if (match && m_net.view().gallows == GallowsStage::Hanged && !m_neckHeard) {
+        const float since = m_net.gallowsTime(m_time);
+        if (since >= gallowsCatchTime()) {
+            m_neckHeard = true;
+            const Vec3 trap = m_world.gallowsTrapdoor();
+            const Vec2 at{trap.x, trap.z};
+            const float gain = std::clamp(1.3f - (at - listener).length() / 45.0f, 0.15f, 1.0f);
+            if (since < gallowsCatchTime() + 1.0f) playSound(Sound::NeckBreak, 0.9f * gain, panAt(at));
+        }
+    }
     if (match && m_soundEvents.takeHauntBell(m_net.view(), m_net.hauntTimeLeft(m_time))) {
         const Vec2 bell{m_world.bell().x, m_world.bell().z};
         const float gain = std::clamp(1.f - (bell - listener).length() / 120.f, .25f, 1.f);

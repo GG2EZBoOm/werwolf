@@ -159,6 +159,9 @@ private:
     void speakPlanned(const Match& match, const SayFn& say);
     void lookAt(uint8_t player, double until);
     void faceSomeone(float dt, const Match& match);
+    // Bei der Hinrichtung schaut man zum Galgen; wer selbst hinaufgeführt wird, sagt vielleicht letzte Worte
+    void faceGallows(float dt, const Match& match);
+    Text lastWords(const GameView& view) const;
     void updateFeelings(float dt, const Match& match, const GameView& view);
     void feelChat(const Match& match, uint8_t speaker, const dialogue::Message& message);
     void changeRelationship(uint8_t other, float amount);
@@ -252,6 +255,8 @@ private:
     uint64_t m_salt = 0;                  // für Entscheidungen in const-Methoden, die je Bot verschieden ausfallen
     bool m_claimedSeer = false;           // Wolf: gibt sich als Seherin aus
     int m_fakeReportDay = -1;
+    int m_lastWordsDay = -1;
+    int m_hangingReviewDay = -1;
     // Verlauf: Stimmen je Tag, nachts gesehene Personen, schon ausgewertete Tote
     std::map<int, std::map<uint8_t, uint8_t>> m_votes;
     struct Sight {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "client/GallowsMotion.h"
 #include "logic/Types.h"
 #include "world/World.h"
 
@@ -27,6 +28,12 @@ public:
     // timeOfDay: 0 = Mitternacht, 0.25 = Sonnenaufgang, 0.5 = Mittag, 0.75 = Sonnenuntergang
     eng::Environment environment(float timeOfDay, Vec3 focus, float time) const;
     void draw(eng::Renderer3D& r, const eng::Environment& env, float time, float candleTime = 0.f) const;
+
+    // Galgen: Falltür und Hebel bewegen sich nach gallowsMotion; Seil und Schlinge zeichnet, wer weiß, wo der Hals ist
+    void drawGallows(eng::Renderer3D& r, const GallowsMotion& motion) const;
+    void drawRope(eng::Renderer3D& r, Vec3 from, Vec3 to) const;
+    void drawNoose(eng::Renderer3D& r, const eng::Mat4& frame) const; // Ring um den Hals; frame wie gallowsNeckFrame
+    void drawRopeCoil(eng::Renderer3D& r, Vec3 at) const;             // aufgeschossenes Seil unter dem Querbalken
 
 private:
     struct Chunk {
@@ -59,6 +66,10 @@ private:
     eng::Mesh m_doorReinforced;
     eng::Mesh m_chapelDoor;
     eng::Mesh m_chapelDoorReinforced;
+    eng::Mesh m_trapLeaf, m_lever, m_ropeUnit, m_noose, m_ropeCoil;
+    eng::Mat4 m_gallowsFrame;
+    float m_gallowsTop = 0.0f; // Plattform über dem Fuß des Galgens
+    bool m_hasGallows = false;
     int m_hiddenRoof = -1;
     std::vector<Vec3> m_lanterns;
     std::vector<Vec3> m_fireflies;

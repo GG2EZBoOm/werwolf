@@ -618,6 +618,8 @@ void GameView::write(eng::ByteWriter& w) const {
     }
     w.u8(static_cast<uint8_t>(haunting));
     if (haunting != Haunt::None) { w.u32(hauntSerial); w.f32(hauntTime); }
+    w.u8(static_cast<uint8_t>(gallows));
+    if (gallows != GallowsStage::Idle) { w.u8(gallowsPlayer); w.f32(gallowsTime); }
 }
 
 bool GameView::read(eng::ByteReader& r) {
@@ -719,6 +721,11 @@ bool GameView::read(eng::ByteReader& r) {
     if (haunting != Haunt::None) {
         hauntSerial = r.u32(); hauntTime = r.f32();
         if (haunting > Haunt::Candles || !hauntSerial || !std::isfinite(hauntTime) || hauntTime <= 0 || hauntTime > kHauntSeconds) return false;
+    }
+    gallows = static_cast<GallowsStage>(r.u8()); gallowsPlayer = kNoPlayer; gallowsTime = 0;
+    if (gallows != GallowsStage::Idle) {
+        gallowsPlayer = r.u8(); gallowsTime = r.f32();
+        if (gallows > GallowsStage::Pardoned || !player(gallowsPlayer) || !std::isfinite(gallowsTime) || gallowsTime < 0 || gallowsTime > 600) return false;
     }
     return r.ok();
 }

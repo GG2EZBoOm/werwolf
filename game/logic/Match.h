@@ -133,6 +133,9 @@ public:
     void allowWitnessTime() { if (m_phase == Phase::Assembly && m_timer < 28) setTimer(28); }
     Text describeFootprint(const Footprint& step) const;
     bool election() const { return m_election; }
+    // Galgen: wer gerade hingeführt wird, unter der Schlinge steht oder dort hängt (sonst kNoPlayer)
+    uint8_t gallowsPlayer() const { return m_gallows.stage == GallowsStage::Idle ? kNoPlayer : m_gallows.player; }
+    GallowsStage gallowsStage() const { return m_gallows.stage; }
     bool isProtected(uint8_t id) const;
     const std::vector<DoorState>& doors() const { return m_doors; }
     DoorMask closedDoors() const { return closedDoorMask(m_doors); }
@@ -192,6 +195,12 @@ private:
     void settleGhostTips(uint8_t executed);
     void resolveElection(const std::vector<std::pair<uint8_t, int>>& ranking);
     void finishServant();
+    void startGallows(uint8_t id, DeathCause cause, bool pardon);
+    void updateGallows(float dt);
+    void hang(Player& p);
+    void pardonIdiot(Player& p);
+    void endGallows();
+    float routeSeconds(Vec2 from, const std::vector<Vec2>& route) const;
     void enterNight();
     void enterMorning();
     void advance();
@@ -261,6 +270,16 @@ private:
     uint8_t m_marked = kNoPlayer;     // vom Raben belastet
     uint8_t m_rustyWolf = kNoPlayer;  // stirbt in der nächsten Nacht an der Klinge des Ritters
     uint8_t m_servantPending = kNoPlayer; // Hingerichteter, dessen Rolle die Magd übernehmen kann
+    struct GallowsWalk {
+        uint8_t player = kNoPlayer;
+        GallowsStage stage = GallowsStage::Idle;
+        double since = 0.0;       // Beginn des aktuellen Abschnitts
+        std::vector<Vec2> route;  // Wegpunkte bis zur Falltür bzw. die Treppe hinunter
+        size_t next = 0;
+        DeathCause cause = DeathCause::Vote;
+        bool pardon = false;      // der Dorfdepp wird unter der Schlinge erkannt
+    };
+    GallowsWalk m_gallows;
     bool m_servantTook = false;
     bool m_secondVote = false;        // Stotternder Richter
     float m_bearCooldown = 0.0f;

@@ -16,6 +16,11 @@ namespace {
 
 uint16_t figureKey(uint8_t id, uint8_t kind) { return static_cast<uint16_t>(id * 4 + kind); }
 
+// Wird diese Person gerade zum Galgen geführt (oder die Treppe wieder hinunter)?
+bool ledToGallows(const GameView& v, uint8_t id) {
+    return id == v.gallowsPlayer && (v.gallows == GallowsStage::Led || v.gallows == GallowsStage::Noose || v.gallows == GallowsStage::Pardoned);
+}
+
 float wrap01(float v) {
     v = std::fmod(v, 1.0f);
     return v < 0.0f ? v + 1.0f : v;
@@ -414,7 +419,7 @@ void App::buildPrompts(const GameView& v) {
 
 bool App::canMoveFreely() const {
     const GameView& v = m_net.view();
-    return v.phase != Phase::GameOver;
+    return v.phase != Phase::GameOver && !ledToGallows(v, v.you);
 }
 
 void App::updateMatch() {
@@ -494,6 +499,8 @@ void App::updateMatch() {
     for (const EntityState& e : m_entities) {
         if (e.id == v.you && e.kind == EntityLiving) {
             m_myTransform = e.transform;
+            // Zum Galgen wird man geführt: die eigene Figur folgt dem Server
+            if (ledToGallows(v, v.you)) m_player.animateTo(m_world.ground(e.x, e.z), e.yaw, dt);
             continue;
         }
         if (e.id == v.you && e.kind == EntityGhost) continue;
@@ -530,7 +537,7 @@ void App::updateMatch() {
     else if (m_myTransform >= 0.99f) speed = kWolfSpeed;
     else if (m_myTransform > 0.01f) speed = 0.0f; // während der Verwandlung erstarrt
     if (!canMoveFreely()) speed = 0.0f;
-    m_player.move(wish, speed, dt, m_world, alive, m_net.closedDoors());
+    if (!ledToGallows(v, v.you)) m_player.move(wish, speed, dt, m_world, alive, m_net.closedDoors());
     m_worldRenderer.updateHouses(m_net.doors(), dt);
     m_worldRenderer.setHiddenRoof(m_world.houseAt({m_player.position.x, m_player.position.z}, 0.25f));
     if (m_time - m_lastMoveSent >= proto::kMoveInterval) {
@@ -587,6 +594,8 @@ void App::renderMatch3D() {
     m_worldRenderer.draw(m_renderer3d, env, t, candleTime);
     m_worldRenderer.drawMud(m_renderer3d, m_world, v, m_player.position, t);
     const float night = env.emissive;
+    const float gallowsSince = m_net.gallowsTime(m_time);
+    drawGallowsRigging(v.gallows, v.gallowsPlayer, gallowsSince, t);
 
     auto drawFigure = [&](uint8_t id, const Mover& m, float transform, uint8_t flags, uint8_t kind) {
         CharacterPose pose;
@@ -601,6 +610,7 @@ void App::renderMatch3D() {
         pose.ghost = kind == EntityGhost;
         pose.lantern = (flags & EntityLantern) != 0 && kind == EntityLiving && night > 0.3f;
         pose.redEyes = (flags & EntityRedEyes) != 0 && kind == EntityLiving ? std::clamp(night * 1.4f - 0.2f, 0.0f, 1.0f) : 0.0f;
+        if (id == v.gallowsPlayer) poseAtGallows(pose, id, kind, v.gallows, gallowsSince);
         m_characters.draw(m_renderer3d, characterLook(id), pose);
         // ein Hauch von Rot im Gesicht – aufmerksame Augenzeugen erkennen so einen Vampir
         if (pose.redEyes > 0.0f)
@@ -634,6 +644,7 @@ void App::renderMatch3D() {
         else drawFigure(v.you, m_player, 0.0f, 0, EntityGhost);
     }
     for (const auto& [key, f] : m_figures) drawFigure(static_cast<uint8_t>(key / 4), f.mover, f.transform, f.flags, f.kind);
+
 
     // Fährtenleser: die verfolgte Person leuchtet auch durch Wände
     if (v.tracked != kNoPlayer && alive) {
@@ -679,6 +690,43 @@ void App::renderMatch3D() {
         }
     }
     m_renderer3d.endFrame();
+}
+
+// --- Galgen --------------------------------------------------------------------
+
+void App::poseAtGallows(CharacterPose& pose, uint8_t id, uint8_t kind, GallowsStage stage, float since) const {
+    pose.bound = kind == EntityLiving && (stage == GallowsStage::Led || stage == GallowsStage::Noose);
+    if (kind != EntityCorpse || stage != GallowsStage::Hanged) return;
+    pose.dead = false;
+    pose.hanging = true;
+    pose.neckFrame = gallowsNeckFrame(m_world, characterLook(id).height, gallowsMotion(since), true);
+}
+
+void App::drawGallowsRigging(GallowsStage stage, uint8_t player, float since, float t) {
+    const bool hanged = stage == GallowsStage::Hanged;
+    const GallowsMotion motion = gallowsMotion(hanged ? since : -1.0f);
+    m_worldRenderer.drawGallows(m_renderer3d, motion);
+    // Seil und Schlinge: leer im Wind, um den Hals des Verurteilten oder straff über dem Gehängten
+    const Vec3 anchor = m_world.gallowsRopeAnchor();
+    if (stage == GallowsStage::Noose || hanged) {
+        const eng::Mat4 neck = gallowsNeckFrame(m_world, characterLook(player).height, motion, hanged);
+        m_worldRenderer.drawNoose(m_renderer3d, neck);
+        const Vec3 knot = neck.transformPoint(kNooseKnot);
+        if (hanged) {
+            m_worldRenderer.drawRope(m_renderer3d, anchor, knot);
+            return;
+        }
+        // die Fallhöhe liegt noch aufgeschossen unter dem Balken
+        const Vec3 coil = anchor - Vec3{0.0f, 0.3f, 0.0f};
+        m_worldRenderer.drawRope(m_renderer3d, anchor, coil);
+        m_worldRenderer.drawRopeCoil(m_renderer3d, coil);
+        m_worldRenderer.drawRope(m_renderer3d, coil - Vec3{0.0f, 0.14f, 0.0f}, knot);
+        return;
+    }
+    const Vec3 end = anchor + Vec3{std::sin(t * 0.9f) * 0.04f, -1.3f, std::cos(t * 0.7f) * 0.03f};
+    m_worldRenderer.drawRope(m_renderer3d, anchor, end);
+    m_worldRenderer.drawNoose(m_renderer3d, eng::Mat4::translation(end) * eng::Mat4::rotationY(m_world.gallows().yaw) *
+                                                 eng::Mat4::rotationZ(-eng::kPi * 0.5f) * eng::Mat4::translation(-kNooseKnot));
 }
 
 // --- HUD -----------------------------------------------------------------------
@@ -770,6 +818,11 @@ void App::drawNameTags(const GameView& v) {
 
     for (const auto& [key, f] : m_figures) {
         const uint8_t id = static_cast<uint8_t>(key / 4);
+        if (f.kind == EntityCorpse && id == v.gallowsPlayer && v.gallows == GallowsStage::Hanged) {
+            const GallowsMotion motion = gallowsMotion(m_net.gallowsTime(m_time));
+            tag(id, gallowsNeckFrame(m_world, characterLook(id).height, motion, true).transformPoint({0, 0, 0}), 0.75f, true, false);
+            continue;
+        }
         CharacterPose pose;
         pose.wolf = f.transform;
         pose.dead = f.kind == EntityCorpse;

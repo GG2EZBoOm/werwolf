@@ -38,6 +38,18 @@ private:
     enum class MenuPage { None, Host, Join, Settings };
 
     // Offline-Testumgebung: selbst durchs Dorf laufen, Dorfbewohner wandern umher
+    // Sandbox mit --gallows: eine Figur wird immer wieder zum Galgen geführt (zum Anschauen und für Screenshots)
+    struct GallowsDemo {
+        Mover mover;
+        std::vector<Vec2> route;
+        size_t next = 0;
+        GallowsStage stage = GallowsStage::Idle;
+        float time = 0.0f;
+    };
+    GallowsDemo m_gallowsDemo;
+    void updateGallowsDemo(float dt);
+    void playGallowsSound(Sound sound, float gain); // vom Galgen her, nach Entfernung und Richtung
+
     struct SandboxNpc {
         uint8_t id = 0;
         Mover mover;
@@ -82,6 +94,7 @@ private:
         bool autoPlay = false;
         bool preview = false;
         bool sandbox = false;
+        bool gallows = false; // Sandbox vor dem Galgen, mit vorgeführter Hinrichtung
         bool indoors = false; // Sandbox im ersten Haus beginnen (für Screenshots)
         int chapel = 0;       // Sandbox an der Kapelle beginnen: 1 = drinnen, 2 = davor (für Screenshots)
         bool journal = false; // Tagebuch nach Spielbeginn öffnen (für Screenshots)
@@ -176,6 +189,8 @@ private:
     Vec3 myPosition() const { return m_player.position; }
     bool imAlive() const;
     bool canMoveFreely() const;
+    void poseAtGallows(CharacterPose& pose, uint8_t id, uint8_t kind, GallowsStage stage, float since) const;
+    void drawGallowsRigging(GallowsStage stage, uint8_t player, float since, float t);
 
     // Aktionen
     void hostGame();
@@ -309,6 +324,8 @@ private:
     uint8_t m_aimTarget = kNoPlayer;
     bool m_pauseOpen = false;
     double m_deathTime = -100.0;
+    GallowsStage m_gallowsHeard = GallowsStage::Idle;
+    bool m_neckHeard = false;
     bool m_wasAlive = true;
     float m_myTransform = 0.0f;
 

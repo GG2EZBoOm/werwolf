@@ -74,6 +74,8 @@ constexpr float kFieldX0 = 48.0f, kFieldX1 = 74.0f, kFieldZ0 = -15.0f, kFieldZ1 
 const Vec2 kCamp{-52.0f, 8.0f};
 // Kapelle im Norden und Mitte der Kirchhof-Terrasse (Kapelle und Friedhof)
 const Vec2 kChapelAt{0.0f, -55.0f};
+// Galgen am südwestlichen Rand des Dorfplatzes, von jedem Platz am Feuer aus zu sehen
+const Vec2 kGallowsAt{-10.75f, 10.75f};
 const Vec2 kYard{7.75f, -56.0f};
 // Abstand zu Hindernissen für Wegknoten bzw. Wegstrecken in Gebäuden (etwas mehr als bzw. knapp unter dem Spielerradius)
 constexpr float kPlayerClearance = 0.36f;
@@ -167,6 +169,7 @@ float World::gridHeight(int i, int j) const {
 
 float World::height(float x, float z) const {
     const float terrain = terrainHeight(x, z);
+    if (const float g = gallowsHeight(x, z, terrain); g > -1e8f) return g;
     for (const House& h : m_houses) {
         const float dx = x - h.position.x, dz = z - h.position.z;
         const float reach = 0.5f * (h.width + h.depth) + h.ramp;
@@ -183,6 +186,62 @@ float World::height(float x, float z) const {
             return eng::lerp(h.floorY, terrain, smooth(0.0f, 1.0f, (local.y - hd) / h.ramp));
     }
     return terrain;
+}
+
+float World::gallowsHeight(float x, float z, float terrain) const {
+    using namespace gallows;
+    const float dx = x - m_gallows.position.x, dz = z - m_gallows.position.z;
+    if (!m_gallows.built || dx * dx + dz * dz > 49.0f) return -1e9f;
+    const Vec2 local = unrotate({dx, dz}, m_gallows.yaw);
+    if (std::fabs(local.x) <= kWidth * 0.5f && std::fabs(local.y) <= kDepth * 0.5f) return m_gallows.floorY;
+    // Treppe: steigt von außen zur Plattform hin an
+    const float along = local.x - kWidth * 0.5f;
+    if (along > 0.0f && along <= kStairLength && std::fabs(local.y - kStairZ) <= kStairWidth * 0.5f)
+        return eng::lerp(m_gallows.floorY, terrain, along / kStairLength);
+    return -1e9f;
+}
+
+Vec2 World::gallowsToWorld(Vec2 local) const {
+    return Vec2{m_gallows.position.x, m_gallows.position.z} + rotate(local, m_gallows.yaw);
+}
+
+Vec3 World::gallowsTrapdoor() const {
+    const Vec2 p = gallowsToWorld(gallows::kTrapdoor);
+    return {p.x, m_gallows.floorY, p.y};
+}
+
+Vec3 World::gallowsRopeAnchor() const {
+    return gallowsTrapdoor() + Vec3{0.0f, gallows::kBeamHeight, 0.0f};
+}
+
+std::vector<Vec2> World::gallowsRoute(Vec2 from) const {
+    using namespace gallows;
+    const Vec2 approach = gallowsToWorld({kWidth * 0.5f + kStairLength + 0.7f, kStairZ + 1.6f});
+    std::vector<Vec2> route;
+    // Nicht quer durchs Feuer: erst an den Rand des Platzes, dann außen herum
+    constexpr float ring = kSquareRadius + 0.5f;
+    if (from.length() < ring + 4.0f) {
+        const float a0 = from.length() > 0.1f ? std::atan2(from.y, from.x) : std::atan2(approach.y, approach.x);
+        float turn = std::atan2(approach.y, approach.x) - a0;
+        while (turn > kPi) turn -= 2.0f * kPi;
+        while (turn < -kPi) turn += 2.0f * kPi;
+        const int steps = std::max(1, static_cast<int>(std::ceil(std::fabs(turn) / deg(15.0f))));
+        for (int i = 0; i <= steps; ++i) {
+            const float a = a0 + turn * static_cast<float>(i) / static_cast<float>(steps);
+            route.push_back(Vec2{std::cos(a), std::sin(a)} * ring);
+        }
+    }
+    route.push_back(approach);
+    route.push_back(gallowsToWorld({kWidth * 0.5f + kStairLength + 0.3f, kStairZ})); // Fuß der Treppe
+    route.push_back(gallowsToWorld({kWidth * 0.5f - 0.3f, kStairZ}));                // oben auf der Plattform
+    route.push_back(gallowsToWorld(kTrapdoor));
+    return route;
+}
+
+std::vector<Vec2> World::gallowsWayDown() const {
+    using namespace gallows;
+    return {gallowsToWorld({kWidth * 0.5f - 0.3f, kStairZ}), gallowsToWorld({kWidth * 0.5f + kStairLength + 0.3f, kStairZ}),
+            gallowsToWorld({kWidth * 0.5f + kStairLength + 0.7f, kStairZ + 1.6f})};
 }
 
 float World::terrainHeight(float x, float z) const {
@@ -344,6 +403,7 @@ void World::generate(uint32_t seed) {
     m_colliders.clear();
     m_pathPoints.clear();
     m_chapelIndex = -1;
+    m_gallows = {};
     m_routeNodes.clear();
     m_routeDist.clear();
 
@@ -392,6 +452,7 @@ void World::placeVillage() {
     addCircle({m_well.x, m_well.z}, 1.25f);
     m_bell = ground(-7.0f, -6.5f);
     addBox({m_bell.x, m_bell.z}, {1.1f, 0.9f}, kBellYaw);
+    placeGallows(kGallowsAt);
 
     // Häuserring
     const uint32_t walls[] = {0xD9C9A3, 0xCDB892, 0xE3D6BC, 0xC9AE86, 0xBFB5A0, 0xD4BFA0};
@@ -520,6 +581,27 @@ void World::placeVillage() {
         m_props.push_back({PropKind::Lantern, ground(p.x, p.y), 0.0f, 1.0f});
         addCircle(p, 0.25f);
     }
+}
+
+void World::placeGallows(Vec2 at) {
+    using namespace gallows;
+    Gallows& g = m_gallows;
+    g.yaw = yawToward(-at.x, -at.y);
+    // Pfosten reichen bis zum tiefsten Punkt, die Plattform steht über dem höchsten
+    float lowest = 1e9f, highest = -1e9f;
+    for (int cx = -1; cx <= 1; ++cx)
+        for (int cz = -1; cz <= 1; ++cz) {
+            const Vec2 corner = at + rotate({kWidth * 0.5f * static_cast<float>(cx), kDepth * 0.5f * static_cast<float>(cz)}, g.yaw);
+            lowest = std::min(lowest, terrainHeight(corner.x, corner.y));
+            highest = std::max(highest, terrainHeight(corner.x, corner.y));
+        }
+    g.position = {at.x, lowest, at.y};
+    g.baseY = lowest;
+    g.floorY = highest + kHeight;
+    g.built = true;
+    // Unter die Plattform und von der Seite auf die Treppe kommt man nicht; den Weg hinauf geht nur der Verurteilte
+    addBox(at, {kWidth * 0.5f, kDepth * 0.5f}, g.yaw);
+    addBox(gallowsToWorld({kWidth * 0.5f + kStairLength * 0.5f, kStairZ}), {kStairLength * 0.5f, kStairWidth * 0.5f}, g.yaw);
 }
 
 void World::placeChapel(Vec2 at, float yaw) {
